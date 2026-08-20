@@ -226,7 +226,15 @@ _STRENGTH_CACHE_MAX = 200_000
 #: ~1,100-holding universe from scratch. Flops repeat often enough over tens of
 #: thousands of hands to make this the difference.
 _BOARD_CACHE: dict[tuple[str, ...], tuple] = {}
-_BOARD_CACHE_MAX = 40_000
+#: Entries, not bytes -- but each one is ~15 KB, so this is the memory budget
+#: in disguise: about 45 MB.
+#:
+#: It was 40,000, which is 1.2 GB. Measured over a 71,456-hand database that
+#: bought a 2.1% hit rate: boards barely repeat (72,289 distinct across 102,184
+#: lookups, ~1.4x reuse), so no reachable cache size makes this cheap. Paying
+#: over a gigabyte for it is what a browser cannot survive, and the tool runs
+#: in one.
+_BOARD_CACHE_MAX = 3_000
 
 
 def _board_universe(board: tuple[str, ...]):
@@ -247,13 +255,21 @@ def _board_universe(board: tuple[str, ...]):
         [combos, np.repeat(board_ids[None, :], len(combos), axis=0)], axis=1)
     scores = evaluate(seven)
     # A flat 52x52 table so a pair of card ids indexes its own score directly.
-    lookup = np.zeros(52 * 52, dtype=np.int64)
+    # int32, not int64. A hand score is at most ~9.2 million, so half of every
+    # cached entry was leading zeros -- and this cache is measured in hundreds
+    # of megabytes, not kilobytes.
+    lookup = np.zeros(52 * 52, dtype=np.int32)
     lo = np.minimum(combos[:, 0], combos[:, 1])
     hi = np.maximum(combos[:, 0], combos[:, 1])
     lookup[lo * 52 + hi] = scores
-    result = (np.sort(scores), lookup)
+    result = (np.sort(scores).astype(np.int32), lookup)
     if len(_BOARD_CACHE) >= _BOARD_CACHE_MAX:
-        _BOARD_CACHE.clear()
+        # Drop the oldest half rather than everything. Clearing outright threw
+        # away the entries most likely to be asked for next, so a database with
+        # more distinct boards than the cap kept paying full price for a cache
+        # it also paid full memory for.
+        for old_key in list(_BOARD_CACHE)[:_BOARD_CACHE_MAX // 2]:
+            del _BOARD_CACHE[old_key]
     _BOARD_CACHE[board] = result
     return result
 

@@ -65,8 +65,13 @@ def _runouts(deck: np.ndarray, need: int, samples: int,
         from itertools import combinations
         return np.array(list(combinations(deck.tolist(), need)), dtype=np.int64)
     rng = rng or np.random.default_rng(0)
-    # Sample without replacement per row: argsort of random keys is exact and
-    # fast enough at these sizes.
+    # Sample without replacement per row by drawing a random key per card and
+    # taking the lowest `need` of them.
+    #
+    # argpartition, not argsort: the order of the chosen cards does not matter,
+    # only which ones they are, and a full sort of every row was the single
+    # most expensive line in an import -- 13.5s of a 71,000-hand rebuild, to
+    # order 45 keys per row and then throw all but the first two away.
     keys = rng.random((samples, len(deck)))
-    picks = np.argsort(keys, axis=1)[:, :need]
+    picks = np.argpartition(keys, need - 1, axis=1)[:, :need]
     return deck[picks]
