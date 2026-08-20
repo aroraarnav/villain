@@ -56,3 +56,12 @@ before any change leaves this repo — read it before opening a PR, not after.
    language, back claims with real measurements from a run you actually did
    (before/after numbers, test counts), and call out what you deliberately
    left alone and why. Terse, technical, no filler.
+
+## After a PR merges
+
+The repo has `delete_branch_on_merge` on, so a merged PR's head branch is
+gone from GitHub automatically — don't delete it by hand mid-review, GitHub
+does it the moment the merge lands. That only cleans the remote side: also
+run `git fetch --prune` and `git branch -d <branch>` (or `checkout main &&
+git branch -d <branch>` if it's the branch you're on) locally so old
+branches don't pile up in your own clone.
