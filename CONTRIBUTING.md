@@ -55,6 +55,27 @@ The suite lives in `tests/` and is run with plain `pytest` (config is in
   `player1`…`player5` names and synthetic account ids. Any fixture you add must
   be the same — never commit a real export with real screen names.
 
+## Player anonymity
+
+This tool exists to say true, sometimes unflattering things about how specific
+people play — that only stays defensible if the humans behind it never surface
+in anything that leaves the local database. A real screen name has shown up
+before as a "realistic" example in a docstring or comment explaining the
+identity-matching code, and separately in a PR description quoting a real
+read. Neither is fine: **no real screen name, real full name, or anything that
+identifies a specific player belongs in code, comments, docstrings, tests,
+commit messages, or PR descriptions.** The local database, `HANDOFF.md`, and
+your own working notes are the only places that should ever see one — both are
+gitignored for exactly this reason.
+
+Need an example name for a comment or test? Use a fictional placeholder
+(`player1`, `PlayerA`, `Ghost`, whatever reads clearly) rather than something
+lifted from a real session. If a fictional pair needs to interact with the
+matching algorithm in a specific way (share a suffix, drop the same vowels,
+collide after normalizing), pick strings that actually reproduce that
+behavior — check with `villain.identity.name_similarity` before trusting the
+example, the same way you'd check any other figure that reaches a docstring.
+
 Please add or update tests with any behavior change, and keep the suite green.
 
 ## Adding a parser for a new site

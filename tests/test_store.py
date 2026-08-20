@@ -118,8 +118,8 @@ def test_unlink_splits_an_alias_back_out(tmp_path, hands):
 
 
 @pytest.mark.parametrize("a,b,expected", [
-    ("Arnav", "Arnav2", 1.0),
-    ("DavidMazour", "DavidMazour2", 1.0),
+    ("PlayerG", "PlayerG2", 1.0),
+    ("PlayerK", "PlayerK2", 1.0),
     ("player_one", "PlayerOne", 1.0),
 ])
 def test_trailing_digits_and_punctuation_are_noise(a, b, expected):
@@ -133,8 +133,8 @@ def test_suggestion_reason_cites_the_matching_alias(tmp_path, hands):
     with Store(db) as store:
         store.add_hands(hands)
         # Plant a second player whose only alias collides with player1's name,
-        # but whose display name is unrelated — the bug that made TinHusband
-        # look like a 100% match for ShishGL.
+        # but whose display name is unrelated — the bug that made PlayerJHusband
+        # look like a 100% match for PlayerE.
         store.conn.execute(
             "INSERT INTO players (display_name, created_at) VALUES ('OtherFace', 0)")
         pid = store.conn.execute("SELECT id FROM players WHERE display_name='OtherFace'"
@@ -151,7 +151,7 @@ def test_suggestion_reason_cites_the_matching_alias(tmp_path, hands):
 
 
 def test_unrelated_names_stay_apart():
-    assert name_similarity("aryan", "Arnav2") < 0.8
+    assert name_similarity("Milo", "PlayerG2") < 0.8
     assert normalize("Bob!!") == "bob"
 
 
