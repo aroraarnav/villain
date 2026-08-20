@@ -161,3 +161,54 @@ def test_straddle_flag_is_recorded():
     from villain.parsers.pokernow import _parse_hand
     hand = _parse_hand(_minimal_hand(straddleSeat=2), "table")
     assert "straddle" in hand.flags
+
+
+def _straddled_hand():
+    """SB, BB, then a straddle from the third seat at twice the big blind.
+
+    The shape every straddled hand in a real export has: opcode 6, the seat
+    after the big blind, exactly 2x it.
+    """
+    raw = _minimal_hand(straddleSeat=3)
+    raw["players"].append({"seat": 3, "id": "c", "name": "C", "stack": 1000})
+    raw["events"] = [
+        {"at": 1, "payload": {"type": 3, "seat": 1, "value": 10}},   # small blind
+        {"at": 2, "payload": {"type": 2, "seat": 2, "value": 20}},   # big blind
+        {"at": 3, "payload": {"type": 6, "seat": 3, "value": 40}},   # the straddle
+        {"at": 4, "payload": {"type": 11, "seat": 1}},               # SB folds
+        {"at": 5, "payload": {"type": 11, "seat": 2}},               # BB folds
+        {"at": 6, "payload": {"type": 10, "seat": 3, "value": 70}},  # straddler takes it
+        {"at": 7, "payload": {"type": 15}},
+    ]
+    return raw
+
+
+def test_a_straddle_is_read_as_chips_not_just_a_flag():
+    """The bug this covers dropped 4.64% of a real database.
+
+    `straddleSeat` in the metadata set a flag, but the event carrying the money
+    was unrecognised and skipped -- so the pot came up short by the straddle
+    while the award did not. Less went in than came out, which cannot happen at
+    a real table, so the hand was decoded as untrustworthy and thrown away.
+    """
+    from villain.parsers.pokernow import _parse_hand
+    hand = _parse_hand(_straddled_hand(), "table")
+    assert hand is not None
+    assert "unknown_event:6" not in hand.flags
+    assert "pot_mismatch" not in hand.flags, "the straddle's chips never reached the pot"
+    # 10 + 20 + 40 in, 70 out.
+    assert hand.pot == 70
+
+
+def test_a_straddle_is_a_post_not_a_voluntary_raise():
+    """Money in before cards. Counting it as a raise would make every
+    straddling player look like the most aggressive person at the table."""
+    from villain.model import Act
+    from villain.parsers.pokernow import _parse_hand
+    hand = _parse_hand(_straddled_hand(), "table")
+    posts = [a for a in hand.actions if a.act is Act.POST_STRADDLE]
+    assert len(posts) == 1
+    assert posts[0].seat == 3
+    assert posts[0].amount == 40
+    assert posts[0].act.is_post
+    assert not posts[0].is_voluntary

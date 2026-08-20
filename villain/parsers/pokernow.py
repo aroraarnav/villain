@@ -44,6 +44,11 @@ from ..model import Act, Action, Hand, Seat, Street, positions_for
 from .base import register
 
 CHECK, POST_BB, POST_SB = 0, 2, 3
+#: A straddle: a voluntary blind from the seat after the big blind, posted
+#: before any cards are seen. Always twice the big blind, and always the seat
+#: after the one that posted it -- which is how it was identified, the site
+#: documenting none of these codes.
+STRADDLE = 6
 CALL, AGGRESS, BOARD, AWARD, FOLD = 7, 8, 9, 10, 11
 SHOW, SHOWDOWN, RETURN = 12, 15, 16
 #: Run-it-twice approval — no money or cards change hands.
@@ -281,6 +286,16 @@ _ACTS = {
     AGGRESS: Act.BET,      # refined to RAISE during replay
     POST_SB: Act.POST_SB,
     POST_BB: Act.POST_BB,
+    # Chips, not just a flag. The hand already knew a straddle had happened --
+    # `straddleSeat` in the metadata sets a flag -- but the event carrying the
+    # money was unrecognised and skipped, so the pot came up short by the
+    # straddle while the awards did not. Less went in than came out, which
+    # cannot happen at a real table, so every straddled hand was decoded as
+    # untrustworthy and dropped: 4.64% of a real 71,456-hand database.
+    #
+    # A post, not a raise. It is money in before cards, so it must not count
+    # as a voluntary preflop action -- Act.is_post already draws that line.
+    STRADDLE: Act.POST_STRADDLE,
 }
 
 register("pokernow", sniff, parse)
