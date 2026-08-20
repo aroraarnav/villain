@@ -919,10 +919,35 @@ function showBusy(text) {
   const modal = $("#modal");
   modal.innerHTML = `<div class="veil busy"><div class="sheet busy-sheet">
     <div class="spinner" aria-hidden="true"></div>
-    <div><b id="busy-text"></b></div>
+    <div class="busy-body">
+      <b id="busy-text"></b>
+      <div id="busy-bar" class="busy-bar"><i></i></div>
+    </div>
   </div></div>`;
   $("#busy-text").textContent = text;
-  return (next) => { const el = $("#busy-text"); if (el) el.textContent = next; };
+  /* (message, fraction).
+     A null message leaves the text alone, because progress updates arrive far
+     more often than the step they belong to changes.
+     A number fills the bar to it. `undefined` leaves the bar running but
+     *unmeasured* -- one blocking call into Python that reports nothing back,
+     where the only accurate thing to say is "working". A bar that invented a
+     percentage there would be the one part of this interface that lies. */
+  return (next, fraction) => {
+    const el = $("#busy-text");
+    if (el && next != null) el.textContent = next;
+    const bar = $("#busy-bar");
+    if (!bar) return;
+    bar.classList.add("on");
+    if (fraction == null) {
+      // Width is left to the stylesheet: the travelling piece is a fraction of
+      // the track, and setting it here would pin it full again.
+      bar.classList.add("unmeasured");
+      bar.firstChild.style.width = "";
+      return;
+    }
+    bar.classList.remove("unmeasured");
+    bar.firstChild.style.width = Math.round(Math.max(0, Math.min(1, fraction)) * 100) + "%";
+  };
 }
 
 async function importFiles(list, status, done) {
@@ -932,15 +957,54 @@ async function importFiles(list, status, done) {
   const setBusy = showBusy(`Reading ${files.length} file(s)\u2026`);
   try {
     const payload = await readFiles(files);
-    setBusy(`Parsing ${files.length} file(s)\u2026`);
-    const data = await post("/api/upload", {files: payload});
+    // Parsed in pieces rather than in one call. In the browser the whole tool
+    // runs on this thread, so a single parse of two hundred files is a frozen
+    // window with no way to tell it apart from a crash; the same work in
+    // tens is a counter that moves. The session is assembled server-side and
+    // the identity questions are still asked once, over the whole batch.
+    // Measured in bytes rather than in files. A run of these exports goes from
+    // 3 KB to 2.6 MB, so counting files makes the bar jump and stall by turns;
+    // counting bytes tracks the work actually being done.
+    const totalBytes = payload.reduce((n, f) => n + (f.content ? f.content.length : 0), 0) || 1;
+    const PIECE = 10;
+    let token = null, sent = 0;
+    for (let i = 0; i < payload.length; i += PIECE) {
+      const piece = payload.slice(i, i + PIECE);
+      setBusy("Reading hand histories\u2026", sent / totalBytes);
+      const step = await post("/api/upload", {files: piece, token, more: true});
+      token = step.token;
+      sent += piece.reduce((n, f) => n + (f.content ? f.content.length : 0), 0);
+      setBusy(null, sent / totalBytes);
+    }
+    // Closing the batch is its own step, and on a large import much the
+    // longest: every hand is deduplicated and every name in it matched against
+    // everybody already in the database. One call into Python that reports
+    // nothing until it returns, so the bar says "working" rather than guessing.
+    setBusy("Matching players across every file\u2026", undefined);
+    const data = await post("/api/upload", {files: [], token, more: false});
     const skipped = (data.rejected || []).length
       ? ` \u00b7 skipped ${data.rejected.map(r => r.name).join(", ")}` : "";
-    setBusy(`Parsed ${data.hands} hands \u2014 saving and rebuilding profiles\u2026`);
+    setBusy(`Parsed ${data.hands} hands\u2026`, undefined);
     const finish = async (answers) => {
-      setBusy("Saving and rebuilding profiles\u2026");
+      setBusy("Saving and rebuilding profiles\u2026", undefined);
       const r = await post(`/api/session/${data.token}/commit`,
                            answers ? {answers} : {});
+      // In the browser the import is not finished when the hands are stored --
+      // they are stored in this tab. Uploading is part of the same action, so
+      // it happens under the same veil rather than silently afterwards.
+      // Absent on the desktop, which has no account to save to.
+      if (window.villainSaveNow) {
+        setBusy("Saving to your account\u2026", 0);
+        try {
+          await window.villainSaveNow((fraction) => setBusy(null, fraction));
+        } catch (err) {
+          $("#modal").innerHTML = "";
+          status.innerHTML = `<span class="err">Stored here, but not saved to your `
+            + `account: ${esc(err.message)}</span>`;
+          if (done) done(status.innerHTML);
+          return;
+        }
+      }
       $("#modal").innerHTML = "";
       // Inline, not a modal: after a batch you want to be looking at the
       // roster you just changed, not dismissing a box in front of it.
@@ -958,7 +1022,7 @@ async function importFiles(list, status, done) {
     };
     if (data.questions && data.questions.length && !data.answered) {
       $("#modal").innerHTML = "";
-      askIdentity(data.token, data.questions, finish);
+      askIdentity(data.token, data.questions, finish, data.linked, data.conflicts);
     } else {
       await finish(null);
     }
@@ -976,6 +1040,8 @@ function wireImport() {
   const go = (files) => importFiles(files, status, async (summary) => {
     state.player = null;
     await viewPlayers();
+    // Hands just arrived: Hero and Simulate may have become possible.
+    paintTabs();
     const after = $("#db-status");
     if (after && summary) after.innerHTML = summary;
   });
@@ -1020,9 +1086,11 @@ function whenLabel(ms, withTime) {
 
 async function viewSessions() {
   const view = $("#view");
-  view.innerHTML = `<div class="panel"><div class="empty">loading\u2026</div></div>`;
+  // No loading panel here: switchTab has already painted the spinner, and a
+  // second, plainer one underneath it only made the wait look like two waits.
   const sessions = await get("/api/sessions");
   if (!sessions.length) {
+    if (!onScreen("sessions")) return;
     view.innerHTML = `<div class="panel"><h2>no sittings yet</h2>
       <p class="muted">Add hand histories on the Database tab.</p></div>`;
     return;
@@ -1031,6 +1099,7 @@ async function viewSessions() {
   // The list lives beside the detail, not above it: twenty sittings pushed the
   // thing you came to read off the bottom of the screen, and switching meant
   // scrolling back up every time.
+  if (!onScreen("sessions")) return;
   view.innerHTML = `<div class="sess-layout${state.sessListHidden ? " collapsed" : ""}"
       id="sess-layout">
       <div class="panel sess-list">
@@ -1317,6 +1386,7 @@ function actbtn(label, on, cls) {
 async function viewPlay() {
   const view = $("#view");
   if (state.game) { renderTable(view, state.game); return; }
+  if (!onScreen("play")) return;
   view.innerHTML = `<div class="panel"><h2>Simulate</h2>
     <div class="small muted" style="margin:-6px 0 16px">Sit at a table and play real hands
       against players from your database. Each villain acts from their own measured profile —
@@ -1465,6 +1535,11 @@ async function simPost(route, extra) {
 
 function renderTable(view, data) {
   if (state.stepTimer) { clearTimeout(state.stepTimer); state.stepTimer = null; }
+  // The simulator outlives the tab. A queued auto-step, or a reply that lands
+  // after you have moved on, used to paint the table over whichever tab you
+  // had switched to. The game is kept in state.game and drawn again by
+  // viewPlay when you come back to it.
+  if (state.tab !== "play") return;
   const st = data.state, n = st.seats.length;
   const pnl = st.pnl || 0;
   const pnlBb = st.bb ? (pnl / st.bb).toFixed(1) : "0";
@@ -1707,12 +1782,71 @@ function renderAnalysis(view, a) {
 
 async function viewHero() {
   const view = $("#view");
-  // The same blocking spinner as import/link ("Applying\u2026"). The first pass
-  // is much faster now, so the full-page explainer is no longer warranted.
-  showBusy("Reading your own hands\u2026");
+  // Blocking, because in the browser this genuinely blocks: there is no thread
+  // to build the hero model on, so the tab cannot answer anything -- including
+  // a click on another tab -- until it is done. Three minutes of that with an
+  // inline spinner reads as a hung page. The veil says what is happening, and
+  // the tab lock that comes with it turns "nothing responds" into "not yet".
+  //
+  // Only for a cold build. Once the cache is warm this returns immediately and
+  // a veil would be a flash of furniture.
+  let cold = false;
+  try {
+    cold = (await get("/api/hero?peek=1")).status === "cold";
+  } catch (err) {
+    // Do not quietly assume warm. Guessing wrong here means a build that takes
+    // minutes runs with no veil and no progress registered -- a bare spinner,
+    // which is the one outcome this whole path exists to avoid. Treat an
+    // unanswerable peek as cold and say so.
+    console.warn("hero: could not check the cache, assuming cold", err);
+    cold = true;
+  }
+  const done = cold
+    ? showBusy("Reading your own hands\u2026", undefined)
+    : null;
+  if (cold) {
+    // Say the two things somebody watching a long wait needs to know: that it
+    // will finish, and that it will not happen again.
+    const note = $("#busy-text");
+    if (note) {
+      note.insertAdjacentHTML("afterend",
+        '<div class="small muted" style="margin-top:6px;max-width:34rem">'
+        + 'Fitting a hand-strength model over every hand you have played, so '
+        + 'your folds and your sizing can be graded against what you actually '
+        + 'held. <b>This runs once</b> — after it, the Hero tab opens instantly '
+        + 'until your next import.</div>');
+    }
+    // Real progress, reported from inside the Python as it walks. The walk
+    // over hands can be counted; fitting the trees cannot, and says so by
+    // sending no total rather than by inventing one.
+    const PHASES = {
+      starting: "Opening your database",
+      finding: "Finding which seat is yours",
+      loading: "Reading your hand histories",
+      reading: "Scoring every hand you played",
+      fitting: "Fitting the model to what you held",
+      grading: "Grading your folds and your sizing",
+    };
+    window.__villainProgress = (msg) => {
+      const label = PHASES[msg.phase] || "Working";
+      if (msg.total > 0) {
+        done(`${label}\u2026 ${msg.done.toLocaleString()} of ${msg.total.toLocaleString()}`,
+             msg.done / msg.total);
+      } else {
+        // No total means this phase cannot be counted -- or has not started
+        // counting yet. Name it and show the travelling bar rather than a
+        // number nobody measured, so there is never a spinner on its own.
+        done(`${label}\u2026`, undefined);
+      }
+    };
+  }
   let data;
   try {
     data = await get("/api/hero");
+    delete window.__villainProgress;
+    if (done) $("#modal").innerHTML = "";
+    // A cold build takes minutes; the reader may well be somewhere else by now.
+    if (!onScreen("hero")) return;
     if (data && data.status === "building") {
       // The build runs once per import and takes about a minute and a half.
       // Say so and keep asking, rather than holding the request open with a
@@ -1726,11 +1860,13 @@ async function viewHero() {
     }
     if (state.heroPoll) { clearTimeout(state.heroPoll); state.heroPoll = null; }
   } catch (err) {
+    delete window.__villainProgress;
     $("#modal").innerHTML = "";
     view.innerHTML = `<div class="panel"><h2>hero</h2>
       <p class="err">${esc(err.message)}</p></div>`;
     return;
   }
+  if (done) $("#modal").innerHTML = "";
 
   // Hero is a player, so render the full profile card -- header, skill
   // breakdown, your leaks, key numbers: everything a villain's page has, in the
@@ -1910,7 +2046,7 @@ function viewSession() {
       state.session = data;
       renderSession();
       if (data.questions && data.questions.length && !data.answered) {
-        askIdentity(data.token, data.questions);
+        askIdentity(data.token, data.questions, null, data.linked, data.conflicts);
       }
       status.innerHTML = data.rejected && data.rejected.length
         ? `<span class="err">skipped: ${data.rejected.map(r => esc(r.name)).join(", ")}</span>`
@@ -1966,27 +2102,264 @@ function sideKey(side) {
   if (!side) return "";
   return side.player_id != null ? `db${side.player_id}` : `ac${side.account}`;
 }
-function groupQuestions(questions) {
+function groupQuestions(questions, linked) {
   const parent = {};
   const find = k => { while (parent[k] !== k) k = parent[k] = parent[parent[k]]; return k; };
   const union = (a, b) => {
     parent[a] = parent[a] ?? a; parent[b] = parent[b] ?? b;
     parent[find(a)] = find(b);
   };
-  for (const q of questions) {
+  // Settled pairs join clusters even though nobody is asked about them. Two
+  // accounts whose names normalise the same are merged without a question, and
+  // leaving that edge out split one knot of accounts into two unrelated
+  // dialogs -- "tin"/"tintin" over here, "Tins white gf"/"Tin" over there.
+  for (const q of [...questions, ...(linked || [])]) {
     const a = sideKey(q.left), b = sideKey(q.right);
     parent[a] = parent[a] ?? a; parent[b] = parent[b] ?? b;
     union(a, b);
   }
+  // Also join accounts whose names match outright. Two accounts both called
+  // "tin" are related whether or not they can be merged -- they often cannot,
+  // having sat at the table together -- and splitting them across two dialogs
+  // asked about half a knot twice and explained neither.
+  const byName = new Map();
+  for (const q of [...questions, ...(linked || [])]) {
+    for (const side of [q.left, q.right]) {
+      const key = displayKey(side.name || "");
+      if (!key) continue;
+      if (byName.has(key)) union(byName.get(key), sideKey(side));
+      else byName.set(key, sideKey(side));
+    }
+  }
   const groups = new Map();
+  const at = (root) => {
+    if (!groups.has(root)) {
+      groups.set(root, {questions: [], members: new Map(), together: []});
+    }
+    return groups.get(root);
+  };
   for (const q of questions) {
-    const root = find(sideKey(q.left));
-    if (!groups.has(root)) groups.set(root, {questions: [], members: new Map()});
-    const g = groups.get(root);
+    const g = at(find(sideKey(q.left)));
     g.questions.push(q);
     for (const side of [q.left, q.right]) g.members.set(sideKey(side), side);
   }
+  for (const q of (linked || [])) {
+    const g = at(find(sideKey(q.left)));
+    g.together.push([sideKey(q.left), sideKey(q.right)]);
+    for (const side of [q.left, q.right]) g.members.set(sideKey(side), side);
+  }
   return [...groups.values()];
+}
+
+/* Sorting accounts into people.
+ *
+ * The old control was one radio pair for the whole cluster: merge all six, or
+ * keep all six apart. Six accounts are rarely one answer -- a regular with two
+ * devices, their brother on a third, and a stranger whose name happens to
+ * shorten the same way -- and neither choice was right, so the reader had to
+ * pick the less wrong one and repair it afterwards.
+ *
+ * A column per person, accounts moved between them. The answer the server
+ * wants is still pairwise: for every pair it asked about, "same" is simply
+ * whether the two ended up in the same column.
+ *
+ * The starting split is by name, not "everything together": identical names
+ * are the reconnect case and belong together, while two different names are
+ * two people until somebody says otherwise -- merging being the expensive
+ * mistake, and the one that used to need a database reset to undo.
+ */
+function buildPartition(card, members, together, conflicts) {
+  const assigned = new Map();          // account key -> column id
+  const columnOf = new Map();          // column id -> chosen display name
+  for (const m of members) {
+    const key = displayKey(m.name);
+    if (!columnOf.has(key)) columnOf.set(key, m.name);
+    assigned.set(sideKey(m), key);
+  }
+  for (const [a, b] of (together || [])) {
+    const to = assigned.get(a), from = assigned.get(b);
+    if (to === undefined || from === undefined || to === from) continue;
+    for (const [key, col] of [...assigned]) if (col === from) assigned.set(key, to);
+  }
+
+  // Pairs that can never be one person. Kept as a lookup so a drop can be
+  // refused before it happens, rather than accepted and then rejected by the
+  // database with a message about hands nobody remembers playing.
+  const cannot = new Map();
+  for (const [a, b] of (conflicts || [])) {
+    if (!assigned.has(a) || !assigned.has(b)) continue;
+    if (!cannot.has(a)) cannot.set(a, new Set());
+    if (!cannot.has(b)) cannot.set(b, new Set());
+    cannot.get(a).add(b);
+    cannot.get(b).add(a);
+  }
+  const blocks = (key, col) => {
+    const foes = cannot.get(key);
+    if (!foes) return null;
+    for (const [other, its] of assigned) {
+      if (its === col && foes.has(other)) {
+        const who = members.find(m => sideKey(m) === other);
+        if (!who) return "another account";
+        // The account id when two members share a name, for the same reason.
+        const twins = members.filter(x => x.name === who.name).length > 1;
+        return twins && who.account ? `${who.name} (${who.account})` : (who.name || who.account);
+      }
+    }
+    return null;
+  };
+  // Nothing may start in a column it is not allowed to be in.
+  for (const m of members) {
+    const key = sideKey(m);
+    if (blocks(key, assigned.get(key))) assigned.set(key, `solo:${key}`);
+  }
+
+  card._partition = assigned;
+  card._columnName = columnOf;
+
+  const holder = card.querySelector(".people");
+  const note = card.querySelector(".partition-note");
+  let picked = null;                   // click-to-place, for touch and keyboard
+
+  const say = (text) => { if (note) note.textContent = text || ""; };
+
+  const place = (key, col) => {
+    const why = blocks(key, col);
+    if (why) {
+      const m = members.find(x => sideKey(x) === key);
+      say(`${m ? m.name : "That account"} and ${why} played hands at the same `
+          + "table, so they cannot be the same person.");
+      return false;
+    }
+    assigned.set(key, col);
+    say("");
+    return true;
+  };
+
+  const draw = () => {
+    const columns = [...new Set(assigned.values())];
+    holder.innerHTML = "";
+    columns.forEach((col, i) => {
+      const wrap = document.createElement("div");
+      wrap.className = "person";
+      const mine = members.filter(m => assigned.get(sideKey(m)) === col);
+      const names = [...new Set(mine.map(m => m.name))];
+      const hands = mine.reduce((n, m) => n + (m.hands || 0), 0);
+      wrap.innerHTML = `<div class="person-head"><span>Person ${i + 1}</span>
+        <span class="small muted">${hands.toLocaleString()} hands</span></div>`;
+
+      for (const m of mine) {
+        const key = sideKey(m);
+        const chip = document.createElement("div");
+        chip.className = "member" + (picked === key ? " picked" : "");
+        chip.draggable = true;
+        chip.tabIndex = 0;
+        chip.innerHTML = `<b>${esc(m.name)}</b>
+          <span class="small muted">${(m.hands || 0).toLocaleString()} hands`
+          + (m.account ? ` · <span class="mono">${esc(String(m.account))}</span>` : "")
+          + `</span>`;
+        chip.ondragstart = (e) => {
+          e.dataTransfer.setData("text/plain", key);
+          e.dataTransfer.effectAllowed = "move";
+          chip.classList.add("dragging");
+        };
+        chip.ondragend = () => chip.classList.remove("dragging");
+        // Click to pick up, click a column to put down. Drag is faster; this
+        // is the one that works on a phone and from a keyboard.
+        chip.onclick = (e) => {
+          // Without this the click reaches the column underneath, which reads
+          // it as "put it here" and drops the card back where it started.
+          if (e) e.stopPropagation();
+          picked = picked === key ? null : key;
+          say("");
+          draw();
+        };
+        chip.onkeydown = (e) => {
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); chip.onclick(e); }
+        };
+        wrap.appendChild(chip);
+      }
+
+      if (names.length > 1) {
+        const pick = document.createElement("select");
+        pick.className = "keepname";
+        pick.innerHTML = names.map(n =>
+          `<option value="${esc(n)}" ${n === columnOf.get(col) ? "selected" : ""}>`
+          + `keep “${esc(n)}”</option>`).join("");
+        pick.onchange = () => columnOf.set(col, pick.value);
+        pick.onclick = (e) => e.stopPropagation();
+        wrap.appendChild(pick);
+      }
+      if (!mine.some(m => m.name === columnOf.get(col))) {
+        columnOf.set(col, mine.length ? mine[0].name : columnOf.get(col));
+      }
+
+      wrap.onclick = () => { if (picked && place(picked, col)) { picked = null; } draw(); };
+      wrap.ondragover = (e) => { e.preventDefault(); wrap.classList.add("over"); };
+      wrap.ondragleave = () => wrap.classList.remove("over");
+      wrap.ondrop = (e) => {
+        e.preventDefault();
+        wrap.classList.remove("over");
+        const key = e.dataTransfer.getData("text/plain");
+        if (key && assigned.get(key) !== col) place(key, col);
+        draw();
+      };
+      holder.appendChild(wrap);
+    });
+
+    if (members.length > columns.length) {
+      const spare = document.createElement("div");
+      spare.className = "person spare";
+      spare.innerHTML = `<div class="person-head"><span>Someone else</span></div>
+        <div class="small muted">${picked ? "click to move here" : "drag here"}</div>`;
+      const put = (key) => { assigned.set(key, `solo:${key}`); say(""); };
+      spare.onclick = () => { if (picked) { put(picked); picked = null; draw(); } };
+      spare.ondragover = (e) => { e.preventDefault(); spare.classList.add("over"); };
+      spare.ondragleave = () => spare.classList.remove("over");
+      spare.ondrop = (e) => {
+        e.preventDefault();
+        const key = e.dataTransfer.getData("text/plain");
+        if (key) { put(key); draw(); }
+      };
+      holder.appendChild(spare);
+    }
+  };
+
+  const all = card.querySelector(".allone");
+  if (all) all.onclick = () => {
+    // Everything that is allowed to be together, together. Accounts that
+    // cannot join keep their own column rather than silently not moving.
+    const first = sideKey(members[0]);
+    const home = assigned.get(first);
+    for (const m of members) {
+      const key = sideKey(m);
+      if (!blocks(key, home)) assigned.set(key, home);
+    }
+    const stuck = members.filter(m => assigned.get(sideKey(m)) !== home);
+    // Named by account when the names collide: "dev and dev cannot be the same
+    // person" is a true sentence that tells the reader nothing about which.
+    const label = (m) => {
+      const twins = members.filter(x => x.name === m.name).length > 1;
+      return twins && m.account ? `${m.name} (${m.account})` : m.name;
+    };
+    say(stuck.length
+      ? `${stuck.map(label).join(" and ")} sat at the table with the rest, `
+        + "so cannot be the same person."
+      : "");
+    picked = null;
+    draw();
+  };
+  const apart = card.querySelector(".allapart");
+  if (apart) apart.onclick = () => {
+    for (const m of members) assigned.set(sideKey(m), `solo:${sideKey(m)}`);
+    for (const [a, b] of (together || [])) {
+      if (assigned.has(a) && assigned.has(b)) assigned.set(b, assigned.get(a));
+    }
+    picked = null;
+    say("");
+    draw();
+  };
+
+  draw();
 }
 
 function sideMeta(side) {
@@ -2115,7 +2488,7 @@ function sideAccount(side) {
   return ` \u00b7 <span class="mono">${esc(short)}</span>`;
 }
 
-async function askIdentity(token, questions, onDone) {
+async function askIdentity(token, questions, onDone, linked, conflicts) {
   const modal = $("#modal");
   modal.innerHTML = `
     <div class="veil"><div class="sheet">
@@ -2134,7 +2507,7 @@ async function askIdentity(token, questions, onDone) {
       </div>
     </div></div>`;
   const box = $("#questions");
-  const groups = groupQuestions(questions);
+  const groups = groupQuestions(questions, linked);
 
   for (const g of groups.filter(x => x.questions.length > 1)) {
     const members = [...g.members.values()]
@@ -2143,25 +2516,19 @@ async function askIdentity(token, questions, onDone) {
     const div = document.createElement("div");
     div.className = "q group" + (allExact ? " exact" : "");
     div.dataset.group = g.questions.map(q => q.id).join("|");
-    const names = [...new Map(members.map(m => [displayKey(m.name), m.name])).values()];
     div.innerHTML = `
-      <div class="q-prompt">${members.length} accounts look like one person</div>
+      <div class="q-prompt">${members.length} accounts with similar names</div>
       <div class="small muted">${esc(groupReason(members, g.questions))}</div>
-      <div class="members">${members.map(m => `
-        <div class="member"><b>${esc(m.name)}</b>
-          <span class="small muted">${sideMeta(m)}</span></div>`).join("")}</div>
-      <div class="choice">
-        <label><input type="radio" name="g-${esc(div.dataset.group)}" value="yes" checked>
-          Merge all ${members.length}</label>
-        <label><input type="radio" name="g-${esc(div.dataset.group)}" value="no">
-          Keep all separate</label>
+      <div class="small muted" style="margin-top:6px">One column per person.
+        Drag an account to move it, or tap it and then tap a column.</div>
+      <div class="row" style="margin-top:8px;gap:10px">
+        <button class="act small allone" type="button">All one person</button>
+        <button class="act small allapart" type="button">All separate</button>
       </div>
-      ${names.length < 2 ? "" : `<div class="choice namechoice">
-        <span class="small muted namelabel">keep the name</span>${names.map(n => `
-        <label><input type="radio" name="gname-${esc(div.dataset.group)}"
-          value="${esc(n)}" ${n === names[0] ? "checked" : ""}>keep \u201c${esc(n)}\u201d</label>`
-        ).join("")}</div>`}`;
+      <div class="people"></div>
+      <div class="small err partition-note"></div>`;
     box.appendChild(div);
+    buildPartition(div, members, g.together, conflicts);
   }
 
   const singles = new Set(
@@ -2223,11 +2590,16 @@ async function askIdentity(token, questions, onDone) {
 
   const groupAnswer = (q) => {
     const card = box.querySelector(`.q.group[data-group*="${CSS.escape(q.id)}"]`);
-    if (!card) return undefined;
-    const picked = card.querySelector(`input[name="g-${CSS.escape(card.dataset.group)}"]:checked`);
-    const name = card.querySelector(`input[name="gname-${CSS.escape(card.dataset.group)}"]:checked`);
-    return {same: picked ? picked.value === "yes" : true,
-            name: name ? name.value : q.default_name};
+    if (!card || !card._partition) return undefined;
+    // The pairwise answer falls straight out of where the two accounts were
+    // put: same column, same person.
+    const left = card._partition.get(sideKey(q.left));
+    const right = card._partition.get(sideKey(q.right));
+    if (left === undefined || right === undefined) return undefined;
+    const same = left === right;
+    return {same,
+            name: same ? (card._columnName.get(left) || q.default_name)
+                       : q.default_name};
   };
 
   const answerFor = (q, forceSame) => {
@@ -2239,17 +2611,39 @@ async function askIdentity(token, questions, onDone) {
   };
 
   const send = async (answers) => {
-    showBusy("Applying\u2026");
+    showBusy("Applying\u2026", undefined);
     try {
-      const refreshed = await post(`/api/session/${token}/identity`, {answers});
-      if (state.session && state.session.token === token) {
+      // The full preview is asked for only when it is on screen. During an
+      // import nothing is showing it, and building it costs as much as the
+      // import itself.
+      const showing = !!(state.session && state.session.token === token);
+      const refreshed = await post(
+        `/api/session/${token}/identity${showing ? "?full=1" : ""}`, {answers});
+      if (showing) {
         state.session = refreshed;
         renderSession();
       }
       if (onDone) await onDone();
       else $("#modal").innerHTML = "";
     } catch (err) {
-      $("#modal").innerHTML = "";
+      // Loudly, and in place. This used to clear the dialog and rethrow to a
+      // status line the reader may not have been looking at, so a failed apply
+      // looked like an apply that silently did nothing -- with the hands still
+      // unsaved and the database still empty.
+      const sheet = modal.querySelector(".sheet");
+      if (sheet) {
+        let note = sheet.querySelector(".apply-err");
+        if (!note) {
+          note = document.createElement("p");
+          note.className = "err apply-err";
+          sheet.appendChild(note);
+        }
+        note.textContent = /expired/i.test(err.message || "")
+          ? "This upload timed out while the dialog was open. Nothing was saved — add the files again."
+          : `Not applied — ${err.message}`;
+      } else {
+        $("#modal").innerHTML = "";
+      }
       throw err;
     }
   };
@@ -2314,11 +2708,11 @@ function showResult(result) {
 async function viewPlayers() {
   const view = $("#view");
   if (state.player) return viewPlayer(state.player);
-  view.innerHTML = `<div class="panel"><div class="empty">loading\u2026</div></div>`;
   const data = await get("/api/roster");
   state.heroId = data.hero_id;
   $("#meta").textContent = `${data.hands} hands \u00b7 ${data.players.length} players`;
   if (!data.players.length) {
+    if (!onScreen("players")) return;
     view.innerHTML = `<div class="panel"><h2>nothing stored yet</h2>
       <p class="muted">Drop your hand history exports here.</p>
       <div class="drop" id="db-drop">
@@ -2333,6 +2727,7 @@ async function viewPlayers() {
   }
   /* One table, sorted however you like. A separate leaderboard tab was the
      same rows in a different order. */
+  if (!onScreen("players")) return;
   view.innerHTML = `<div class="panel">
       <div class="spread"><h2>database</h2>
         <div class="row">
@@ -2346,8 +2741,6 @@ async function viewPlayers() {
       <input type="file" id="db-file" multiple accept=".json,.txt" hidden>
       <div id="db-status" class="small muted" style="margin-bottom:10px"></div>
       <div id="db-roster"></div></div>
-    <div id="suggest-panel" class="panel" hidden>
-      <h2>possible same person</h2><div id="suggestions"></div></div>
     <p class="footnote">
       <button class="linkbtn danger-link" id="reset">reset database</button>
       <span class="muted">deletes every hand, player and merge decision</span></p>`;
@@ -2373,64 +2766,13 @@ async function viewPlayers() {
       `measured against generic online norms \u2014 your pool takes over at 8 players`;
   }
 
-  const suggestions = await get("/api/suggestions");
-  if (suggestions.length) {
-    $("#suggest-panel").hidden = false;
-    $("#suggestions").innerHTML = suggestions.map(s => `
-      <div class="leak"><div class="leak-head">
-        <div><b>${esc(s.absorb_name)}</b> may be <b>${esc(s.keep_name)}</b>
-          <div class="small muted">${esc(s.reason)}</div></div>
-        <div class="row"><span class="tag">${fmtPct(s.confidence)}</span>
-          <button class="act small" data-keep="${s.keep}" data-absorb="${s.absorb}">merge</button></div>
-      </div></div>`).join("");
-    $("#suggestions").querySelectorAll("button").forEach(b => b.onclick = async () => {
-      b.disabled = true; b.textContent = "merging\u2026";
-      try {
-        await post("/api/link", {keep: +b.dataset.keep, absorb: +b.dataset.absorb});
-        // Retire the row here rather than relying on the re-render to drop it:
-        // the merge is done, and a suggestion still sitting on screen reads as
-        // one that failed. If it was the last one, the panel goes too.
-        b.textContent = "done";
-        const row = b.closest(".leak");
-        if (row) {
-          row.classList.add("merged");
-          setTimeout(() => {
-            row.remove();
-            if (!$("#suggestions").querySelector(".leak")) {
-              $("#suggest-panel").hidden = true;
-            }
-          }, 550);
-        }
-        // A session on the other tab is about the same people; leaving it
-        // unmerged would contradict the database it is about to be saved into.
-        if (state.session && state.session.token) {
-          try {
-            state.session = await get(`/api/session/${state.session.token}`);
-          } catch (ignored) { /* session expired; nothing to refresh */ }
-        }
-        await viewPlayers();
-      } catch (err) {
-        b.disabled = false;
-        b.textContent = "merge";
-        b.title = err.message || "merge failed";
-        const note = b.closest(".leak");
-        if (note) {
-          let msg = note.querySelector(".merge-err");
-          if (!msg) {
-            msg = document.createElement("div");
-            msg.className = "small err merge-err";
-            note.appendChild(msg);
-          }
-          msg.textContent = err.message || "merge failed";
-        }
-      }
-    });
-  }
+
 }
 
 async function viewPlayer(id) {
   const view = $("#view");
   const data = await get("/api/player/" + id);
+  if (!onScreen("players")) return;
   const names = [...new Set(data.aliases.map(a => a.name))];
   $("#meta").textContent = names.length > 1
     ? `also known as ${names.slice(1).join(", ")}` : "";
@@ -2444,6 +2786,58 @@ async function viewPlayer(id) {
   view.appendChild(holder);
   state.heroId = data.hero_id;
   playerTabs(data.profiles, holder, {narrate: true, heroId: data.hero_id});
+
+  // Accounts pooled into this player, each splittable on its own.
+  //
+  // Merging was previously one-way from the interface: the only way out of a
+  // wrong "same person" was to reset the database. Splitting is per account,
+  // not per player, because that is the grain the mistake happens at -- one
+  // stray account swept into somebody else, not a whole identity gone wrong.
+  if (data.aliases && data.aliases.length > 1) {
+    const panel = document.createElement("div");
+    panel.className = "panel";
+    panel.innerHTML = `<h2>accounts</h2>
+      <div class="small muted" style="margin:-8px 0 12px">
+        ${data.aliases.length} accounts are pooled as this player. Split one out
+        if it is somebody else — the hands stay put, only who they belong to
+        changes, and both profiles are rebuilt from them.</div>
+      <div id="alias-rows"></div>`;
+    view.appendChild(panel);
+    const rows = panel.querySelector("#alias-rows");
+    for (const a of data.aliases) {
+      const row = document.createElement("div");
+      row.className = "leak";
+      row.innerHTML = `<div class="leak-head">
+        <div><b>${esc(a.name || a.account)}</b>
+          <div class="small muted">${esc(a.account)} · ${a.hands} hand(s)</div></div>
+        <div class="row"><button class="act small">split out</button></div>
+      </div>`;
+      const button = row.querySelector("button");
+      button.onclick = async () => {
+        button.disabled = true;
+        button.textContent = "splitting\u2026";
+        try {
+          const r = await post("/api/unlink",
+            {player_id: id, site: a.site, account: a.account});
+          // Straight to whoever this just became: the point of splitting is
+          // to look at them on their own.
+          state.player = r.player_id;
+          await viewPlayer(r.player_id);
+        } catch (err) {
+          button.disabled = false;
+          button.textContent = "split out";
+          let msg = row.querySelector(".split-err");
+          if (!msg) {
+            msg = document.createElement("div");
+            msg.className = "small err split-err";
+            row.appendChild(msg);
+          }
+          msg.textContent = err.message || "could not split";
+        }
+      };
+      rows.appendChild(row);
+    }
+  }
 
   if (data.by_table && data.by_table.length > 1) {
     const panel = document.createElement("div");
@@ -2499,6 +2893,7 @@ function confirmReset(data) {
       modal.innerHTML = "";
       state.player = null; state.session = null;
       viewPlayers();
+      paintTabs();               // an emptied database closes tabs again
       showResult({reset: result});
     } catch (err) { showResult({error: err.message}); }
   };
@@ -2629,6 +3024,11 @@ async function showReplay(handId, playerId, headline) {
 
 /* ---- tabs ---- */
 function switchTab(tab, playerId) {
+  // A blocking operation owns the window until it finishes. Leaving mid-import
+  // replaces the view it is still writing into, and the veil it put up is
+  // cleared by whatever it was doing rather than by the tab that replaced it --
+  // which left a full-screen dim with nothing on it.
+  if (document.querySelector(".veil.busy")) return;
   state.tab = tab;
   // Bare "go to the database tab" clears which player was open; a link that
   // names a specific player (from Sessions, say) opens straight to them
@@ -2644,22 +3044,111 @@ function switchTab(tab, playerId) {
 document.querySelectorAll("nav button").forEach(b =>
     b.classList.toggle("on", b.dataset.tab === tab));
   $("#meta").textContent = "";
-  render();
+  renderWithSpinner();
 }
+
+/* In the browser the whole tool runs on this thread, so the work a tab does to
+   build itself is work the page cannot paint through. Put a spinner up, give
+   the browser a frame to actually draw it, and only then start. Two frames,
+   because one only schedules the paint -- the second runs after it. */
+const nextFrame = () => new Promise((done) =>
+  requestAnimationFrame(() => requestAnimationFrame(() => done())));
+
+async function renderWithSpinner() {
+  const view = $("#view");
+  if (view) {
+    view.innerHTML = `<div class="panel loading">
+      <div class="spinner" aria-hidden="true"></div>
+      <span>Loading\u2026</span></div>`;
+    await nextFrame();
+  }
+  return render();
+}
+
+/* True while `tab` is the one on screen.
+ *
+ * Views build themselves asynchronously and then write. A view that started
+ * before the reader switched away must not write at all -- correcting it
+ * afterwards leaves a visible flash of the wrong screen. */
+function onScreen(tab) { return state.tab === tab; }
+
+/* Which render is the current one.
+ *
+ * Every tab builds itself asynchronously, and a slow one -- Database on a big
+ * roster, Hero on a cold cache -- finishes long after the reader has moved on,
+ * writing its screen over whatever they switched to. The simulator had this
+ * and was fixed in place; the same thing was true of all of them, so the guard
+ * belongs here rather than in each view.
+ *
+ * A render that is no longer the current one throws its output away, and the
+ * tab that *is* current is drawn instead.
+ */
+let renderSeq = 0;
+
 async function render() {
+  const mine = ++renderSeq;
+  const forTab = state.tab;
   try {
     if (!state.glossary) state.glossary = await get("/api/glossary");
+    if (mine !== renderSeq) return;          // superseded while we waited
     if (state.tab === "session") viewSession();
     else if (state.tab === "sessions") await viewSessions();
     else if (state.tab === "hero") await viewHero();
     else if (state.tab === "play") await viewPlay();
     else await viewPlayers();
   } catch (err) {
+    if (mine !== renderSeq) return;
     $("#view").innerHTML = `<div class="panel err">${esc(err.message)}</div>`;
+    return;
   }
+  // Finished into a tab nobody is looking at any more: draw the real one.
+  if (mine === renderSeq && state.tab !== forTab) render();
 }
 document.querySelectorAll("nav button").forEach(b =>
-  b.onclick = () => switchTab(b.dataset.tab));
+  b.onclick = () => {
+    if (b.disabled) return;
+    if (document.querySelector(".veil.busy")) {
+      // Nudge the thing that is holding the window, so the click reads as
+      // "not now" rather than as nothing happening at all.
+      const sheet = document.querySelector(".busy-sheet");
+      if (sheet) {
+        sheet.animate(
+          [{ transform: "translateX(0)" }, { transform: "translateX(-4px)" },
+           { transform: "translateX(4px)" }, { transform: "translateX(0)" }],
+          { duration: 180 });
+      }
+      return;
+    }
+    switchTab(b.dataset.tab);
+  });
+
+/* ---- tabs with nothing to show yet ----
+   Hero needs a hand history with your own cards in it; Simulate needs somebody
+   measured enough to play against. Both are ordinary on a new database, and
+   both used to be found out by clicking, reading an explanation and clicking
+   back. The server says which are ready and why not, and the reason sits on
+   the tab itself. */
+async function paintTabs() {
+  let tabs;
+  try {
+    tabs = (await get("/api/meta")).tabs || {};
+  } catch {
+    return;                     // never let this stop the interface loading
+  }
+  for (const button of document.querySelectorAll("nav button")) {
+    const state_ = tabs[button.dataset.tab];
+    const blocked = state_ && state_.ok === false;
+    button.disabled = !!blocked;
+    button.classList.toggle("off", !!blocked);
+    if (blocked) button.title = state_.why || "";
+    else button.removeAttribute("title");
+  }
+  // Landing on a tab that has since become unavailable -- a reset, say --
+  // would otherwise leave the view stranded on a dead screen.
+  const here = document.querySelector(`nav button[data-tab="${state.tab}"]`);
+  if (here && here.disabled) switchTab("players");
+}
+paintTabs();
 
 /* Sun when it is dark (click for light), moon when it is light. The icon
    shows what you get, not what you have. */
@@ -2684,4 +3173,4 @@ themeBtn.onclick = () => {
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", paintTheme);
 paintTheme();
 
-render();
+renderWithSpinner();

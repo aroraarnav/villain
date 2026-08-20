@@ -27,6 +27,12 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["villain*"]
 
+# The UI's page, stylesheet and script live beside the package as data files,
+# not importable modules. Without this they are left out of a wheel, and the
+# in-browser build (villain.webapp.browser) would import a UI it cannot serve.
+[tool.setuptools.package-data]
+"villain.webapp" = ["assets/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

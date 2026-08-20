@@ -20,7 +20,7 @@ from ..db import DEFAULT_PATH, Store, split_key
 from ..evidence import find as find_evidence
 from ..glossary import payload as glossary_payload
 from ..glossary import stat_help
-from ..identity import auto_answers, session_questions, suggest_links
+from ..identity import auto_answers, session_questions
 from ..model import hand_from_dict
 from ..narrate import Unavailable, narrate
 from ..narrate import enabled as narrator_enabled
@@ -30,8 +30,8 @@ from ..stats import VS_HERO
 from .assets import page, static
 from .heroview import _cached_hero_id, hero_begin, hero_payload, hero_status
 from .leaderboard import leaderboard_payload
-from .payloads import MIN_ROSTER_HANDS, profile_payload, roster_payload
-from .sessions import SESSIONS, SIM_GAMES, _reap_sessions, apply_answers, commit_session, parse_upload, question_payload, session_payload
+from .payloads import MIN_ROSTER_HANDS, profile_payload, roster_payload, tab_availability
+from .sessions import SESSIONS, SIM_GAMES, _reap_sessions, apply_answers, commit_session, parse_upload, question_payload, session_brief, session_payload
 
 #: Hostnames the UI may be reached on. Anything else is a rebinding attempt.
 LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", ""})
@@ -147,18 +147,33 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, leaderboard_payload(store))
             if path == "/api/hero":
                 with Store(self.db_path) as store:
+                    # "Is this going to take a while?" -- asked before the real
+                    # request so the page can put a veil up first. It must not
+                    # start anything: the whole point is to answer instantly.
+                    if parse_qs(route.query).get("peek", ["0"])[0] == "1":
+                        return self._send(200, {"status": hero_status(store)})
                     # Never block the request on the build. A cold hero is
                     # ~90s of model fitting; the page asks again rather than
                     # holding a socket open and showing nothing.
                     status = hero_status(store)
-                    if status != "ready":
-                        hero_begin(store)
+                    if status != "ready" and hero_begin(store):
                         return self._send(202, {
                             "status": "building",
                             "message": "Reading your hands -- fitting the "
                                        "strength model over every one of them. "
                                        "This runs once per import.",
                         })
+                    if status == "building":
+                        return self._send(202, {
+                            "status": "building",
+                            "message": "Reading your hands -- fitting the "
+                                       "strength model over every one of them. "
+                                       "This runs once per import.",
+                        })
+                    # Cold, and no background thread to build it on: that is
+                    # the browser, where the whole tool is single-threaded.
+                    # Building inside the request is slower to first paint than
+                    # polling, and it is the only thing that ever finishes.
                     payload = hero_payload(store)
                     if payload is None:
                         return self._send(404, {
@@ -244,17 +259,13 @@ class Handler(BaseHTTPRequestHandler):
                         seat.player_id = str(pid)
                 return self._send(200, replay(hand, focus=focus))
             if path == "/api/meta":
-                return self._send(200, {"narrator": narrator_enabled()})
+                with Store(self.db_path) as store:
+                    return self._send(200, {
+                        "narrator": narrator_enabled(),
+                        "tabs": tab_availability(store),
+                    })
             if path == "/api/glossary":
                 return self._send(200, glossary_payload())
-            if path == "/api/suggestions":
-                with Store(self.db_path) as store:
-                    return self._send(200, [{
-                        "keep": s.keep, "absorb": s.absorb,
-                        "keep_name": s.keep_name, "absorb_name": s.absorb_name,
-                        "matched_a": s.matched_a, "matched_b": s.matched_b,
-                        "confidence": s.confidence, "reason": s.reason,
-                    } for s in suggest_links(store)])
             return self._send(404, {"error": "not found"})
         except Exception as exc:                      # keep the server alive
             return self._send(500, {"error": str(exc)})
@@ -334,9 +345,23 @@ class Handler(BaseHTTPRequestHandler):
                 token = route.split("/")[3]
                 if token not in SESSIONS:
                     return self._send(404, {"error": "session expired -- upload again"})
+                # Being answered counts as being alive. Reading a dialog about
+                # six accounts takes as long as it takes, and a session evicted
+                # while somebody was thinking loses the whole import.
+                SESSIONS[token]["created"] = time.time()
                 apply_answers(SESSIONS[token], body.get("answers") or {})
-                with Store(self.db_path) as store:
-                    return self._send(200, session_payload(token, store))
+                # Brief unless the caller is showing the preview. This is the
+                # same trap as the upload response: building the full payload
+                # profiles every hand in the session, which on a large import
+                # is minutes of work behind a dialog that said "Applying".
+                # `route` is the path alone in do_POST -- unlike do_GET, where it
+                # is the whole parsed URL. Reading .query off it raised
+                # "'str' object has no attribute 'query'" and took down every
+                # apply.
+                if parse_qs(urlparse(self.path).query).get("full", ["0"])[0] == "1":
+                    with Store(self.db_path) as store:
+                        return self._send(200, session_payload(token, store))
+                return self._send(200, session_brief(token))
             if route.startswith("/api/session/") and route.endswith("/plan"):
                 token = route.split("/")[3]
                 if token not in SESSIONS:
@@ -347,6 +372,7 @@ class Handler(BaseHTTPRequestHandler):
                 token = route.split("/")[3]
                 if token not in SESSIONS:
                     return self._send(404, {"error": "session expired -- upload again"})
+                SESSIONS[token]["created"] = time.time()
                 with Store(self.db_path) as store:
                     return self._send(200, commit_session(
                         store, token, body.get("answers") or {}))
@@ -426,7 +452,7 @@ class Handler(BaseHTTPRequestHandler):
     def _upload(self, body: dict):
         """Parse uploaded files into a session held in memory."""
         files = body.get("files") or []
-        if not files:
+        if not files and not body.get("token"):
             return self._send(400, {"error": "no files"})
         hands, names, rejected = [], [], []
         for item in files:
@@ -441,20 +467,52 @@ class Handler(BaseHTTPRequestHandler):
                 continue
             hands.extend(parsed)
             names.append({"name": name, "hands": len(parsed)})
-        if not hands:
+        # A batch may be delivered in pieces so the page can paint between them:
+        # `token` continues an open session, `more` says another piece is
+        # coming. Identity questions are settled once, at the end, because they
+        # are asked about the whole batch and recomputing them per piece would
+        # be quadratic in the number of files.
+        token = str(body.get("token") or "")
+        more = bool(body.get("more"))
+        if token and token in SESSIONS:
+            session = SESSIONS[token]
+            session["hands"].extend(hands)
+            session["files"].extend(names)
+            session.setdefault("rejected", []).extend(rejected)
+            # Still being written to, so it is the newest session, not the
+            # oldest. Without this a batch that takes longer than the others
+            # sit around is the one _reap_sessions evicts -- and the import
+            # fails at the end with "session expired", having done all the work.
+            session["created"] = time.time()
+        else:
+            _reap_sessions()
+            token = secrets.token_urlsafe(9)
+            SESSIONS[token] = {"hands": list(hands), "files": names,
+                               "created": time.time(), "rejected": list(rejected)}
+            session = SESSIONS[token]
+
+        if more:
+            # Nothing is parsed twice: this is a running tally, deduplicated
+            # when the batch closes.
+            return self._send(200, {"token": token, "partial": True,
+                                    "hands": len(session["hands"]),
+                                    "files": len(session["files"])})
+
+        rejected = session.get("rejected", rejected)
+        if not session["hands"]:
+            SESSIONS.pop(token, None)
             return self._send(400, {"error": "nothing could be parsed", "rejected": rejected})
 
         # One hand id can appear in two exports of the same game.
         unique, seen = [], set()
-        for hand in sorted(hands, key=lambda h: h.started_at):
+        for hand in sorted(session["hands"], key=lambda h: h.started_at):
             if hand.hand_id in seen:
                 continue
             seen.add(hand.hand_id)
             unique.append(hand)
 
-        _reap_sessions()
-        token = secrets.token_urlsafe(9)
-        SESSIONS[token] = {"hands": unique, "files": names, "created": time.time()}
+        names = session["files"]
+        session["hands"] = unique
         # Identity is settled up front so the session being read is already
         # pooled. Reading the database to ask a better question is not the
         # same as writing to it -- nothing is stored until you save.
@@ -467,7 +525,10 @@ class Handler(BaseHTTPRequestHandler):
             auto = auto_answers(questions)
             if auto:
                 apply_answers(SESSIONS[token], auto)
-            payload = session_payload(token, store)
+        # Deliberately the brief payload: an import never shows the preview,
+        # and building it means profiling every hand in the session a second
+        # time. The session view asks for the full one when it opens.
+        payload = session_brief(token)
         payload["rejected"] = rejected
         return self._send(200, payload)
 

@@ -643,3 +643,238 @@ def test_no_against_you_read_without_enough_shared_history():
     b.ratios[VS_HERO + "vpip"] = Ratio(hits=5, opps=20)
     b.ratios["vpip"] = Ratio(hits=5, opps=20)
     assert versus_read({"6max": b}) is None
+
+
+# --- Hero where there is no thread to build it on ---------------------------
+#
+# The browser runs this same server module under Pyodide, which cannot start a
+# thread. Hero's "answer 202 and build in the background" is therefore a
+# promise it can never keep there, and the first version of it wedged: the
+# in-flight flag was set before the thread existed, so a failed start left the
+# key set with no `finally` to clear it and every later request was told
+# "building" forever.
+
+
+@pytest.fixture
+def no_threads(monkeypatch):
+    """A Pyodide-shaped interpreter: threads refuse to start."""
+    from villain.webapp import heroview
+
+    def refuse(*args, **kwargs):
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(heroview.threading.Thread, "start", refuse)
+    monkeypatch.setattr(heroview, "_THREADS_WORK", None)
+    heroview._HERO_BUILDING.clear()
+    yield heroview
+    heroview._HERO_BUILDING.clear()
+    heroview._THREADS_WORK = None
+
+
+def test_threads_work_is_false_when_they_cannot_start(no_threads):
+    assert no_threads.threads_work() is False
+
+
+def test_hero_begin_refuses_rather_than_claiming_a_build(tmp_path, no_threads):
+    """False, not True: the caller has to know to build it itself."""
+    with Store(tmp_path / "v.db") as store:
+        assert no_threads.hero_begin(store) is False
+
+
+def test_a_failed_thread_start_does_not_wedge_the_flag(tmp_path, no_threads):
+    """The bug this exists for. A wedged flag is permanent: status reads
+    'building' forever and the tab polls an answer that never comes."""
+    with Store(tmp_path / "v.db") as store:
+        no_threads.hero_begin(store)
+        assert no_threads._HERO_BUILDING == set()
+        assert no_threads.hero_status(store) != "building"
+
+
+def test_the_flag_survives_a_start_that_fails_midway(tmp_path, monkeypatch):
+    """Same guarantee when threads exist in principle but this start fails."""
+    from villain.webapp import heroview
+    monkeypatch.setattr(heroview, "_THREADS_WORK", True)
+    heroview._HERO_BUILDING.clear()
+
+    def refuse(*args, **kwargs):
+        raise RuntimeError("resource unavailable")
+
+    monkeypatch.setattr(heroview.threading.Thread, "start", refuse)
+    with Store(tmp_path / "v.db") as store:
+        assert heroview.hero_begin(store) is False
+        assert heroview._HERO_BUILDING == set()
+    heroview._THREADS_WORK = None
+
+
+# --- tabs that have nothing to show yet -------------------------------------
+
+
+def test_a_new_database_offers_neither_hero_nor_simulate(tmp_path):
+    from villain.webapp.payloads import tab_availability
+    with Store(tmp_path / "v.db") as store:
+        tabs = tab_availability(store)
+    assert tabs["hero"]["ok"] is False
+    assert tabs["play"]["ok"] is False
+    # The reason has to name the fix; "no hero found" tells a newcomer nothing.
+    assert "Import" in tabs["hero"]["why"]
+
+
+def test_hands_without_an_identifiable_hero_open_simulate_but_not_hero(tmp_path, hands):
+    """The three states are distinct, and the middle one is the interesting
+    case: there are hands and opponents to play, but nothing in them says
+    which seat was yours, so Hero alone stays shut -- with a reason about
+    whose cards are visible rather than about the database being empty."""
+    from villain.webapp.payloads import tab_availability
+    with Store(tmp_path / "v.db") as store:
+        store.add_hands(hands)
+        store.rebuild()
+        tabs = tab_availability(store)
+    assert tabs["play"]["ok"] is True
+    assert tabs["play"]["why"] is None
+    assert tabs["hero"]["ok"] is False
+    assert "your own cards" in tabs["hero"]["why"]
+    assert "nothing in this database" not in tabs["hero"]["why"]
+
+
+def test_a_hero_and_opponents_open_both(tmp_path, hands, monkeypatch):
+    """Hero detection needs more hands than the fixture has, so it is stubbed:
+    what is under test is the availability logic, not find_hero."""
+    from villain.webapp import payloads
+    with Store(tmp_path / "v.db") as store:
+        store.add_hands(hands)
+        store.rebuild()
+        monkeypatch.setattr("villain.webapp.heroview._cached_hero_id", lambda s: 1)
+        tabs = payloads.tab_availability(store)
+    assert tabs["hero"]["ok"] is True
+    assert tabs["hero"]["why"] is None
+    assert tabs["play"]["ok"] is True
+
+
+def test_every_blocked_tab_says_why(tmp_path):
+    """A dimmed tab with no explanation is worse than one that is merely
+    empty -- there is nothing to hover and nothing to do about it."""
+    from villain.webapp.payloads import tab_availability
+    with Store(tmp_path / "v.db") as store:
+        tabs = tab_availability(store)
+    for name, state in tabs.items():
+        if not state["ok"]:
+            assert state["why"], f"{name} is blocked without a reason"
+            assert state["why"].strip().endswith("."), f"{name}: reason is a sentence"
+
+
+# --- splitting an account back out --------------------------------------
+#
+# Merging was one-way from the interface: /api/unlink existed and nothing
+# reached it, so a wrong "same person" could only be undone by deleting the
+# database. These cover the round trip the player page now offers.
+
+
+def test_a_merged_account_can_be_split_back_out(tmp_path, hands):
+    from villain.db import Store as _Store
+    with _Store(tmp_path / "v.db") as store:
+        store.add_hands(hands)
+        store.rebuild()
+        ids = [int(p["id"]) for p in store.players()]
+        # Any pair the co-occurrence guard permits. Most of this fixture's
+        # players sat together, so the first pair is usually not one.
+        pair = next(((a, b) for i, a in enumerate(ids) for b in ids[i + 1:]
+                     if not store.are_distinct(a, b)), None)
+        assert pair is not None, "fixture has no mergeable pair to test with"
+        keep, absorb = pair
+        absorbed = [dict(r) for r in store.conn.execute(
+            "SELECT site, account FROM aliases WHERE player_id = ?", (absorb,))]
+        store.link(keep, absorb)
+        pooled = store.conn.execute(
+            "SELECT COUNT(*) c FROM aliases WHERE player_id = ?", (keep,)).fetchone()["c"]
+        assert pooled >= 2
+
+        alias = absorbed[0]
+        new_id = store.unlink(keep, alias["site"], alias["account"])
+        assert new_id != keep
+        moved = store.conn.execute(
+            "SELECT player_id FROM aliases WHERE site = ? AND account = ?",
+            (alias["site"], alias["account"])).fetchone()["player_id"]
+        assert int(moved) == new_id
+
+
+def test_splitting_an_alias_that_is_not_there_is_refused(tmp_path, hands):
+    from villain.db import Store as _Store
+    with _Store(tmp_path / "v.db") as store:
+        store.add_hands(hands)
+        store.rebuild()
+        pid = int(store.players()[0]["id"])
+        with pytest.raises(LookupError):
+            store.unlink(pid, "pokernow", "no-such-account")
+
+
+def test_a_merge_that_cannot_be_honored_is_never_asked(tmp_path, hands):
+    """The red errors this removes: a question whose "yes" Store.link refuses,
+    so the import finished by explaining that the answer was discarded."""
+    from villain.db import SPURIOUS_OVERLAP
+    from villain.db import Store as _Store
+    from villain.identity import session_questions
+    with _Store(tmp_path / "v.db") as store:
+        questions = session_questions(store, hands)
+    for q in questions:
+        overlap = getattr(q, "overlap", 0) or 0
+        assert overlap <= SPURIOUS_OVERLAP, (
+            f"asked about a pair seated together {overlap} times")
+
+
+# --- the Hero build reports itself ------------------------------------------
+#
+# The browser shows a real progress bar for a build that takes minutes, driven
+# by callbacks from inside the Python. Nothing covered that the callback is
+# actually wired up, so removing a parameter from `build_dataset` left
+# `fit_population_model` calling it with an argument it no longer took -- a
+# TypeError on every cold Hero build, and a green test suite.
+
+
+def test_a_cold_hero_build_reports_its_phases(tmp_path, hands):
+    from villain.db import Store as _Store
+    from villain.webapp.heroview import hero_payload
+
+    seen = []
+    with _Store(tmp_path / "v.db") as store:
+        store.add_hands(hands)
+        store.rebuild()
+        hero_payload(store, progress=lambda done, total, phase: seen.append(phase))
+
+    assert seen, "the build reported nothing at all"
+    # The phases that walk hands can be counted; the rest say so with no total.
+    counted = [p for p in seen if p in ("finding", "loading", "reading")]
+    assert counted, f"no counted phase was reported, only {sorted(set(seen))}"
+
+
+def test_build_dataset_reports_progress(hands):
+    """The call that broke: `fit_population_model` passes `progress=` into
+    `build_dataset`, and nothing checked the parameter was still there."""
+    from villain.reads import build_dataset
+
+    seen = []
+    build_dataset(list(hands), progress=lambda done, total: seen.append((done, total)))
+    assert seen, "build_dataset reported nothing"
+    done, total = seen[-1]
+    assert done == total, f"a bar that stops at {done} of {total} is worse than no bar"
+
+
+def test_fit_population_model_passes_progress_down(tmp_path, hands):
+    """Both walks report, under the names the interface labels them with.
+
+    The fixture is far too small to fit a model, and that is fine -- what is
+    under test is that the plumbing survives the trip, not the model."""
+    from villain.db import Store as _Store
+    from villain.hero import fit_population_model
+    from villain.reads import NotEnoughData
+
+    seen = []
+    with _Store(tmp_path / "v.db") as store:
+        store.add_hands(hands)
+        store.rebuild()
+        try:
+            fit_population_model(store, progress=lambda d, t, phase: seen.append(phase))
+        except NotEnoughData:
+            pass                      # twenty hands cannot fit one; the call is the point
+
+    assert "loading" in seen, f"the load phase never reported: {sorted(set(seen))}"
+    assert "reading" in seen, f"the walk never reported: {sorted(set(seen))}"

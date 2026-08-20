@@ -13,3 +13,13 @@ secrets*
 
 # Working notes, not part of the project.
 HANDOFF.md
+DESIGN_AUDIT_PROMPT.md
+ENGINEERING_AUDIT_PROMPT.md
+DATA_SCIENCE_AUDIT_PROMPT.md
+
+# Built browser demo (assembled by web/build.py, deployed by CI).
+web/dist/
+
+node_modules/
+# setuptools build intermediate (python -m build)
+/build/

@@ -139,11 +139,28 @@ CREATE TABLE IF NOT EXISTS meta (
 
 DEFAULT_PATH = Path.home() / ".villain" / "villain.db"
 
-#: Shared hands that can be waved away as a reconnect leaving a stale seat.
-#: Above this, two accounts really were at the table together and cannot be one
-#: person. At or below it the merge is still offered, with the overlap stated,
-#: because refusing outright makes one glitched hand permanently unmergeable.
-SPURIOUS_OVERLAP = 2
+#: Shared hands that can be waved away as one person on two accounts -- a
+#: reconnect leaving a stale seat, or somebody sitting down again from a phone
+#: for a few hands. Above this, two accounts really were at the table together
+#: and cannot be one person. At or below it the merge is offered, with the
+#: overlap stated, and a merge is never applied without being asked for.
+#:
+#: Fitted to a real pool rather than assumed. Over 1,588 pairs of players who
+#: were ever dealt in together, the shared-hand counts are:
+#:
+#:     1 hand    37 pairs        11-25    143
+#:     2         9               26-100   547
+#:     3-5      34               100+     769
+#:     6-10     49
+#:
+#: 83% of pairs share 26 or more hands, which is a session played together and
+#: nothing else. The thin tail below ten is where brief double-seating lives,
+#: so the line goes there. It was 2, which refused the ordinary case of one
+#: person reconnecting mid-orbit and playing a few hands as both accounts.
+#:
+#: Raising it is also safer than it was: a merge can now be undone from the
+#: player page one account at a time, so a wrong answer is no longer permanent.
+SPURIOUS_OVERLAP = 10
 
 #: Feature / display-stat definition stamp. Bump when ``rebuild`` is required
 #: for existing databases to grow new counters or fix old ones.
@@ -289,6 +306,13 @@ class Store:
             [(a, b, n) for (a, b), n in fixed.items()])
 
     def close(self) -> None:
+        # The .db file is what we copy, export, and (in the browser) upload.
+        # WAL left sitting beside it is a second file nobody copies, so a
+        # checkpoint here is what makes the one file actually complete.
+        try:
+            self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.Error:
+            pass
         self.conn.close()
 
     def __enter__(self) -> Store:
@@ -1169,7 +1193,7 @@ class Store:
             profile.versus = versus_read(books, priors=priors)
         return profile
 
-    def player_hands(self, player_id: int | None = None) -> list[Hand]:
+    def player_hands(self, player_id: int | None = None, progress=None) -> list[Hand]:
         """Stored hands, keyed to internal ids.
 
         The same re-keying ``rebuild`` does, so anything computed from these
@@ -1217,14 +1241,24 @@ class Store:
                      " JOIN temp.player_hand_ids w ON w.hand_id = h.hand_id"
                      " ORDER BY h.started_at")
 
+        # Counted, because this is not a quick read: every hand is decompressed
+        # and parsed, and on a large database that is a minute of silence before
+        # the caller's own work even starts. A caller with a progress bar was
+        # left with nothing to put in it for the longest part of the wait.
+        total = (len(wanted) if player_id is not None else
+                 self.conn.execute("SELECT COUNT(*) c FROM hands").fetchone()["c"])
         out = []
-        for row in self.conn.execute(query):
+        for at, row in enumerate(self.conn.execute(query)):
+            if progress is not None and at % 500 == 0:
+                progress(at, total)
             data = json.loads(gzip.decompress(row["payload"]))
             hand = hand_from_dict(data)
             for seat in hand.seats:
                 pid = resolve(hand.site, seat.player_id, seat.name)
                 seat.player_id = str(pid) if pid is not None else seat.player_id
             out.append(hand)
+        if progress is not None:
+            progress(total, total)
         return out
 
     def reset(self) -> dict[str, int]:
