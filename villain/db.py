@@ -8,8 +8,8 @@ recording -- so every hand is stored in canonical form and ``rebuild()``
 recomputes every book from scratch. Without that, a definition change leaves
 old players wrong until they happen to sit down again.
 
-**Identity is separate from account.** The same human is ``DavidMazour`` at one
-table and ``DavidMazour2`` at the next, and the profile is worthless if it
+**Identity is separate from account.** The same human is ``PlayerK`` at one
+table and ``PlayerK2`` at the next, and the profile is worthless if it
 restarts each time. So site accounts are *aliases* pointing at an internal
 player, aliases can be merged, and merging is guarded by co-occurrence: two
 accounts dealt into the same hand are provably different people and can never

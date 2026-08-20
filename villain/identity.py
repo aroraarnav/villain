@@ -1,11 +1,11 @@
 """Recognizing a player you have seen before.
 
 Home games are full of the same humans under slightly different names --
-``DavidMazour`` becomes ``DavidMazour2`` after a reconnect, and a profile that
+``PlayerK`` becomes ``PlayerK2`` after a reconnect, and a profile that
 restarts each time is worthless. Two independent signals are combined:
 
 * **Name similarity**, after stripping the noise accounts accumulate: case,
-  punctuation, and trailing digits. ``Arnav`` and ``Arnav2`` normalize to the
+  punctuation, and trailing digits. ``PlayerG`` and ``PlayerG2`` normalize to the
   same string. Only a high name match is offered as a possible merge; play
   style is not used — two tight-passives looking alike is not evidence they
   are one person.
@@ -36,7 +36,7 @@ STRONG_EVIDENCE = 4.0
 MIN_HANDS_FOR_BEHAVIOUR = 60
 
 #: Name similarity required before we even mention a possible merge. Trailing
-#: digits and punctuation already normalize away (``Arnav`` / ``Arnav2`` score
+#: digits and punctuation already normalize away (``PlayerG`` / ``PlayerG2`` score
 #: 1.0); this bar is for everything else. Play style is not used — agreeing
 #: that two tight-passives are "similar" is not evidence they are one person.
 HIGH_NAME_SCORE = 0.92
@@ -75,8 +75,8 @@ def normalize(name: str) -> str:
 def display_key(name: str) -> str:
     """Case- and punctuation-insensitive, but digits intact.
 
-    :func:`normalize` deliberately strips trailing digits so ``Arnav`` and
-    ``Arnav2`` compare equal. That is the wrong tool for asking whether two
+    :func:`normalize` deliberately strips trailing digits so ``PlayerG`` and
+    ``PlayerG2`` compare equal. That is the wrong tool for asking whether two
     accounts are literally showing the same screen name, where ``Vik`` and
     ``Vik2`` are different answers.
     """
@@ -89,8 +89,8 @@ def name_similarity(a: str, b: str) -> float:
     Two measures, taking the better of them. ``SequenceMatcher`` rewards shared
     runs, which catches additions and truncations; edit distance catches
     transposed and mistyped characters, which is what actually happens to a
-    name being retyped from memory -- ``DavidMazour`` reappearing as
-    ``DamivDazour`` scores 0.73 on shared runs but 0.82 on edit distance.
+    name being retyped from memory -- ``PlayerK`` reappearing as
+    ``PlaeyrK`` scores 0.73 on shared runs but 0.82 on edit distance.
     """
     na, nb = normalize(a), normalize(b)
     if not na or not nb:
@@ -104,23 +104,24 @@ def name_similarity(a: str, b: str) -> float:
 
 #: Shortest stem a name-plus-suffix match will accept. Measured on a real
 #: pool: at 3+ characters the pairs a prefix match newly proposes are things
-#: like ``nuj``/``nuj10min`` and ``Rauf``/``RaufLaptop``; at 1-2 it starts
-#: proposing ``T@2009`` for ``Thomas`` and ``Tin``.
+#: like ``PlayerC``/``PlayerC10min`` and ``PlayerA``/``PlayerALaptop``; at 1-2
+#: it starts proposing weak account-handle matches for two unrelated names
+#: that merely happen to share a first letter.
 MIN_CONTAINED = 3
 
 
 def _containment_score(na: str, nb: str) -> float:
     """Catch a name that is another name with something stuck on the end.
 
-    ``Rauf`` reappears as ``RaufLaptop`` and ``RAUF10MIN``, ``Benson`` as
-    ``Benson1hr`` and ``Benson Wang`` -- one person labelling which device or
+    ``PlayerA`` reappears as ``PlayerALaptop`` and ``PLAYERA10MIN``, ``PlayerB`` as
+    ``PlayerB1hr`` and ``Player B Wang`` -- one person labelling which device or
     how long they are staying. Neither shared runs nor edit distance sees it:
-    the suffix is most of the longer string, so ``Rauf``/``Raufff`` scores
-    0.80 and ``Benson``/``Benson1hr`` 0.80, both under the bar.
+    the suffix is most of the longer string, so ``PlayerA``/``PlayerAaa`` scores
+    0.80 and ``PlayerB``/``PlayerB1hr`` 0.80, both under the bar.
 
     A prefix, deliberately, not a substring: the suffix is something appended,
     and a substring rule matches the middle of unrelated names. It is evidence
-    for a question and never an answer -- ``Arnav``/``Arnav Shah`` has exactly
+    for a question and never an answer -- ``PlayerG``/``PlayerG North`` has exactly
     this shape and is two different people, which only the user can say.
     """
     short, long = (na, nb) if len(na) <= len(nb) else (nb, na)
@@ -130,14 +131,14 @@ def _containment_score(na: str, nb: str) -> float:
 
 
 def _skeleton(name: str) -> str:
-    """The consonants, in order. ``saarang`` and ``srng`` share one."""
+    """The consonants, in order. ``PlayerD`` and ``PlyrD`` share one."""
     return re.sub(r"[aeiou]", "", name)
 
 
 def _skeleton_score(na: str, nb: str) -> float:
     """Catch the vowel-dropped nickname, which neither other measure can see.
 
-    ``saarang`` against ``srng`` scores 0.73 on shared runs and 0.57 on edit
+    ``PlayerD`` against ``PlyrD`` scores 0.73 on shared runs and 0.57 on edit
     distance, so it sat well under the bar -- but dropping the vowels out of a
     name is one of the most common ways a person shortens it, and the two are
     almost always the same human.
@@ -245,8 +246,8 @@ def suggest_links(store, min_name_score: float = HIGH_NAME_SCORE) -> list[Sugges
 def matched_only_by_containment(a: str, b: str, bar: float) -> bool:
     """True when a name-plus-suffix match is the *only* thing linking two names.
 
-    Those are asked, never applied: the shape that makes ``Rauf`` and
-    ``RaufLaptop`` one person makes ``Arnav`` and ``Arnav Shah`` two.
+    Those are asked, never applied: the shape that makes ``PlayerA`` and
+    ``PlayerALaptop`` one person makes ``PlayerG`` and ``PlayerG North`` two.
     """
     na, nb = normalize(a), normalize(b)
     if _containment_score(na, nb) < bar:
@@ -260,8 +261,8 @@ def matched_only_by_containment(a: str, b: str, bar: float) -> bool:
 def _name_match_reason(a: str, b: str, score: float) -> str:
     """Explain the match using the aliases that actually scored, not display names.
 
-    Display names can drift (``TinHusband`` while the only alias is still
-    ``ShishGL``); citing those makes a real same-screen-name hit look fake.
+    Display names can drift (``PlayerJHusband`` while the only alias is still
+    ``PlayerE``); citing those makes a real same-screen-name hit look fake.
     """
     if a == b:
         return f"both appeared as “{a}”"
@@ -557,7 +558,7 @@ def session_questions(store, hands, min_name_score: float = HIGH_NAME_SCORE) -> 
     # 2a. One screen name, many account ids, never at a table together: a
     # reconnect run. Applied without asking -- it is the same evidence the
     # co-occurrence guard treats as decisive everywhere else, and asking the
-    # user 1,181 times whether "valmik" is "valmik" is not a question, it is
+    # user 1,181 times whether "playerf" is "playerf" is not a question, it is
     # a wall. `villain unlink` splits one back out if it was ever wrong.
     reconnect_runs = _same_name_clusters(incoming, blocked)
     for run in reconnect_runs:

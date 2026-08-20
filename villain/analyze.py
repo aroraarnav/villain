@@ -160,7 +160,7 @@ def as_dict(profile: Profile) -> dict:
              # once did opens an empty panel.
              "stats": [st for st in component_stats(c.name)
                        if profile.opps(st) and not st.startswith("aggression:")
-                       # At least a handful of actual instances: Arnav limps
+                       # At least a handful of actual instances: PlayerG limps
                        # 4 times in 1841 hands, which is nonzero and is not
                        # evidence of anything.
                        # Between a handful and a reviewable list. VPIP has

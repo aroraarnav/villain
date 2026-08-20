@@ -180,7 +180,7 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
         if not opened and getattr(hand, "limpers", 0) >= 1:
             # Limpers in, nobody raised: an isolation spot, and a wider one than
             # opening a folded pot. Pooling it under rfi had every villain
-            # attacking limps at their first-in rate -- ShishGL opens the button
+            # attacking limps at their first-in rate -- PlayerE opens the button
             # 40% first in and isolates limpers at ~63%.
             iso_f = _freq_n(profile, f"iso:{pos}",
                             _freq(profile, "iso", _freq(profile, f"rfi:{pos}", 0.25)), 12)
