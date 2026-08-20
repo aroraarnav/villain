@@ -63,19 +63,38 @@ from .profile import PROFILE_FEATURES, Profile
 #: archetype: these are exponents in a likelihood, so varying them per
 #: archetype would make the scores incomparable.
 IMPORTANCE = {
-    "vpip": 2.0, "pfr": 1.3, "raise_share": 2.6, "three_bet": 2.2, "fold_to_three_bet": 0.9,
-    # fold_vs_bet:river's 3.4 was flagged as tuned on four players and
-    # deciding 89% of one player's entire margin -- worth re-checking, not
-    # worth trusting on sight. Swept 0.8-3.4 against villain.validate: log
-    # loss improves monotonically up to ~3.0 and is flat within noise from
-    # 2.4 on, accuracy plateaus at its current value from 2.4 on. 3.4 is a
-    # defensible point on that curve, not an outlier to fix.
-    "fold_vs_bet:flop": 1.4, "fold_vs_bet:turn": 1.6, "fold_vs_bet:river": 3.4,
-    "fold_to_cbet:flop": 1.2, "fold_to_cbet:turn": 1.0,
-    "aggression:flop": 1.4, "aggression:turn": 1.4, "aggression:river": 1.2,
-    "cbet:flop": 1.1, "cbet:turn": 1.0, "cbet:river": 0.8,
-    "check_raise:flop": 1.2, "donk:flop": 0.8,
-    "wtsd": 1.5, "wsd": 1.0, "wwsf": 0.8, "limp": 1.2, "bb_defend": 1.0,
+    # The preflop block is one axis measured four ways. `raise_share`, `pfr`
+    # and `limp` all answer "do you enter the pot by raising", and they are
+    # near-collinear on any real pool -- so the old weights (raise_share 2.6,
+    # three_bet 2.2, vpip 2.0, pfr 1.3, limp 1.2 = 9.3) counted that single
+    # question five times. Together with the opportunity gap -- a preflop spot
+    # arrives every hand, a river fold only when the hand gets there, which is
+    # n=1745 against n=263 on a real profile -- preflop decided the archetype
+    # outright: on the worst-diagnosed player in the pool it contributed 108%
+    # of the winning margin, the postflop evidence pointing the other way and
+    # being outvoted. `vpip` keeps its weight because volume is a genuinely
+    # separate axis from initiative; the rest of the block is halved.
+    "vpip": 2.0, "pfr": 0.9, "raise_share": 1.4, "three_bet": 1.2,
+    "fold_to_three_bet": 0.6, "limp": 0.7, "bb_defend": 1.0,
+    # Postflop carries the half of the vocabulary that preflop cannot see --
+    # station, maniac, trapper and the difference between a TAG and a
+    # weak-tight reg are all decided after the flop. These are raised to match
+    # what they are being asked to decide, which is also all that IMPORTANCE
+    # was ever supposed to mean.
+    "aggression:flop": 1.8, "aggression:turn": 1.8, "aggression:river": 1.5,
+    "cbet:flop": 1.3, "cbet:turn": 1.1, "cbet:river": 0.8,
+    "check_raise:flop": 1.6, "donk:flop": 0.8,
+    # fold_vs_bet:river came down from 3.4. That value was swept honestly, but
+    # against the old geometry, where every postflop target sat outside the
+    # range players post and the river fold was one of the few postflop
+    # features still saying anything -- so the sweep was measuring how much to
+    # lean on the last working postflop feature, not how much a river fold is
+    # worth. With the whole block reachable it no longer has to carry the
+    # street on its own, and 3.4 on an n=263 counter is more variance than
+    # signal. Re-swept in the new units; see the note under CONCENTRATION.
+    "fold_vs_bet:flop": 1.6, "fold_vs_bet:turn": 1.8, "fold_vs_bet:river": 1.8,
+    "fold_to_cbet:flop": 1.4, "fold_to_cbet:turn": 1.0,
+    "wtsd": 1.6, "wsd": 1.0, "wwsf": 0.8,
 }
 DEFAULT_IMPORTANCE = 1.0
 
@@ -102,9 +121,20 @@ ARCHETYPES: list[Archetype] = [
         "they have it, and the pots they contest are the ones to keep "
         "small. Your profit here is a lot of tiny uncontested pots, not one "
         "big one.",
-        {"vpip": -2.2, "pfr": -1.8, "raise_share": +0.3, "three_bet": -1.2, "fold_to_three_bet": +1.5,
-         "fold_vs_bet:flop": +1.2, "fold_vs_bet:turn": +1.2, "wtsd": -1.2,
-         "aggression:flop": -1.0, "bb_defend": -1.5},
+        # Tight *and* folding: without the fold family this is only a tighter
+        # TAG, and the two were separated by volume alone. A nit's blind is
+        # the tell -- bb_defend is the lowest claim any prototype makes.
+        # pfr is well below field, not near it. VPIP and PFR are not free of
+        # each other -- raise_share is very nearly their ratio -- and a
+        # prototype that moves one without the other implies a player who
+        # raises more hands than they play. It does so only under the built-in
+        # fallback priors, where the population VPIP is an online 24% against
+        # a home game's 42%, which is exactly the case a prototype has to
+        # survive: it is the state of every database before `villain fit`.
+        {"vpip": -1.5, "pfr": -0.9, "raise_share": +0.2, "three_bet": -0.3,
+         "fold_to_three_bet": +0.8, "limp": -0.9, "bb_defend": -1.3,
+         "fold_to_cbet:flop": +1.0, "fold_vs_bet:flop": +1.0, "fold_vs_bet:turn": +1.2,
+         "wtsd": -1.1, "aggression:flop": -0.6, "check_raise:flop": -0.6},
     ),
     Archetype(
         "station",
@@ -115,18 +145,17 @@ ARCHETYPES: list[Archetype] = [
         "here. The discipline is the other half: never bluff, not on a "
         "scare card and not with a busted draw. Checking back your air is "
         "where most of the edge against them comes from.",
-        # Preflop volume is deliberately mild. "Station" is a *postflop* plan,
-        # and the fold family below is its identity; hanging half the label on
-        # VPIP made this a preflop-looseness detector that threw out every
-        # tight player who will not fold after the flop -- which is most of
-        # them. Loose entry belongs to "loose passive" and "limper". Note the
-        # asymmetry: *passivity* (low PFR given entry) stays a full part of the
-        # identity, because that is the plan -- it is only the volume that was
-        # borrowed from a different bucket.
-        {"vpip": +0.7, "pfr": -1.2, "raise_share": -1.2, "three_bet": -1.0,
-         "fold_to_cbet:flop": -2.0, "fold_vs_bet:flop": -2.0, "fold_vs_bet:turn": -2.2,
-         "fold_vs_bet:river": -1.8, "wtsd": +1.6, "wsd": -0.8,
-         "aggression:flop": -1.4, "aggression:turn": -1.5},
+        # The fold family *is* the identity, and it is what "station" has to
+        # mean if the word is to keep any content: loose entry alone belongs
+        # to "loose passive". Preflop volume is present but deliberately
+        # secondary -- hanging half the label on VPIP made this a preflop-
+        # looseness detector that threw out every tight player who will not
+        # fold after the flop.
+        {"vpip": +0.3, "pfr": -0.4, "raise_share": -0.6, "three_bet": -0.4, "limp": +0.4,
+         "fold_to_cbet:flop": -1.4, "fold_vs_bet:flop": -1.4,
+         "fold_vs_bet:turn": -1.5, "fold_vs_bet:river": -1.3,
+         "wtsd": +1.1, "wsd": -0.8,
+         "aggression:flop": -0.8, "aggression:turn": -0.9},
     ),
     Archetype(
         "overfolder",
@@ -138,9 +167,14 @@ ARCHETYPES: list[Archetype] = [
         "they do anything other than fold. Their raises and their multi-"
         "street calls are genuine, because everything weak left the hand "
         "already.",
-        {"raise_share": +0.1, "vpip": +0.3, "fold_to_cbet:flop": +1.3, "fold_to_cbet:turn": +1.4,
-         "fold_vs_bet:flop": +1.3, "fold_vs_bet:turn": +1.5, "fold_vs_bet:river": +1.3,
-         "wtsd": -1.3, "check_raise:flop": -0.8, "wwsf": -0.8},
+        # Same fold axis as nit, opposite end of the volume axis: a nit never
+        # entered the pot, an overfolder entered and then could not continue.
+        # Without the vpip split the two prototypes are the same claim twice.
+        {"vpip": +0.3, "pfr": 0.0, "raise_share": 0.0, "three_bet": -0.2, "limp": 0.0,
+         "fold_to_cbet:flop": +1.2, "fold_to_cbet:turn": +1.2,
+         "fold_vs_bet:flop": +1.2, "fold_vs_bet:turn": +1.3, "fold_vs_bet:river": +1.1,
+         "wtsd": -1.0, "check_raise:flop": -0.7, "wwsf": -1.0,
+         "aggression:flop": -0.6},
     ),
     Archetype(
         "maniac",
@@ -151,15 +185,24 @@ ARCHETYPES: list[Archetype] = [
         "strong hands so they keep firing into them. Never bluff and never "
         "raise as a bluff: that is the one part of their game already "
         "working. Expect variance; the money arrives in lumps.",
-        # maniac used to differ from lag only in degree -- same shape, turned
-        # up -- which put them 1.9 nats apart and made maniac the thing lag
-        # collapses into once the volume numbers run hot. The kind of
-        # difference is whether the aggression works: lag's wwsf is positive,
-        # so give maniac the mirror image. They get to showdown more (wtsd)
-        # and win it less (wsd) -- the same shove, aimed worse.
-        {"raise_share": +0.5, "vpip": +1.6, "pfr": +1.8, "three_bet": +1.8, "cbet:flop": +1.3,
-         "cbet:turn": +1.3, "aggression:flop": +1.7, "aggression:turn": +1.7,
-         "aggression:river": +1.5, "wtsd": +0.4, "wwsf": -0.6, "wsd": -0.7},
+        # Every aggression axis at once, and every value sits near the top of
+        # what this pool actually posts rather than past it -- which is the
+        # whole reason this prototype was nobody's label for three sessions.
+        # It differs from lag in degree on aggression and in kind on the
+        # blind: a maniac defends everything (bb_defend) and folds to nothing
+        # (fold_to_three_bet), where a lag is selective about both.
+        {"vpip": +1.0, "pfr": +1.4, "raise_share": +1.1, "three_bet": +1.6,
+         "limp": -1.0, "bb_defend": +1.1, "fold_to_three_bet": -1.0,
+         "cbet:flop": +0.8, "cbet:turn": +1.2,
+         "aggression:flop": +1.2, "aggression:turn": +1.4, "aggression:river": +1.3,
+         "check_raise:flop": +1.2,
+         # The money leak, and the half of the archetype that "relentless
+         # aggression" alone does not capture: a maniac cannot fold either.
+         # Without it the prototype is only an intensified LAG and nothing
+         # prices against it -- a synthetic player built from this vector
+         # tripped no exploit rule at all, which is not what the word means.
+         "fold_vs_bet:flop": -1.0, "fold_vs_bet:turn": -1.1, "fold_to_cbet:flop": -1.0,
+         "wtsd": +0.4, "wwsf": -0.3, "wsd": -0.4},
     ),
     Archetype(
         "lag",
@@ -171,48 +214,58 @@ ARCHETYPES: list[Archetype] = [
         "bluffing war on the later streets; they are competent, and that "
         "part of their game works. Position matters more here than against "
         "anyone else.",
-        # Identity on the axes a LAG actually shows: they enter raising, three-bet
-        # hard and never limp. Softening the postflop demands made this the
-        # smallest prototype in the table (L1 6.1) and therefore the new magnet
-        # for every average player -- the same failure TAG had.
-        {"raise_share": +0.5, "vpip": +0.9, "pfr": +1.5, "three_bet": +1.6,
-         "limp": -1.2, "fold_to_three_bet": -0.6, "cbet:flop": +0.45,
-         "aggression:flop": +0.6, "aggression:turn": +0.55, "wwsf": +0.5,
-         "fold_vs_bet:turn": -0.3},
+        # Aggression that works, which is the only thing separating this from
+        # maniac: positive wwsf against maniac's negative, and continuing
+        # rather than folding when the aggression is turned back on them.
+        # vpip is +0.1, not the +0.9 the name suggests, and that is a finding
+        # rather than a compromise: the aggressive players in a home game pool
+        # are not the wide ones. Measured, the pool's most aggressive regulars
+        # run at or slightly below field VPIP and put their volume into raises
+        # and later-street bets instead. Authoring the caricature -- loose
+        # *and* aggressive -- made this prototype win on preflop volume
+        # against TAG's tightness, which handed it 17 of 54 players on an axis
+        # that has nothing to do with what "LAG" is supposed to mean.
+        {"vpip": +0.1, "pfr": +0.4, "raise_share": +0.5, "three_bet": +0.6,
+         "limp": -0.9, "fold_to_three_bet": -0.4,
+         "cbet:flop": +0.5, "cbet:turn": +0.8,
+         "aggression:flop": +1.1, "aggression:turn": +1.2, "aggression:river": +1.1,
+         "check_raise:flop": +1.0,
+         "fold_vs_bet:turn": -0.8, "fold_vs_bet:river": -0.7, "wwsf": +0.9},
     ),
     Archetype(
         "tag",
-        "Solid home-game reg: field-sized volume, raises when in, no cheap "
-        "limp-call leaks.",
+        "Solid home-game reg: tight, enters raising, keeps betting after the flop.",
         "There is no cheap edge here, so stop looking for one -- the "
         "mistake against a solid player is inventing a read and over-"
         "adjusting to it. Play a straightforward positional game, keep pots "
         "small out of position, and take thin value where it exists. If "
         "there is a weaker player at the table, your attention belongs on "
         "them; against this one, breaking even is a fine result.",
-        # Near-field volume, but a real identity rather than a near-copy of the
-        # population: this prototype used to sit ~8x closer to the field than
-        # any other, which made it the bucket every ambiguous player fell into.
-        # The identity is discipline -- enters raising, never limps, never
-        # donks -- not raw aggression frequency, which a tight winner reads
-        # *below* field on. It says nothing at all about fold frequency: that
-        # axis is "station"'s identity, and a TAG may be sticky or not without
-        # leaving the bucket.
-        # The fold signal is here, and it points the *other way* from the
-        # attempt that was reverted last session. That one gave TAG a positive
-        # fold deviation -- folds more than the field -- and it pushed real
-        # TAGs into tight passive. Measured against four players with known
-        # labels, a TAG folds rivers *less* than the field and plays tighter:
-        # they get to the river with hands worth calling, so they are not the
-        # ones surrendering to the last bet.
-        {"vpip": -0.9, "pfr": +0.2, "raise_share": +0.70, "three_bet": +0.35,
-         "limp": -1.0, "donk:flop": -0.6, "fold_to_three_bet": -0.3,
-         "cbet:flop": +0.3, "fold_vs_bet:river": -1.3,
-         "check_raise:flop": +0.6, "wsd": +0.3, "wtsd": -0.2},
+        # This prototype's problem has always been that it makes the fewest
+        # claims, so every player the other nine reject lands here by default
+        # -- 41% of a 58-player pool at the last count. The fix is not to move
+        # it further from the field for its own sake; it is to name the axis
+        # it was silent on. A TAG keeps the initiative *after* the flop, and
+        # that is exactly where the tight players who are not TAGs give up:
+        # measured against known labels, the weak-tight regs sit a full spread
+        # below on turn and river aggression while their preflop numbers are
+        # indistinguishable. Stating aggression ~ field is a real prediction
+        # and the one that finally separates them; see "tight passive".
+        # cbet:flop is *negative* and that is not a typo. The tempting shape --
+        # solid player, so bet more -- is contradicted by every known-good
+        # player in the pool: they all continuation-bet the flop below field
+        # and keep firing on the turn, which is the modern pattern of checking
+        # back a wide range in position. Authoring the obvious sign here would
+        # have put the TAGs' own numbers on the wrong side of their own label.
+        {"vpip": -1.1, "pfr": +0.1, "raise_share": +1.0, "three_bet": +0.3,
+         "limp": -1.0, "donk:flop": -0.8, "fold_to_three_bet": +0.3,
+         "cbet:flop": -0.4, "cbet:turn": +0.4,
+         "aggression:flop": 0.0, "aggression:turn": +0.1, "aggression:river": +0.2,
+         "check_raise:flop": +0.4, "wtsd": -0.2, "wsd": +0.5, "wwsf": +0.5},
     ),
     Archetype(
         "tight passive",
-        "Below-field volume and timid after the flop -- weak-tight, not a TAG.",
+        "Opens like a reg and gives up after the flop -- not a TAG.",
         "Open wider into their blinds and keep betting when they check; they "
         "are folding more than the pot odds ask for and rarely put you in "
         "hard spots themselves. Do not pay off their rare raises -- those "
@@ -220,10 +273,37 @@ ARCHETYPES: list[Archetype] = [
         "than against a station because they will get away from weak pairs, "
         "so prefer bluffs and small-stab continuation bets over three-street "
         "value with mediocre holdings.",
-        {"raise_share": -1.3, "vpip": -1.0, "pfr": -1.0, "three_bet": -0.8, "fold_to_three_bet": +0.6,
-         "fold_vs_bet:flop": +0.6, "fold_vs_bet:turn": +0.5, "cbet:flop": -0.8,
-         "aggression:flop": -1.1, "aggression:turn": -1.1, "wtsd": +0.5,
-         "check_raise:flop": -0.6},
+        # This prototype used to demand a low raise_share and a low PFR, which
+        # made it a second "limper" -- and it left nowhere at all for the
+        # commonest weak player in a home game: someone who opens raising like
+        # a reg, tight, and then checks the turn back and calls a bet. Those
+        # players read TAG at 95% confidence, because TAG owned the only
+        # "tight and enters raising" corner the vocabulary had.
+        #
+        # So the preflop block here is now a deliberate *copy* of TAG's, and
+        # the copying is the mechanism, not an oversight. Leaving it silent
+        # was tried first and does not work: silence is a prediction of the
+        # field, and on `limp` the field mean is a number almost nobody in a
+        # home game posts -- most players never limp at all, a handful limp a
+        # third of their hands, and the mean sits in the empty middle. A
+        # prototype that declines to mention it is therefore not neutral, it
+        # is wrong, and at n≈2900 it loses 2 nats for the privilege. Matching
+        # TAG preflop makes the whole block cancel between the two, which is
+        # what forces the label to be decided where the difference actually
+        # is: the later streets. Capping the opportunity count was tried as
+        # the alternative and does nothing -- see EVIDENCE_CAP.
+        # The preflop half is character-for-character TAG's. Anything less than
+        # an exact copy leaves a residue on the highest-opportunity features in
+        # the tool, and that residue decides the label: a 0.2-spread difference
+        # on `raise_share` at n=1745 outweighs the entire three-street
+        # aggression gap this prototype exists to detect.
+        {"vpip": -1.1, "pfr": +0.1, "raise_share": +1.0, "three_bet": +0.3,
+         "limp": -1.0, "donk:flop": -0.8, "fold_to_three_bet": +0.3,
+         "cbet:flop": -1.0, "cbet:turn": -0.5,
+         "aggression:flop": -0.7, "aggression:turn": -0.9, "aggression:river": -0.9,
+         "check_raise:flop": -0.7,
+         "fold_vs_bet:turn": +0.2,
+         "wtsd": +0.7, "wsd": -0.2, "wwsf": -0.5},
     ),
     Archetype(
         "loose passive",
@@ -234,11 +314,13 @@ ARCHETYPES: list[Archetype] = [
         "too often for pure air to print -- but do not turn into a station "
         "yourself: when they finally raise, give them credit. The edge is "
         "volume of small-to-medium value pots, not one heroic bluff.",
-        # Elevated VPIP is the gate. Limp is optional — many fish just flat.
-        {"raise_share": -1.4, "vpip": +1.7, "pfr": +0.35, "three_bet": -1.0, "limp": 0.0,
-         "fold_to_cbet:flop": -0.5, "fold_vs_bet:flop": -0.4, "fold_vs_bet:turn": -0.3,
-         "aggression:flop": -0.9, "aggression:turn": -0.9, "cbet:flop": -0.3,
-         "wtsd": +0.8, "wsd": -0.3},
+        # Elevated VPIP is the gate, and the fold family is deliberately
+        # milder than station's: this is the bucket for loose-and-passive,
+        # while refusing to fold at all is what earns the other name.
+        {"vpip": +1.5, "pfr": -0.2, "raise_share": -0.4, "three_bet": -0.4, "limp": +0.3,
+         "fold_to_cbet:flop": -0.5, "fold_vs_bet:flop": -0.5, "fold_vs_bet:turn": -0.4,
+         "aggression:flop": -0.8, "aggression:turn": -0.8, "cbet:flop": -0.4,
+         "wtsd": +0.7, "wsd": -0.5, "wwsf": -0.5},
     ),
     Archetype(
         "limper",
@@ -249,8 +331,15 @@ ARCHETYPES: list[Archetype] = [
         "cheap flops, so they miss constantly and give up when they do. "
         "Slow down when they call the flop -- that call means something "
         "real -- and fold to their raises without hesitation.",
-        {"raise_share": -1.9, "vpip": +0.8, "pfr": -1.8, "limp": +2.5, "three_bet": -1.2,
-         "fold_to_cbet:flop": +0.8, "aggression:flop": -1.2},
+        # The limp demand is +0.9 rather than the old +2.5 because the unit
+        # changed under it: limp's fitted spread is 1.60 against the assumed
+        # 1.00, so +2.5 was asking for a frequency past anything in the pool
+        # while *also* being the cheapest claim in the table to half-satisfy.
+        # This bucket held 22% of the pool. +0.9 is the top of what players
+        # here actually post.
+        {"raise_share": -1.1, "vpip": +0.2, "pfr": -1.0, "limp": +0.7, "three_bet": -0.9,
+         "fold_to_cbet:flop": +0.7, "fold_vs_bet:flop": +0.6,
+         "aggression:flop": -0.9, "cbet:flop": -0.3, "wwsf": -0.7},
     ),
     Archetype(
         "trapper",
@@ -261,10 +350,30 @@ ARCHETYPES: list[Archetype] = [
         "marginal holdings and treat every check-raise as the real thing -- "
         "they do not have a bluffing range there. The edge comes from not "
         "paying them off in the big pots they engineer.",
-        {"raise_share": -0.5, "vpip": -0.8, "pfr": -0.6, "check_raise:flop": +2.2, "donk:flop": -0.5,
-         "cbet:flop": -1.4, "aggression:flop": -0.9, "wtsd": +0.6, "wsd": +1.0},
+        # The check-raise is the identity and wsd is the confirmation: a
+        # trapper wins what they take to showdown, which is what separates
+        # the slow-play from the tight passive player who simply cannot bet.
+        #
+        # The preflop block is TAG's, and so is "tight passive"'s: those three
+        # share one preflop signature and are separated entirely by what
+        # happens after the flop -- TAG keeps betting, tight passive gives up,
+        # a trapper gives up *betting* and raises instead. That is the only
+        # arrangement in which the check-raise gets to decide anything.
+        #
+        # Leaving preflop near-neutral was tried and is worse than either
+        # extreme. This prototype then took 11% of a pool in which *every
+        # single* player it claimed check-raised the flop **less** than the
+        # field -- because near-neutral is what the average player posts, so
+        # the bucket was being won on the claims that are not its identity
+        # while the claim that is its identity argued against it.
+        {"vpip": -1.0, "pfr": +0.1, "raise_share": +0.9, "three_bet": +0.2, "limp": -1.0,
+         "check_raise:flop": +1.1, "donk:flop": -0.6,
+         "cbet:flop": -1.2, "cbet:turn": -1.0,
+         "aggression:flop": -0.8, "aggression:turn": -0.5,
+         "wtsd": +0.5, "wsd": +0.8},
     ),
 ]
+
 
 ARCHETYPE_BY_NAME = {a.name: a for a in ARCHETYPES}
 
@@ -301,9 +410,29 @@ DISCIPLINE_WEIGHT = 0.2
 
 #: Beta-Binomial concentration. Low values mean an archetype tolerates a wide
 #: band of frequencies; high values demand players hit the prototype exactly.
-#: At 22 the implied tolerance was ~0.95 population spreads -- half of an
-#: entire prototype signature -- which cost only the archetypes whose identity
-#: *is* being far from the mean, and left the near-field ones untouched.
+#: An archetype is a *region* of strategy space, not a point, and a station who
+#: folds to 26% of turn bets rather than the prototype's 22% is still a
+#: station. At 40 the implied tolerance is roughly one population spread.
+#:
+#: Making that tolerance *per feature* was tried after the spread was fitted,
+#: and it does not pay -- recorded here because the argument for it is good
+#: enough that somebody will try it again. A flat concentration is a fixed
+#: tolerance in frequency points, which is a different region per feature once
+#: the spreads are fitted from a real pool: five points is 0.3 spreads on
+#: `limp` and 1.9 spreads on `fold_vs_bet:turn`. Setting concentration to
+#: 1/(k*spread)^2/(p(1-p)) - 1 makes the tolerance one thing everywhere, which
+#: is what the docstring above claims it already is.
+#:
+#: What that misses is that the narrowest-spread features are also the ones
+#: closest to being results rather than style -- `wwsf` and `wsd` -- and it
+#: hands them concentrations of 180 and 100 against 5 for `raise_share`. Held
+#: out, the substitution is a clear regression (predictive loss 0.55366 ->
+#: 0.55563, back to the pre-recalibration baseline, and halves-agree 0.522 ->
+#: 0.442). Clamping the range recovers most of it but never beats flat: the
+#: best clamp measured, [20, 45], is 0.55391, and it is only better than the
+#: wider clamps because it is nearly flat already. Making this work would need
+#: the importances re-derived alongside it, which is a larger change than the
+#: evidence supports.
 CONCENTRATION = 40.0
 
 #: Features are correlated (VPIP with PFR, every fold stat with every other),
@@ -322,14 +451,41 @@ CONCENTRATION = 40.0
 #: much confidence. Against disjoint halves of real players, 0.55 produced a
 #: calibration error of 0.275 and nine players at 1.00; 0.20 gives 0.092 and
 #: none, at no cost in accuracy.
-CORRELATION_DISCOUNT = 0.20
+#:
+#: Re-swept after the spread was fitted, because this constant trades against
+#: the width of the unit the prototypes are written in and that width changed
+#: by up to 2x per feature. 0.14 / 0.20 / 0.28 / 0.38 / 0.50 against held-out
+#: predictive loss: 0.55457 / 0.55394 / 0.55372 / 0.55375 / 0.55387, flat from
+#: 0.28 on and clearly worse below 0.20. 0.28 is also where calibration error
+#: bottoms out (0.008) and top-1 accuracy peaks (0.469), so all three agree on
+#: it. The eigenvalue argument above still gives 0.221 -- the extra room comes
+#: from the prototypes no longer duplicating each other's claims across
+#: independent axes, which is a real reduction in double counting.
+CORRELATION_DISCOUNT = 0.28
 
 #: How common each archetype is in the wild -- the prior the likelihood updates.
 #: With no hands on a player, this is the answer.
+#:
+#: Close to flat, and deliberately flatter than the online-pool numbers it used
+#: to hold. A prior is not free: it is added to every posterior, so a 2.5x gap
+#: between two archetypes is 0.9 nats of permanent tilt, and on a real pool the
+#: entire likelihood margin separating the most aggressive player in the
+#: database from `lag` was 0.6 nats. The old mix had `maniac` at 0.04 against
+#: `lag` at 0.10 and `nit` at 0.08 against `tag` at 0.16, so those buckets were
+#: losing every close call before a single hand was counted -- which is a large
+#: part of why they were never anybody's label.
+#:
+#: The numbers that produced those gaps described an online pool. A home game
+#: is not one: it is looser and more aggressive, and there is no reason to
+#: believe a maniac here is half as likely as a LAG. Where the honest answer is
+#: "we do not know the mix of this particular game", a near-flat prior says so,
+#: and lets the hands decide -- which is the whole point of the tool. The
+#: residual ordering is only the little that is safe to assume anywhere: the
+#: passive buckets are a touch commoner than the specialists.
 POPULATION_MIX = {
-    "tag": 0.16, "loose passive": 0.16, "station": 0.12, "overfolder": 0.11,
-    "tight passive": 0.10, "lag": 0.10, "limper": 0.09, "nit": 0.08,
-    "maniac": 0.04, "trapper": 0.04,
+    "tag": 0.12, "lag": 0.12, "loose passive": 0.12, "limper": 0.11,
+    "station": 0.10, "tight passive": 0.10, "overfolder": 0.09,
+    "maniac": 0.08, "nit": 0.08, "trapper": 0.08,
 }
 
 
