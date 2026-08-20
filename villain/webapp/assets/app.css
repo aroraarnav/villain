@@ -67,6 +67,11 @@
   }
   nav button:hover { color: var(--ink); }
   nav button.on { color: var(--ink); border-bottom-color: var(--red); font-weight: 600; }
+  /* A tab with nothing to show yet. Dimmed rather than hidden: what the tool
+     can eventually do is worth knowing about, and the title says what it is
+     waiting for. */
+  nav button.off { color: var(--muted); opacity: .42; cursor: not-allowed; }
+  nav button.off:hover { color: var(--muted); }
   /* Hero is you. The tool is otherwise about the villain across the table, so
      anything that reads your own play -- the Hero tab, and the against-you
      panel that exists only because the export knows which seat is yours --
@@ -435,11 +440,84 @@
     border-top: 1px solid var(--line);
   }
   .q.group .member:first-child { border-top: 0; }
+  /* One column per person, accounts sorted between them. Columns rather than
+     a list of pickers: the question is which of these are the same, and a
+     column answers it at a glance. Every control that was inside a row is
+     gone -- a card is dragged, or tapped and dropped, and nothing else. */
+  .q.group .people {
+    display: grid; gap: 10px; margin: 12px 0 2px;
+    grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
+    align-items: start;
+  }
+  .q.group .person {
+    border: 1px solid var(--line); border-radius: 10px; padding: 10px;
+    background: var(--panel); transition: border-color .12s ease, background .12s ease;
+  }
+  .q.group .person-head {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--muted); font-weight: 600; margin-bottom: 8px;
+  }
+  .q.group .person .member {
+    display: block; padding: 8px 10px; margin-bottom: 6px; cursor: grab;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--bg);
+    border-top: 1px solid var(--line);
+  }
+  .q.group .person .member:last-of-type { margin-bottom: 0; }
+  .q.group .person .member b { display: block; font-size: 13.5px; }
+  .q.group .person .member:hover { border-color: var(--edge); }
+  .q.group .person .member.dragging { opacity: .35; cursor: grabbing; }
+  /* Picked up by tap: it is waiting for a column, and says so by standing out
+     rather than by a message somewhere else on the page. */
+  .q.group .person .member.picked {
+    border-color: var(--red); box-shadow: 0 0 0 1px var(--red) inset;
+  }
+  .q.group .person.over { border-color: var(--red); background: var(--accent-soft); }
+  .q.group .person.spare {
+    border-style: dashed; display: flex; flex-direction: column;
+    justify-content: center; align-items: center; min-height: 88px; text-align: center;
+  }
+  .q.group select.keepname { font-size: 12px; padding: 3px 6px; width: 100%; margin-top: 8px; }
+  .q.group .partition-note { margin-top: 8px; min-height: 1.2em; }
   /* A merged suggestion is finished business: it dims and leaves. */
   .leak.merged { opacity: 0; transition: opacity .35s ease; }
   @media (prefers-reduced-motion: reduce) { .leak.merged { transition: none; } }
+  /* A tab that is still assembling itself. Same spinner as everywhere else,
+     inline rather than over a veil: switching tabs is not modal, and a veil
+     for something that usually takes a moment would flash. */
+  .panel.loading {
+    display: flex; align-items: center; gap: 12px;
+    color: var(--muted); font-size: 13.5px;
+  }
   .veil.busy { cursor: progress; }
   .busy-sheet { display: flex; gap: 14px; align-items: center; max-width: 420px; }
+  .busy-body { min-width: 15rem; }
+  /* Shown only for work whose size is known. Anything else keeps the spinner
+     alone rather than a bar that would have to lie about how far along it is. */
+  .busy-bar {
+    display: none; height: 4px; margin-top: 9px; border-radius: 999px;
+    background: var(--line); overflow: hidden;
+  }
+  .busy-bar.on { display: block; }
+  .busy-bar > i {
+    display: block; height: 100%; width: 0; background: var(--red);
+    transition: width .18s linear;
+  }
+  /* Work whose size cannot be known: one call into Python that returns when it
+     returns. A short piece travelling across the track, never a full one --
+     a filled bar means finished, and saying "finished" for something still
+     running is worse than admitting the length is unknown. */
+  .busy-bar.unmeasured > i {
+    width: 32%; transition: none;
+    animation: busy-travel 1.15s ease-in-out infinite;
+  }
+  @keyframes busy-travel {
+    0%   { transform: translateX(-105%); }
+    100% { transform: translateX(320%); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .busy-bar.unmeasured > i { animation-duration: 3.2s; }
+  }
   .spinner {
     width: 20px; height: 20px; flex: none; border-radius: 50%;
     border: 2px solid var(--line); border-top-color: var(--red);

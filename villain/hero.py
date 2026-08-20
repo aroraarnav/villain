@@ -79,7 +79,8 @@ POSITION_ORDER = {p: i for i, p in enumerate(
     ["UTG", "UTG1", "UTG2", "MP", "MP1", "MP2", "LJ", "HJ", "CO", "BTN", "SB", "BB"])}
 
 
-def find_hero(store, min_hands: int = MIN_HERO_HANDS) -> int | None:
+def find_hero(store, min_hands: int = MIN_HERO_HANDS, progress=None,
+              hands=None) -> int | None:
     """Which internal player id is hero, judged by whose cards are visible
     almost regardless of outcome rather than almost only at showdown.
 
@@ -89,7 +90,14 @@ def find_hero(store, min_hands: int = MIN_HERO_HANDS) -> int | None:
     """
     seen: dict[int, int] = {}
     total: dict[int, int] = {}
-    for hand in store.player_hands():
+    # `hands` lets a caller that has already loaded them hand them over. A cold
+    # Hero build needs the same list twice -- once to work out whose seat is
+    # whose, once to fit the model -- and loading it twice meant decompressing
+    # and parsing the whole database twice for one page.
+    #
+    # Counted when it does load: on a cold build this is the first thing that
+    # happens, so it is the first thing anybody waiting is waiting for.
+    for hand in (hands if hands is not None else store.player_hands(progress=progress)):
         for seat in hand.seats:
             try:
                 pid = int(seat.player_id)
@@ -306,10 +314,22 @@ def combined_grid(ranges: dict[str, PositionRange]) -> dict[str, tuple[int, int]
 # textbook assumption.
 
 
-def fit_population_model(store) -> StrengthModel:
+def fit_population_model(store, progress=None, hands=None) -> StrengthModel:
     """The same population hand-strength model :mod:`villain.reads` fits,
-    for grading hero's folds against what the bet actually represents."""
-    return fit_strength(build_dataset(store.player_hands()))
+    for grading hero's folds against what the bet actually represents.
+
+    ``progress(done, total, phase)`` is passed through so a caller with a
+    progress bar has something true to put in it. The walk over hands can be
+    counted; fitting the trees cannot, and says so by reporting no total.
+    """
+    if hands is None:
+        loading = (lambda done, total: progress(done, total, "loading")) if progress else None
+        hands = store.player_hands(progress=loading)
+    step = (lambda done, total: progress(done, total, "reading")) if progress else None
+    rows = build_dataset(hands, progress=step)
+    if progress:
+        progress(0, 0, "fitting")
+    return fit_strength(rows)
 
 
 @dataclass

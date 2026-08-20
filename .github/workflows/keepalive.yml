@@ -1,0 +1,49 @@
+# A free Supabase project pauses after a week with no traffic, and a paused
+# project means nobody can sign in. One request a week prevents that.
+#
+# The URL and anon key are not secrets -- they already ship in web/config.js and
+# are served to every visitor -- so they are written here plainly rather than
+# through Actions secrets, which would only imply a confidentiality that does
+# not exist.
+#
+# One thing to know: GitHub disables scheduled workflows in a repository with no
+# activity for 60 days. If this repo goes quiet for that long the ping stops and
+# the project will eventually pause; re-enable it from the Actions tab, or press
+# "Run workflow" here, and resume the project from the Supabase dashboard.
+
+name: keep supabase awake
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"      # 06:00 UTC every Monday
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Touch auth and the database
+        env:
+          URL: https://tvfccruvwgnwbhcsacft.supabase.co
+          ANON: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR2ZmNjcnV2d2dud2JoY3NhY2Z0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcyNDEzNzgsImV4cCI6MjEwMjgxNzM3OH0.F1as1-fOfjrvAxEbExiZBiMfd96arid0FG11zMzfG2k
+        run: |
+          set -euo pipefail
+          # Auth alone may not register as *database* activity, so the storage
+          # call matters more: listing a bucket makes Postgres evaluate the
+          # row-level policy, which is a real query against the database.
+          # PostgREST is deliberately not pinged -- the anon role has no grants,
+          # so /rest/v1/ answers 401 and proves nothing.
+          auth=$(curl -sS -o /dev/null -w '%{http_code}' \
+            "$URL/auth/v1/health" -H "apikey: $ANON")
+          storage=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -X POST "$URL/storage/v1/object/list/dbs" \
+            -H "apikey: $ANON" -H "Authorization: Bearer $ANON" \
+            -H "Content-Type: application/json" --data '{"prefix":"","limit":1}')
+          echo "auth: $auth  storage: $storage"
+          # Fail loudly rather than "succeeding" every week while the project
+          # quietly sleeps, which is the only way this job can be worse than
+          # not existing.
+          test "$auth" = "200" && test "$storage" = "200"

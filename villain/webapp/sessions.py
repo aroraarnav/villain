@@ -145,6 +145,80 @@ def session_identity_labels(session: dict) -> dict[str, dict]:
     return by_keep
 
 
+def _conflicting_pairs(session: dict) -> list[list[str]]:
+    """Accounts in this batch that provably are not the same person.
+
+    Two accounts dealt into the same hand more than a glitch's worth of times
+    are two people, and `Store.link` refuses to merge them. The dialog needs to
+    know: it can then show a whole knot of similar names together -- which is
+    the only way to make sense of one -- while keeping the pairs that cannot
+    merge in separate columns and saying why, instead of accepting the drop and
+    failing afterwards.
+
+    Only pairs among accounts the dialog is about, which is a handful.
+    """
+    from ..db import SPURIOUS_OVERLAP
+    from ..identity import _incoming_co_occurrence
+
+    questions = session.get("questions") or []
+    interesting = set()
+    for q in questions:
+        for side in (q.left, q.right):
+            if side and side.get("account"):
+                interesting.add((side.get("site") or "pokernow", side["account"]))
+    if len(interesting) < 2:
+        return []
+
+    overlaps = _incoming_co_occurrence(session.get("hands") or [])
+    out = []
+    for key, count in overlaps.items():
+        if count <= SPURIOUS_OVERLAP:
+            continue
+        pair = [k for k in key if k in interesting]
+        if len(pair) == 2:
+            out.append([f"ac{pair[0][1]}", f"ac{pair[1][1]}"])
+    return out
+
+
+def session_brief(token: str) -> dict:
+    """What an upload needs to know, without profiling anything.
+
+    :func:`session_payload` builds the whole preview -- every statistic for
+    every hand in the session, all-in equities included -- because the session
+    *view* shows profiles before you save. An import does not: it needs the
+    token, the counts, and the identity questions, and then it commits, which
+    computes all of that again from the stored hands.
+
+    On a small session the duplicate pass costs nothing worth naming. On a
+    71,000-hand import it was eighty seconds of native CPU, and the browser is
+    an order of magnitude slower than that -- a quarter of an hour of work
+    thrown away, under a progress message that said "matching players".
+    """
+    session = SESSIONS[token]
+    return {
+        "token": token,
+        "files": session["files"],
+        "hands": len(session["hands"]),
+        "saved": session.get("saved", False),
+        "questions": [question_payload(q) for q in askable_questions(
+            session.get("questions") or [])],
+        # Pairs already settled as the same person. Not asked about, but sent
+        # anyway: they are the edges that join two clusters of accounts, and
+        # without them the dialog showed "tin/tintin" and "Tins white gf/Tin"
+        # as two unrelated questions when the four are one knot.
+        "linked": [question_payload(q) for q in (session.get("questions") or [])
+                   if q.auto],
+        # Pairs that can never be one person, so the dialog can keep them apart
+        # rather than accepting a merge the database will refuse.
+        "conflicts": _conflicting_pairs(session),
+        "answered": bool(set(session.get("answers") or {})
+                         - {q.id for q in (session.get("questions") or []) if q.auto}),
+        "auto_merged": len(auto_answers(session.get("questions") or [])),
+        "merges": [{"from": k[1], "to": v["name"]}
+                   for k, v in (session.get("merges") or {}).items()],
+    }
+
+
 def session_payload(token: str, store: Store | None = None) -> dict:
     """Profiles for an uploaded session. Reads the store, never writes to it."""
     from ..hero import hero_of
@@ -250,6 +324,15 @@ def session_payload(token: str, store: Store | None = None) -> dict:
         "saved": session.get("saved", False),
         "questions": [question_payload(q) for q in askable_questions(
             session.get("questions") or [])],
+        # Pairs already settled as the same person. Not asked about, but sent
+        # anyway: they are the edges that join two clusters of accounts, and
+        # without them the dialog showed "tin/tintin" and "Tins white gf/Tin"
+        # as two unrelated questions when the four are one knot.
+        "linked": [question_payload(q) for q in (session.get("questions") or [])
+                   if q.auto],
+        # Pairs that can never be one person, so the dialog can keep them apart
+        # rather than accepting a merge the database will refuse.
+        "conflicts": _conflicting_pairs(session),
         # Whether a *person* has answered, not whether the session carries
         # answers at all. Auto-applied merges live in the same dict, so the
         # plain truthiness test made every upload look already-answered the

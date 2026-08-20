@@ -504,9 +504,19 @@ def session_questions(store, hands, min_name_score: float = HIGH_NAME_SCORE) -> 
         confidence, _ = _combine(score, log_bf)
         reason = _name_match_reason(
             matched_a or left["name"], matched_b or right["name"], score)
+        if overlap > SPURIOUS_OVERLAP:
+            # Not asked at all. Above this many shared hands the two are
+            # provably different people, and `Store.link` refuses the merge --
+            # so asking produced a question whose "yes" could never be carried
+            # out, and the import ended with a red error explaining why the
+            # answer had been thrown away. Say nothing rather than offer a
+            # choice that does not exist.
+            return
         if overlap:
-            # State it rather than hiding it: the user is being asked to
-            # overrule the strongest signal the tool has.
+            # A handful of shared hands is a site glitch rather than evidence,
+            # and the merge is still allowed -- so this one is asked, with the
+            # overlap stated, because the reader is being invited to overrule
+            # the strongest signal the tool has.
             reason += (f" \u2014 but seated together in {overlap} hand"
                        f"{'s' if overlap > 1 else ''}")
             confidence *= 0.5

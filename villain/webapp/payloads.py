@@ -201,3 +201,54 @@ def roster_payload(store: Store) -> list[dict]:
 # A session is deliberately not written anywhere. You can drop a file in, read
 # the table, and close the tab without the database gaining a single hand.
 
+
+
+# ---------------------------------------------------------------------------
+# which tabs can be opened yet
+# ---------------------------------------------------------------------------
+
+#: A player needs this many hands before the simulator can act from a measured
+#: profile rather than from the prior alone -- below it, every villain plays the
+#: population average and the practice is against nobody in particular.
+MIN_SIM_HANDS = MIN_ROSTER_HANDS
+
+
+def tab_availability(store: Store) -> dict[str, dict]:
+    """Which tabs have something to show, and why not when they do not.
+
+    A tab that opens onto an explanation of its own emptiness is worse than one
+    that is visibly not ready: the reader has to click it to find out, and then
+    click back. The reason travels with the answer so the interface can say why
+    on hover instead of spending a navigation on it.
+
+    Reasons name the fix, not the deficiency -- "import an export you played
+    in" rather than "no hero found" -- because every one of these is reached by
+    someone who has just arrived and has no idea what the tool wanted.
+    """
+    # Local, not top-level: heroview imports this module, so importing it back
+    # at module scope is a cycle.
+    from .heroview import _cached_hero_id
+
+    hands = store.conn.execute("SELECT COUNT(*) c FROM hands").fetchone()["c"]
+    profiled = sum(1 for p in store.players() if (p["hands"] or 0) >= MIN_SIM_HANDS)
+
+    if not hands:
+        empty = "Import a hand history first — there is nothing in this database yet."
+        return {
+            "hero": {"ok": False, "why": empty},
+            "play": {"ok": False, "why": empty},
+        }
+
+    hero_id = _cached_hero_id(store)
+    hero_why = None if hero_id else (
+        "None of these hands show your own cards, so the tool cannot tell which "
+        "seat is yours. Import an export from a game you played in.")
+
+    play_why = None if profiled else (
+        f"No opponent has {MIN_SIM_HANDS} hands yet — there is nobody measured "
+        "enough to play against.")
+
+    return {
+        "hero": {"ok": hero_id is not None, "why": hero_why},
+        "play": {"ok": profiled > 0, "why": play_why},
+    }

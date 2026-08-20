@@ -51,8 +51,48 @@ def test_hands_are_the_source_of_truth(store):
 
 
 def test_regular_opponents_can_never_be_merged(store, hands):
-    """Two people who play each other constantly are two people."""
+    """Two people who play each other constantly are two people.
+
+    The fixture is twenty hands and its busiest pair shares ten of them --
+    exactly ``SPURIOUS_OVERLAP``, and so still mergeable by design. Copying the
+    batch under fresh hand ids puts them clearly past it, which is the state
+    this is about: not a reconnect, two people at one table.
+    """
+    import copy
     from collections import Counter
+
+    from villain.db import SPURIOUS_OVERLAP
+
+    again = []
+    for hand in hands:
+        twin = copy.deepcopy(hand)
+        twin.hand_id = f"{hand.hand_id}-again"
+        again.append(twin)
+    store.add_hands(again)
+
+    pairs = Counter()
+    for hand in list(hands) + again:
+        ids = sorted({store.player_for(hand.site, s.player_id, s.name)
+                      for s in hand.seats})
+        for i, a in enumerate(ids):
+            for b in ids[i + 1:]:
+                pairs[(a, b)] += 1
+    (a, b), shared = pairs.most_common(1)[0]
+    assert shared > SPURIOUS_OVERLAP, "fixture should contain two regular opponents"
+    assert store.shared_hands(a, b) == shared
+    assert store.are_distinct(a, b)
+    with pytest.raises(ValueError, match="hands together"):
+        store.link(a, b)
+
+
+def test_a_brief_double_seating_stays_mergeable(store, hands):
+    """The case the old threshold of 2 refused: one person reconnecting from a
+    second account and playing a few hands as both. Ten shared hands out of a
+    real history is that, not two people who play together."""
+    from collections import Counter
+
+    from villain.db import SPURIOUS_OVERLAP
+
     pairs = Counter()
     for hand in hands:
         ids = sorted({store.player_for(hand.site, s.player_id, s.name)
@@ -61,11 +101,9 @@ def test_regular_opponents_can_never_be_merged(store, hands):
             for b in ids[i + 1:]:
                 pairs[(a, b)] += 1
     (a, b), shared = pairs.most_common(1)[0]
-    assert shared > 2, "fixture should contain two regular opponents"
-    assert store.shared_hands(a, b) == shared
-    assert store.are_distinct(a, b)
-    with pytest.raises(ValueError, match="hands together"):
-        store.link(a, b)
+    assert shared <= SPURIOUS_OVERLAP
+    assert not store.are_distinct(a, b)
+    store.link(a, b)          # allowed, and undoable from the player page
 
 
 def test_a_one_hand_overlap_does_not_block_a_merge(tmp_path, hands):

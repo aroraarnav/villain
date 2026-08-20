@@ -121,10 +121,22 @@ class NotEnoughData(ValueError):
     pass
 
 
-def build_dataset(hands: list[Hand]) -> list[Row]:
-    """Every action whose player's cards are known, labeled by strength."""
+def build_dataset(hands: list[Hand], progress=None) -> list[Row]:
+    """Every action whose player's cards are known, labeled by strength.
+
+    ``progress`` is called as ``progress(done, total)`` every so often. It
+    exists because this walk is minutes long on a real database and the caller
+    is a browser tab: without it the only honest thing the interface can say is
+    "working", for the whole of it.
+    """
     rows: list[Row] = []
-    for hand in hands:
+    total = len(hands)
+    # Every 200 hands: often enough to move a bar smoothly, rare enough that
+    # the callback itself is not part of the measurement.
+    every = 200
+    for at, hand in enumerate(hands):
+        if progress is not None and at % every == 0:
+            progress(at, total)
         if not hand.board:
             continue
         view = HandView(hand)
@@ -169,6 +181,8 @@ def build_dataset(hands: list[Hand]) -> list[Row]:
                 street=int(decision.street),
                 action=act.name.lower(),
             ))
+    if progress is not None:
+        progress(total, total)
     return rows
 
 

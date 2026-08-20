@@ -1,0 +1,130 @@
+"""Run the web API in the browser, with no socket underneath it.
+
+The demo ships the whole tool as WebAssembly (Pyodide): the same Python that
+answers ``/api/*`` over a loopback socket in :mod:`~villain.webapp.server`
+answers it here, called directly from JavaScript instead of read off a wire.
+Reusing :class:`~villain.webapp.server.Handler` rather than re-implementing the
+routing is the point -- the demo cannot drift from the real server, because it
+*is* the real server with its transport removed.
+
+Pyodide is single-threaded, so there is no request concurrency to guard: the
+call runs to completion before JavaScript regains control. The origin checks in
+:meth:`Handler.do_POST` still run, and pass, because every request is minted
+here with a loopback ``Host`` -- there is no cross-origin surface when the
+"server" lives inside the page it serves.
+"""
+
+from __future__ import annotations
+
+import io
+from pathlib import Path
+
+from .server import Handler
+
+
+class _Headers:
+    """The slice of the header interface the handler actually reads.
+
+    ``BaseHTTPRequestHandler`` hands the routing an ``email.message.Message``;
+    the handler only ever calls ``.get``, so a case-insensitive dict is the
+    whole contract and pulling in the email machinery would be theatre.
+    """
+
+    def __init__(self, values: dict[str, str]):
+        self._values = {k.lower(): v for k, v in (values or {}).items()}
+
+    def get(self, name: str, default=None):
+        return self._values.get(name.lower(), default)
+
+
+class _BridgeHandler(Handler):
+    """A :class:`Handler` with the socket lifecycle skipped.
+
+    ``BaseHTTPRequestHandler.__init__`` connects to a client and starts
+    serving; there is neither here, so it is bypassed and the three attributes
+    the routing reads -- ``path``, ``headers``, ``rfile`` -- are set by hand.
+    ``_send`` is captured into a value instead of written to a socket.
+    """
+
+    def __init__(self, method: str, path: str, headers: dict, body: bytes):
+        self.command = method
+        self.path = path
+        self.headers = _Headers(headers)
+        self.rfile = io.BytesIO(body or b"")
+        self.result: tuple[int, bytes, str] | None = None
+
+    def _send(self, code: int, payload, content_type: str = "application/json"):
+        import json
+        body = payload if isinstance(payload, (bytes, bytearray)) else json.dumps(payload).encode()
+        self.result = (code, bytes(body), content_type)
+
+
+def set_db(path: str) -> None:
+    """Point every subsequent request at ``path`` inside the Pyodide FS."""
+    Handler.db_path = Path(path)
+
+
+def dispatch(method: str, path: str, headers: dict | None = None, body: bytes = b"") -> tuple[int, bytes, str]:
+    """Route one request and return ``(status, body, content_type)``."""
+    handler = _BridgeHandler(method, path, headers or {}, body)
+    if method == "GET":
+        handler.do_GET()
+    elif method == "POST":
+        handler.do_POST()
+    else:
+        handler._send(405, {"error": "method not allowed"})
+    return handler.result
+
+
+def dispatch_json(method: str, path: str, body: str = "") -> dict:
+    """The shape the JavaScript ``fetch`` shim wants: a plain dict.
+
+    Writes need a same-origin ``Host``/``Origin`` to clear the CSRF guard in
+    :meth:`Handler.do_POST`; in the browser the origin is the page itself, so
+    the loopback values are both honest and the only ones that make sense.
+    """
+    raw = body.encode() if isinstance(body, str) else bytes(body or b"")
+    headers = {
+        "Host": "127.0.0.1",
+        "Origin": "http://127.0.0.1",
+        "Content-Type": "application/json",
+        "Content-Length": str(len(raw)),
+    }
+    code, out, content_type = dispatch(method, path, headers, raw)
+    # The API is JSON throughout; decode as text so the JS side can hand it
+    # straight to a Response without a copy through the pyodide buffer proxy.
+    return {"status": code, "body": out.decode("utf-8"), "content_type": content_type}
+
+
+def build_hero(progress=None) -> dict:
+    """The Hero payload, reporting progress while it is built.
+
+    Separate from :func:`dispatch_json` because progress has to escape a call
+    that takes minutes, and an HTTP-shaped interface has nowhere to put it. The
+    worker hands in a JavaScript function; Python calls it as the walk goes.
+
+    ``progress(done, total, phase)``. A total of zero means the phase cannot be
+    counted -- fitting the trees, where the only true thing to report is that
+    it is still going.
+    """
+    import json
+
+    from ..db import Store
+    from .heroview import hero_payload
+
+    def report(done, total, phase):
+        if progress is not None:
+            progress(int(done), int(total), str(phase))
+
+    # Before anything at all, including the row counts and cache checks, so the
+    # interface has something to show on the first frame rather than after the
+    # first phase gets going.
+    report(0, 0, "starting")
+    with Store(Handler.db_path) as store:
+        payload = hero_payload(store, progress=report)
+    return {"status": 200 if payload is not None else 404,
+            "body": json.dumps(payload if payload is not None else
+                               {"error": "Could not identify hero automatically -- "
+                                         "no player has cards known on enough of their "
+                                         "own hands."}),
+            "content_type": "application/json"}

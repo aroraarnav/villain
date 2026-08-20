@@ -23,9 +23,13 @@ from __future__ import annotations
 import math
 import os
 from collections.abc import Iterable
-from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
+
+try:
+    from concurrent.futures import ProcessPoolExecutor
+except ImportError:              # no process model (e.g. Pyodide/WASM)
+    ProcessPoolExecutor = None
 
 from .cards import card_ids, evaluate
 from .equity import equities
@@ -125,7 +129,7 @@ def record_hands(hands: Iterable[Hand], books: Books | None = None,
     hero = hero_of(hands)
 
     n_workers = _default_workers() if workers is None else workers
-    if n_workers > 1 and len(hands) >= PARALLEL_MIN_HANDS and not books and _can_spawn():
+    if ProcessPoolExecutor is not None and n_workers > 1 and len(hands) >= PARALLEL_MIN_HANDS and not books and _can_spawn():
         size = math.ceil(len(hands) / n_workers)
         chunks = [(hands[i:i + size], locks, hero)
                   for i in range(0, len(hands), size)]

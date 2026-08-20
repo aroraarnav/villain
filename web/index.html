@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Villain</title>
+<style>
+  :root { color-scheme: light dark; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: #0f1115; color: #e6e8ee;
+    display: grid; place-items: center;
+  }
+  #boot { max-width: 30rem; padding: 2rem; text-align: center; }
+  #boot h1 { font-size: 3rem; margin: 0 0 .4rem; letter-spacing: -.02em; font-weight: 700; }
+  #boot h1 .dot { display: inline-block; width: .62rem; height: .62rem;
+    margin-left: .5rem; border-radius: 50%; background: #e5484d;
+    vertical-align: .55rem; }
+  #boot p.sub { color: #9aa0ad; margin: 0 0 1.5rem; }
+  #boot.gate p.sub { margin: 0 0 2.25rem; }
+  #step { color: #cbd0da; min-height: 1.4em; }
+  #bar { height: 4px; border-radius: 4px; background: #232838; margin: 1.2rem 0 .4rem; overflow: hidden; }
+  #bar > i { display: block; height: 100%; width: 0; background: #e5484d; transition: width .3s ease; }
+  #note { color: #6b7280; font-size: .82rem; margin-top: 1rem; }
+  #boot.err #step { color: #ff6b6b; white-space: pre-wrap; text-align: left; }
+
+  /* The choice shown to anyone not signed in. The runtime downloads behind it,
+     so whichever button they press, most of the waiting is already done. */
+  #gate { display: none; }
+  #boot.gate #gate { display: block; }
+  #boot.gate #step, #boot.gate #bar, #boot.gate #note { display: none; }
+  #gate form { display: flex; gap: .5rem; margin: 0 0 .9rem; }
+  #gate input {
+    flex: 1; font: inherit; font-size: .92rem; padding: .6rem .9rem;
+    border: 1px solid #2a3040; border-radius: 999px;
+    background: #151926; color: #e6e8ee;
+  }
+  #gate input:focus { outline: none; border-color: #e5484d; }
+  #gate button {
+    font: inherit; font-size: .92rem; padding: .6rem 1.1rem; cursor: pointer;
+    border-radius: 999px; border: 1px solid #e5484d; background: #e5484d; color: #fff;
+    white-space: nowrap; font-weight: 600;
+  }
+  #gate button:hover:not(:disabled) { background: #cf3d42; border-color: #cf3d42; }
+  #gate button:disabled { opacity: .6; cursor: default; }
+  #gate .or {
+    display: flex; align-items: center; gap: .75rem;
+    color: #4b5563; font-size: .74rem; margin: 1.25rem 0;
+    text-transform: lowercase;
+  }
+  #gate .or::before, #gate .or::after {
+    content: ""; flex: 1; height: 1px; background: #1e2330;
+  }
+  #gate .ghost {
+    background: transparent; color: #cbd0da; border-color: #2a3040;
+    font-weight: 500; width: 100%;
+  }
+  #gate .ghost:hover { background: transparent; border-color: #6b7280; color: #e6e8ee; }
+  #gate .why { color: #565f6d; font-size: .78rem; margin: 1.5rem 0 0; }
+  #gate .said { color: #9aa0ad; font-size: .84rem; min-height: 1.3em; margin: 0 0 .5rem; }
+  #gate .said.bad { color: #ff6b6b; }
+  #gate .loading { color: #3a4150; font-size: .72rem; margin-top: .9rem; }
+
+  /* Sending is a network round trip with nothing to show for it until it
+     lands, so the gate holds still rather than inviting a second press.
+     Same spinner as the rest of the tool: 2px ring, red leading edge. */
+  #boot.sending #gate form, #boot.sending #gate .or,
+  #boot.sending #gate .ghost, #boot.sending #gate .why { opacity: .3; pointer-events: none; }
+  #gate .waiting { display: none; align-items: center; justify-content: center; gap: .6rem;
+    color: #9aa0ad; font-size: .88rem; margin: .35rem 0 0; }
+  #boot.sending #gate .waiting { display: flex; }
+  #gate .spinner {
+    width: 18px; height: 18px; flex: none; border-radius: 50%;
+    border: 2px solid #232838; border-top-color: #e5484d;
+    animation: gatespin .7s linear infinite;
+  }
+  @keyframes gatespin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { #gate .spinner { animation-duration: 2.4s; } }
+</style>
+</head>
+<body>
+<div id="boot">
+  <h1>Villain<span class="dot"></span></h1>
+  <p class="sub">Reads poker hand histories and tells you how to beat the people you play against.</p>
+
+  <div id="gate">
+    <p class="said" id="said"></p>
+    <form id="signin">
+      <input type="email" name="email" placeholder="you@email.com" autocomplete="email" required>
+      <button type="submit">Email me a link</button>
+    </form>
+    <div class="or">or</div>
+    <button type="button" class="ghost" id="demo">View the demo</button>
+    <p class="why">Hands are parsed in your browser, never uploaded. The demo is read-only.</p>
+    <p class="waiting"><span class="spinner"></span>Sending your link…</p>
+    <p class="loading" id="loading">Loading the runtime…</p>
+  </div>
+
+  <div id="step">Starting…</div>
+  <div id="bar"><i></i></div>
+  <div id="note">
+    The whole tool is running in your browser. Hands are parsed here, not on a
+    server. The sample roster is a guest demo; sign in (once this opens) to keep
+    your own database across devices.
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="sync.js"></script>
+<script>
+(async () => {
+  const boot = document.getElementById("boot");
+  const stepEl = document.getElementById("step");
+  const barEl = document.querySelector("#bar > i");
+  const step = (msg, pct) => { stepEl.textContent = msg; if (pct != null) barEl.style.width = pct + "%"; };
+  const fail = (err) => {
+    boot.classList.add("err");
+    step("Could not start.\n\n" + (err && err.message ? err.message : err) +
+         "\n\nA hard refresh usually clears a half-loaded runtime.");
+    barEl.style.background = "#ff6b6b";
+    console.error(err);
+  };
+
+  const sync = window.VillainSync;
+  const authOn = sync.enabled;
+  const signInError = authOn && /error_description=([^&]+)/.exec(location.hash || "")
+    ? decodeURIComponent(RegExp.$1.replace(/\+/g, " ")) : null;
+  if (!authOn) {
+    document.getElementById("note").textContent =
+      "The whole tool is running in your browser. Hands are parsed here, not on a server. " +
+      "The sample roster is a guest demo; drop your own export on the Database tab.";
+  }
+
+  // Start the runtime before anyone has chosen anything. It is ~30 MB from a
+  // CDN and is the same download either way, so a visitor reading the sign-in
+  // page is spending time that would otherwise be spent staring at a bar.
+  // Python runs in a worker, so the page can keep drawing while it works. Every
+  // call is a message with an id and exactly one reply.
+  // Stamped by web/build.py. Browsers cache a worker script hard, and a stale
+  // one is worse than a stale page: it silently answers with an older set of
+  // calls while the page assumes the new ones exist.
+  const worker = new Worker("worker.js?v=BUILD_STAMP");
+  let nextCall = 0;
+  const waiting = new Map();
+  worker.onmessage = (event) => {
+    const msg = event.data || {};
+    if (msg.type === "step") return step(msg.text, msg.pct);
+    // Progress from inside a long Python call. Whoever put the veil up
+    // registers for it; nobody else needs to know it happened.
+    if (msg.type === "hero") {
+      if (window.__villainProgress) window.__villainProgress(msg);
+      return;
+    }
+    const slot = waiting.get(msg.id);
+    if (!slot) return;
+    waiting.delete(msg.id);
+    if (msg.ok) slot.done(msg);
+    else slot.fail(new Error(msg.error || "the runtime failed"));
+  };
+  worker.onerror = (e) => {
+    for (const slot of waiting.values()) slot.fail(new Error(e.message || "the runtime stopped"));
+    waiting.clear();
+  };
+  const call = (kind, args = {}, transfer = []) => new Promise((done, fail) => {
+    const id = ++nextCall;
+    waiting.set(id, { done, fail });
+    worker.postMessage({ id, kind, ...args }, transfer);
+  });
+
+  let manifest = null;
+  const runtime = call("boot", { base: location.href })
+    .then((out) => { manifest = out.manifest; return out; });
+  runtime.catch(() => {});            // the gate reports it; don't trip "unhandled"
+
+  /**
+   * Ask an unauthenticated visitor which way in they want.
+   *
+   * Resolves once they have chosen the demo. Choosing email does not resolve:
+   * that path ends in a redirect back here with a session, and the page starts
+   * again on the other side of it.
+   */
+  const askTheGate = () => new Promise((chose) => {
+    const said = document.getElementById("said");
+    const form = document.getElementById("signin");
+    const loading = document.getElementById("loading");
+    boot.classList.add("gate");
+
+    runtime.then(() => { loading.textContent = "Ready."; },
+                 () => { loading.textContent = "The runtime failed to load — try a hard refresh."; });
+
+    const say = (text, bad) => { said.textContent = text; said.classList.toggle("bad", !!bad); };
+    if (signInError) say(signInError, true);
+
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      const email = form.email.value.trim();
+      if (!email) return;
+      say("");
+      boot.classList.add("sending");
+      try {
+        await sync.sendLink(email);
+        // Left in the sending state on purpose: the next thing that should
+        // happen is the visitor leaving for their inbox, not pressing again.
+        say("Check your email.");
+        boot.classList.remove("sending");
+        form.querySelector("button").disabled = true;
+      } catch (err) {
+        say(err.message, true);
+        boot.classList.remove("sending");
+      }
+    };
+    document.getElementById("demo").onclick = () => {
+      boot.classList.remove("gate");
+      chose();
+    };
+  });
+
+  try {
+    const user = authOn ? await sync.me() : null;
+    if (authOn) sync.tidyUrl();       // the magic link leaves a live token in the bar
+    if (authOn && !user) await askTheGate();
+
+    step("Starting the runtime…", 30);
+    await runtime;
+
+    // The working copy lives in this browser either way, signed in or not --
+    // but it lives in the worker's filesystem now, so reading and writing it
+    // are messages rather than calls. Bytes are transferred, not copied.
+    const { db: DB, hero: HERO } = await call("paths");
+    const toDisk = (fromDisk) => call("flush", { fromDisk });
+    const exists = async (path) => (await call("exists", { path })).exists;
+    const readFile = async (path) => (await call("read", { path })).bytes;
+    const writeFile = (path, bytes) =>
+      call("write", { path, bytes: bytes.buffer }, [bytes.buffer]);
+    const wipe = async () => {
+      for (const path of [DB, HERO]) await call("remove", { path });
+    };
+    const emptyDb = () => call("fresh");
+
+    const flag = {
+      get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+      set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
+      drop: (k) => { try { localStorage.removeItem(k); } catch { /* nothing to clear */ } },
+    };
+    const ACCOUNT = "villain.account";
+
+    let persistWrite = async () => {};
+    let cancelSave = () => {};                 // drop a save that is only queued
+    let saveNote = () => {};                   // replaced once the header exists
+    let brokenRemote = false;                  // the stored copy could not be read back
+    let showProgress = () => {};               // replaced once the header exists
+
+    if (user) {
+      step("Loading your database…", 78);
+      // A second account signing in on the same laptop must not inherit the
+      // first one's database. The version check below would catch it, but only
+      // after having decided the local copy was current.
+      if (flag.get(ACCOUNT) !== user.sub) {
+        wipe();
+        flag.set(ACCOUNT, user.sub);
+      }
+
+      const remote = await sync.head(user.sub, "db");
+      if (remote.absent) {
+        // First sign-in: an empty database of their own, never the demo roster,
+        // which a guest cannot have added to anyway.
+        await wipe();
+        await emptyDb();
+        await toDisk(false);
+        // Deliberately not uploaded. An empty database is worth nothing to
+        // another device, and writing one means a fresh account -- or one just
+        // emptied -- always has objects in it. The first real change saves.
+      } else if (!(await exists(DB))
+                 || remote.version !== sync.knownVersion(user.sub, "db")) {
+        // Either this browser has never held it, or it changed elsewhere. A big
+        // database arrives in several parts, so say so rather than looking hung.
+        // The boot screen already has a bar; give it the real fraction rather
+        // than a fixed step, so a big database shows movement instead of
+        // sitting at one number for a minute.
+        step("Downloading your database…", 82);
+        try {
+          const pulled = await sync.get(user.sub, "db", (fraction) => {
+            step("Downloading your database…", 82 + Math.round(fraction * 8));
+          });
+          if (pulled.bytes) await writeFile(DB, pulled.bytes);
+          const hero = await sync.get(user.sub, "hero").catch(() => ({ bytes: null }));
+          if (hero.bytes) await writeFile(HERO, hero.bytes);
+          else await call("remove", { path: HERO });
+          await toDisk(false);
+        } catch (err) {
+          // An unreadable copy on the server must not cost you the working one
+          // in this browser. Keep it, say so, and write a whole one back over
+          // the broken remote rather than refusing to start.
+          if (!err.incomplete || !(await exists(DB))) throw err;
+          sync.forget(user.sub);          // drop the version guard: this is a repair
+          brokenRemote = true;
+        }
+      }
+
+      let timer = 0;
+      let pending = false;
+      const upload = async (report) => {
+        pending = false;
+        // `report` is passed when a caller is already showing progress of its
+        // own -- the import, under its veil. Otherwise it goes to the header.
+        const onProgress = report || showProgress;
+        try {
+          if (!report) saveNote("Saving…");
+          await toDisk(false);
+          await sync.put(user.sub, "db", await readFile(DB), onProgress);
+          if (!report) showProgress(null);
+          // A hero cache that no longer exists here has to be removed there
+          // too. Sweeping only runs while writing, so a file that is never
+          // written again would keep every version it ever had.
+          const heroBytes = await readFile(HERO);
+          if (heroBytes) await sync.put(user.sub, "hero", heroBytes);
+          else await sync.drop(user.sub, "hero");
+          const took = sync.tookOver();
+          if (!report) saveNote(took ? "Saved — replaced a newer copy from another tab." : "");
+        } catch (err) {
+          // Loudly. A failed save that only reaches the console is how somebody
+          // imports a session, closes the tab and loses it.
+          if (!report) showProgress(null);
+          if (report) throw err;      // the caller is showing this one
+          saveNote(`Not saved — ${err.message}`);
+        }
+      };
+      persistWrite = async () => {
+        pending = true;
+        clearTimeout(timer);
+        timer = setTimeout(upload, 800);
+      };
+
+      // Let the interface wait for a save and show its own progress, so an
+      // import is not "finished" while its hands are still going up.
+      window.villainSaveNow = async (report) => {
+        clearTimeout(timer);
+        await upload(report);
+      };
+      cancelSave = () => { clearTimeout(timer); pending = false; };
+      if (brokenRemote) {
+        // Write the good local copy over the unreadable stored one at once.
+        upload();
+      }
+
+      // pagehide is too late to start a request; browsers routinely kill one
+      // begun during teardown. visibilitychange fires while the page can still
+      // finish it, and covers switching tabs as well as closing them.
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden" && pending) { clearTimeout(timer); upload(); }
+      });
+    } else {
+      // Guest: the preloaded sample, kept in this browser only.
+      step("Loading the sample database…", 78);
+      await call("seedDemo", { base: location.href });
+      // Nothing a guest does reaches the database, so there is nothing to
+      // write back. Keeping the demo pristine is the point.
+      persistWrite = async () => {};
+    }
+
+
+    // The demo is readable by anyone and writable by nobody. A guest can open
+    // every screen and play the simulator; importing, merging, renaming and
+    // resetting all need an account, because they are the operations whose
+    // results are worth keeping and a guest has nowhere to keep them.
+    //
+    // Enforced here rather than in the Python: the same server module backs
+    // `villain ui` on a laptop, which has no accounts and must stay writable.
+    const GUEST_MAY_POST = /^\/api\/(sim\/|narrate$)/;
+
+    // Which writes actually change stored hands. /api/upload parses into memory
+    // and stores nothing -- and the import sends one per batch of files, so
+    // treating it as a change re-uploaded the whole database several times per
+    // import, for no difference. The simulator writes nothing either.
+    const CHANGES_THE_DB =
+      /^\/api\/(reset|link|unlink|note|fit-priors|session\/[^/]+\/commit)$/;
+    let promptSignIn = () => {};                 // replaced once the header exists
+
+    // Python runs on this thread. Nothing repaints while it does, so a spinner
+    // put up immediately before a call is only drawn once the call is over --
+    // the window simply freezes, which reads as a crash rather than as work.
+    // Two frames is the reliable "let it paint" yield: the first schedules,
+    // the second runs after the compositor has been through.
+    const letItPaint = () => new Promise((done) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => done())));
+
+    // Only when the interface has already said it is busy, or is about to
+    // write. Yielding on every read would put two frames on each of the many
+    // small calls a page load makes, for no one to see.
+    const worthAFrame = (method) =>
+      method === "POST" || !!document.querySelector(".veil.busy");
+
+    const realFetch = window.fetch.bind(window);
+    window.fetch = async (input, init = {}) => {
+      const url = new URL(typeof input === "string" ? input : input.url, location.href);
+      if (!url.pathname.startsWith("/api")) return realFetch(input, init);
+      const method = (init.method || "GET").toUpperCase();
+      if (authOn && !user && method === "POST" && !GUEST_MAY_POST.test(url.pathname)) {
+        promptSignIn();
+        return new Response(
+          JSON.stringify({ error: "Sign in to add your own hands — the demo database is read-only." }),
+          { status: 403, headers: { "Content-Type": "application/json" } });
+      }
+      let body = "";
+      if (init.body) body = typeof init.body === "string" ? init.body : await new Response(init.body).text();
+      if (worthAFrame(method)) await letItPaint();
+      // The cold Hero build is the one call worth reporting from the inside.
+      // `peek` must stay on the ordinary path: it exists to be instant.
+      const r = (method === "GET" && url.pathname === "/api/hero"
+                 && !url.searchParams.has("peek"))
+        ? await call("hero")
+        : await call("api", { method, path: url.pathname + url.search, body });
+      if (method === "POST" && r.status < 400 && CHANGES_THE_DB.test(url.pathname)) {
+        if (url.pathname === "/api/reset" && user) {
+          // "Delete everything" has to mean everything. Uploading the emptied
+          // database instead would leave the account holding a file, a version
+          // folder and a manifest, which is not what anybody means by delete.
+          cancelSave();          // do not let a queued save re-create it
+          await sync.drop(user.sub, "db").catch(() => {});
+          await sync.drop(user.sub, "hero").catch(() => {});
+        } else {
+          await persistWrite();
+        }
+      }
+      return new Response(r.body, { status: r.status, headers: { "Content-Type": r.content_type } });
+    };
+
+    step("Opening the interface…", 92);
+    const shell = (await call("api", { method: "GET", path: "/" })).body;
+    const css = (await call("api", { method: "GET", path: "/static/app.css" })).body;
+    const js = (await call("api", { method: "GET", path: "/static/app.js" })).body;
+    const html = shell
+      .replace(/<link[^>]*app\.css[^>]*>/i, "")
+      .replace(/<script[^>]*app\.js[^>]*><\/script>/i, "");
+
+    document.open();
+    document.write(html);
+    document.close();
+
+    const style = document.createElement("style");
+    style.textContent = css + `
+      /* Same geometry and palette as .iconbtn beside it, so the header reads as
+         one row of controls rather than a toolbar with a sign-in bolted on. */
+      .acct { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
+      .acct button {
+        font: inherit; font-size: 13px; border: 1px solid var(--edge); background: transparent;
+        color: var(--muted); border-radius: 999px; height: 34px; padding: 0 14px;
+        cursor: pointer; display: inline-flex; align-items: center; white-space: nowrap;
+      }
+      .acct button:hover { color: var(--ink); border-color: var(--accent); }
+      /* Signed out, this is the one thing on the page we want pressed. */
+      .acct button.cta { color: var(--ink); border-color: var(--red); font-weight: 600; }
+      .acct button.cta:hover { background: var(--red); color: #fff; }
+      .acct .who { color: var(--muted); }
+      .acct .msg { color: var(--muted); max-width: 20rem; }
+      .acct .msg.bad { color: var(--red); }
+      /* How far a save has got. Hidden until there is something to show, so
+         the header is not carrying an empty gauge the rest of the time. */
+      .acct .gauge {
+        display: none; width: 84px; height: 4px; border-radius: 999px;
+        background: var(--line); overflow: hidden;
+      }
+      .acct .gauge.on { display: block; }
+      .acct .gauge > i {
+        display: block; height: 100%; width: 0; background: var(--red);
+        transition: width .18s linear;
+      }
+
+      .guestbar {
+        display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+        margin: 14px 0 0; padding: 10px 14px; font-size: 13px;
+        border: 1px solid var(--edge); border-left: 3px solid var(--red);
+        border-radius: 8px; color: var(--muted); background: transparent;
+      }
+      .guestbar b { color: var(--ink); font-weight: 600; }
+      .guestbar .signin { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+      .guestbar input {
+        font: inherit; font-size: 12.5px; border: 1px solid var(--edge); background: transparent;
+        color: var(--ink); border-radius: 999px; padding: 5px 12px; width: 12rem;
+      }
+      .guestbar input:focus { outline: none; border-color: var(--red); }
+      .guestbar button {
+        font: inherit; font-size: 12.5px; border: 1px solid var(--red); background: transparent;
+        color: var(--ink); border-radius: 999px; padding: 5px 12px; cursor: pointer;
+        white-space: nowrap;
+      }
+      .guestbar button:hover:not(:disabled) { background: var(--red); color: #fff; }
+      .guestbar button:disabled { opacity: .6; cursor: default; }
+      .guestbar .formnote { color: var(--muted); font-size: 12.5px; }
+      .guestbar .formnote.bad { color: var(--red); }
+      .guestbar .signin.sending input, .guestbar .signin.sending button { opacity: .4; }
+      .guestbar .signin.sending::after {
+        content: ""; width: 15px; height: 15px; flex: none; border-radius: 50%;
+        border: 2px solid var(--line); border-top-color: var(--red);
+        animation: gatespin .7s linear infinite;
+      }
+      @keyframes gatespin { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) {
+        .guestbar .signin.sending::after { animation-duration: 2.4s; }
+      }
+    `;
+    document.head.appendChild(style);
+
+    const script = document.createElement("script");
+    script.textContent = js;
+    document.body.appendChild(script);
+
+    const header = document.querySelector("header");
+    const theme = document.getElementById("theme");
+    if (header && authOn) {
+      const chip = document.createElement("div");
+      chip.className = "acct";
+      const status = document.createElement("span");
+      status.className = "msg";
+      const gauge = document.createElement("span");
+      gauge.className = "gauge";
+      gauge.innerHTML = "<i></i>";
+      // One fraction for the whole database, whether it went in one piece or
+      // six. How it is stored is not the reader's problem.
+      showProgress = (fraction) => {
+        if (fraction == null) { gauge.classList.remove("on"); return; }
+        gauge.classList.add("on");
+        gauge.firstChild.style.width = Math.round(fraction * 100) + "%";
+      };
+      // Save state is the one thing on this page the user cannot verify for
+      // themselves, so it says so in the header rather than in the console.
+      saveNote = (text) => {
+        status.textContent = text;
+        status.classList.toggle("bad", text.startsWith("Not saved"));
+      };
+
+      const button = document.createElement("button");
+      button.type = "button";
+      if (user) {
+        const who = document.createElement("span");
+        who.className = "who";
+        who.textContent = user.name || "signed in";
+        button.textContent = "Sign out";
+        button.onclick = async () => {
+          // The database stays on the server. What goes is this browser's copy,
+          // so the next person at this laptop gets the demo and not your game.
+          await wipe();
+          await toDisk(false);
+          sync.forget(user.sub);
+          flag.drop(ACCOUNT);
+          sync.signOut();
+          location.reload();
+        };
+        chip.append(status, gauge, who, button);
+      } else {
+        button.textContent = "Sign in";
+        button.className = "cta";
+        chip.append(status, gauge, button);
+        if (signInError) saveNote(signInError);
+
+        // Say what an account is for where the reader already is, rather than
+        // waiting for them to try an import and be refused.
+        const bar = document.createElement("div");
+        bar.className = "guestbar";
+        bar.innerHTML = "<span>You are looking at a <b>sample database</b>. "
+          + "Sign in to import your own hand histories and keep them across devices "
+          + "— your hands stay yours, and nobody else's are pooled with them.</span>";
+        const form = document.createElement("form");
+        form.className = "signin";
+        form.innerHTML = '<input type="email" name="email" placeholder="you@email" '
+          + 'autocomplete="email" required><button type="submit">Email me a link</button>';
+        bar.append(form);
+        const nav = document.querySelector("nav");
+        if (nav) nav.insertAdjacentElement("afterend", bar);
+
+        const say = (text, bad) => {
+          const note = form.querySelector(".formnote") || Object.assign(
+            document.createElement("span"), { className: "formnote" });
+          note.textContent = text;
+          note.classList.toggle("bad", !!bad);
+          form.append(note);
+        };
+        form.onsubmit = async (event) => {
+          event.preventDefault();
+          const email = form.email.value.trim();
+          if (!email) return;
+          const submit = form.querySelector("button");
+          submit.disabled = true;
+          form.classList.add("sending");
+          say("", false);
+          try {
+            await sync.sendLink(email);
+            say("Check your email.", false);
+          } catch (err) {
+            say(err.message, true);
+            submit.disabled = false;
+          }
+          form.classList.remove("sending");
+        };
+        button.onclick = () => {
+          bar.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          form.email.focus();
+        };
+
+        // A refused write should point at the way forward, not just fail.
+        promptSignIn = () => {
+          saveNote("Sign in to add your own hands.");
+          button.classList.add("cta");
+          bar.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          form.email.focus();
+        };
+
+        // Catch "Add hands" before the file picker rather than after it. The
+        // guard behind it would refuse the upload anyway, but only once
+        // somebody had already chosen the files.
+        const stopAdd = (event) => {
+          const add = event.target.closest && event.target.closest("#db-add");
+          if (!add) return;
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          promptSignIn();
+        };
+        document.addEventListener("click", stopAdd, true);
+      }
+      header.insertBefore(chip, theme);
+    }
+  } catch (err) {
+    fail(err);
+  }
+})();
+</script>
+</body>
+</html>

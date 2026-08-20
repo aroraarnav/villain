@@ -17,8 +17,28 @@ behind every number are in [How it works](#how-it-works).
 
 ![Villain's profile view: one screen per player, the read and the plan on top, the numbers below](docs/screenshot.png)
 
-## Quickstart
+## Use it
 
+**[aroraarnav.github.io/villain](https://aroraarnav.github.io/villain/)** is
+the tool. Open it, drop a PokerNow export on the Database tab. Hands are
+parsed in your browser — the Python is compiled to WebAssembly — so the
+histories never leave the machine as a server-side upload.
+
+It asks which way in you want. Sign in with an emailed link — it works on
+whichever device you open it — and the database follows you: the same SQLite
+file, gzipped and stored privately under your account, on the next laptop as
+well as this one. A first sign-in starts empty; import your own hands. Or take
+the demo, a sample roster with all ten archetypes already profiled, which you
+can read but not add to.
+
+The hosted page does not pool anyone's reads. Your file is yours; row-level
+security means another account cannot open it. That is the whole of
+[discussion #14](https://github.com/aroraarnav/villain/discussions/14) that
+is built: portability of *your* database, not a shared one.
+
+## Run it locally
+
+Same interface, no account, the database a file at `~/.villain/villain.db`.
 Needs Python 3.11 or newer.
 
 ```bash
@@ -29,17 +49,31 @@ python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -e .
 
-pytest                             # 353 tests
-```
-
-That installs two commands, `villain` and `villain-ui`. A small anonymized
-sample ships with the repo, so you can see real output before you have an export
-of your own:
-
-```bash
-villain scout tests/data/pokernow_sample.json --min-hands 1
+pytest                             # 368 tests
 villain ui                         # then open http://127.0.0.1:8766
 ```
+
+`villain scout tests/data/pokernow_sample.json --min-hands 1` is the
+twenty-hand parser fixture if you want CLI output before an export of your
+own.
+
+To rebuild and serve the hosted page yourself:
+
+```bash
+pip install -e . build
+python web/build.py               # assembles web/dist/
+python web/serve.py               # opens http://127.0.0.1:8000
+```
+
+Deployment is automatic: `.github/workflows/pages.yml` builds `web/dist/` and
+publishes it on every push to `main`. Sign-in needs a Supabase project — free,
+no card — and is described in [web/SYNC_SETUP.md](web/SYNC_SETUP.md).
+Unconfigured, the page is demo-only and still fully usable.
+
+Signing in changes where the database lives, not what it does: hands are still
+parsed in the browser, and what is stored is the finished SQLite file, gzipped,
+readable only by the account that wrote it. Nobody else's hand histories are
+pooled, uploaded or shared — the database that follows you is your own.
 
 The parser suite checks that every hand balances to the cent, which is what
 proves the opcode decoding is right; several tests in `test_profiling.py` are
@@ -47,11 +81,7 @@ regressions named for the modeling mistakes that produced them.
 
 ## The interface
 
-```bash
-villain ui                         # http://127.0.0.1:8766
-```
-
-Standard library HTTP server, one self-contained module. Four tabs.
+Four tabs. The hosted page and `villain ui` are the same ones.
 
 * **Database** — everyone you have recorded, ranked by skill, with the bb/100
   you can attack them for alongside. Drop any number of exports on it at once:

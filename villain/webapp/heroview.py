@@ -35,7 +35,7 @@ def _hand_count(store: Store) -> int:
 _HERO_ID_CACHE: dict[str, tuple[int, int | None]] = {}
 
 
-def _cached_hero_id(store: Store) -> int | None:
+def _cached_hero_id(store: Store, progress=None, hands=None) -> int | None:
     from ..hero import find_hero
 
     key = str(store.path)
@@ -43,12 +43,12 @@ def _cached_hero_id(store: Store) -> int | None:
     cached = _HERO_ID_CACHE.get(key)
     if cached and cached[0] == hand_count:
         return cached[1]
-    hero_id = find_hero(store)
+    hero_id = find_hero(store, progress=progress, hands=hands)
     _HERO_ID_CACHE[key] = (hand_count, hero_id)
     return hero_id
 
 
-def _hero_model(store: Store):
+def _hero_model(store: Store, progress=None, hands=None):
     from ..hero import fit_population_model
 
     key = str(store.path)
@@ -56,7 +56,7 @@ def _hero_model(store: Store):
     cached = _HERO_MODEL_CACHE.get(key)
     if cached and cached[0] == hand_count:
         return cached[1]
-    model = fit_population_model(store)
+    model = fit_population_model(store, progress=progress, hands=hands)
     _HERO_MODEL_CACHE[key] = (hand_count, model)
     return model
 
@@ -110,6 +110,30 @@ def _hero_disk_cache_save(store: Store, hero_id: int | None, hand_count: int,
 #: instead of queueing behind the lock for a minute and a half.
 _HERO_BUILDING: set = set()
 
+#: Whether this interpreter can start a thread at all. Pyodide cannot, and the
+#: browser build runs the same server module, so "start it in the background
+#: and poll" has nowhere to run there. Probed once and remembered.
+_THREADS_WORK: bool | None = None
+
+
+def threads_work() -> bool:
+    """True where a background build is possible; False under Pyodide.
+
+    Callers use this to choose between answering ``202`` and polling, and
+    building inside the request. Without it the browser asks for a build that
+    can never start and then waits for it forever.
+    """
+    global _THREADS_WORK
+    if _THREADS_WORK is None:
+        try:
+            probe = threading.Thread(target=lambda: None)
+            probe.start()
+            probe.join()
+            _THREADS_WORK = True
+        except (RuntimeError, OSError):
+            _THREADS_WORK = False
+    return _THREADS_WORK
+
 
 def hero_status(store: Store, hero_id: int | None = None) -> str:
     """``ready`` | ``building`` | ``cold`` -- without starting a build."""
@@ -136,6 +160,8 @@ def hero_begin(store: Store, hero_id: int | None = None) -> bool:
     key = (str(store.path), hero_id)
     if hero_status(store, hero_id) != "cold" or key in _HERO_BUILDING:
         return False
+    if not threads_work():
+        return False                   # caller builds inline; see server.py
     _HERO_BUILDING.add(key)
     path = store.path
 
@@ -148,11 +174,18 @@ def hero_begin(store: Store, hero_id: int | None = None) -> bool:
         finally:
             _HERO_BUILDING.discard(key)
 
-    threading.Thread(target=run, name="hero-build", daemon=True).start()
+    try:
+        threading.Thread(target=run, name="hero-build", daemon=True).start()
+    except (RuntimeError, OSError):
+        # The flag is set before the thread exists, so a start that fails would
+        # otherwise leave the key in _HERO_BUILDING with no `finally` to clear
+        # it -- and every later request would be told "building" forever.
+        _HERO_BUILDING.discard(key)
+        return False
     return True
 
 
-def hero_payload(store: Store, hero_id: int | None = None) -> dict | None:
+def hero_payload(store: Store, hero_id: int | None = None, progress=None) -> dict | None:
     key = (str(store.path), hero_id)
     hand_count = _hand_count(store)
 
@@ -168,7 +201,7 @@ def hero_payload(store: Store, hero_id: int | None = None) -> dict | None:
             return cached[1]
         hit, payload = _hero_disk_cache_load(store, hero_id, hand_count)
         if not hit:
-            payload = _build_hero_payload(store, hero_id)
+            payload = _build_hero_payload(store, hero_id, progress=progress)
             _hero_disk_cache_save(store, hero_id, hand_count, payload)
         _HERO_PAYLOAD_CACHE[key] = (hand_count, payload)
         return payload
@@ -224,19 +257,33 @@ def _hero_self(store: Store, hero_id: int) -> dict | None:
     return _to_you(profile_payload(prof, hero_id))
 
 
-def _build_hero_payload(store: Store, hero_id: int | None) -> dict | None:
-    from ..hero import NotEnoughData, combined_grid, fold_grades, hero_visibility, missed_value, preflop_range, range_narrowing, sizing_tell, timing_tell
+def _build_hero_payload(store: Store, hero_id: int | None, progress=None) -> dict | None:
+    from ..hero import combined_grid, fold_grades, hero_visibility, missed_value, preflop_range, range_narrowing, sizing_tell, timing_tell
     from ..model import STREET_LABELS
+    from ..reads import NotEnoughData  # raised by the strength-model fit hero.py calls, not by hero itself
+
+    # Loaded once, used by both halves of the build. Working out whose seat is
+    # whose and fitting the model each need every stored hand, and each used to
+    # fetch its own copy -- so a cold Hero page decompressed and parsed the
+    # whole database twice before it drew anything.
+    loading = (lambda done, total: progress(done, total, "loading")) if progress else None
+    all_hands = store.player_hands(progress=loading)
 
     if hero_id is None:
-        hero_id = _cached_hero_id(store)
+        hero_id = _cached_hero_id(store, hands=all_hands)
     if hero_id is None:
         return None
     row = next((r for r in store.players() if int(r["id"]) == hero_id), None)
     if row is None:
         return None
 
-    hero_hands = store.player_hands(hero_id)
+    # Filtered from the batch already in hand, not fetched again. Hero's hands
+    # are a subset of every hand, the seats here are already re-keyed to
+    # internal ids, and a second query would decompress and parse a large slice
+    # of the database for a second time.
+    hero_key = str(hero_id)
+    hero_hands = [hand for hand in all_hands
+                  if any(str(seat.player_id) == hero_key for seat in hand.seats)]
     ranges = preflop_range(hero_hands, hero_id)
     seen, total = hero_visibility(hero_hands, hero_id)
     sizing = sizing_tell(hero_hands, hero_id)
@@ -244,7 +291,12 @@ def _build_hero_payload(store: Store, hero_id: int | None) -> dict | None:
     narrowing = range_narrowing(hero_hands, hero_id)
 
     try:
-        model = _hero_model(store)
+        model = _hero_model(store, progress=progress, hands=all_hands)
+        if progress is not None:
+            # Everything past the model -- grading hero's folds, sizing and
+            # timing -- is a second long stretch with nothing countable in it.
+            # Saying which part is running beats a spinner that never changes.
+            progress(0, 0, "grading")
         report = fold_grades(hero_hands, hero_id, model)
         missed_report = missed_value(hero_hands, hero_id, model)
         grade_error = None
