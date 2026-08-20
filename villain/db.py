@@ -970,6 +970,16 @@ class Store:
                 " WHERE regime = ? AND spread IS NOT NULL", (regime,))
         }
 
+    @staticmethod
+    def _logit_noise(rate: float, opps: float) -> float:
+        """Variance a *single* player's log-odds carries purely from sampling.
+
+        The delta-method variance of ``logit(k/n)`` is ``1 / (n p (1-p))``.
+        Subtracting its average is what turns raw scatter into a spread.
+        """
+        p = min(max(rate, 0.02), 0.98)
+        return 1.0 / max(opps * p * (1.0 - p), 1e-9)
+
     def _spread_samples(self) -> dict[str, dict[str, float]]:
         """Between-player sd of each stat, in log-odds, per regime.
 
@@ -978,28 +988,62 @@ class Store:
         strength, implying a tiny spread, and a tiny spread amplifies every
         deviation measured against it. The observed scatter has no such
         failure mode -- when players really are alike, it is simply small.
+
+        **The scatter is not the spread.** What a pool shows is the true
+        between-player spread *plus* the sampling noise in each player's own
+        estimate, and those add in variance: ``observed = true + noise``. The
+        noise term is ``1 / (n p (1-p))`` per player, so it is largest exactly
+        where opportunities are scarcest -- a river fold at n=60 carries an sd
+        of 0.27 from nothing but the coin flips, against a raw scatter of 0.29.
+        Skipping the subtraction therefore inflates every thin postflop
+        feature and leaves them looking far more separable than they are,
+        which is the same preflop-versus-postflop imbalance this measurement
+        exists to remove, reintroduced one level down. Subtract it, and what
+        is left is how much players genuinely differ.
         """
+        import math
         import statistics
 
         from .priors import logit
+        from .profile import DERIVED
         lo, hi = self.SPREAD_BOUNDS
-        by: dict[str, dict[str, list[float]]] = {}
+        by: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+        noise: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+        raw: dict[tuple[str, int], dict[str, tuple[float, float]]] = {}
         for row in self.conn.execute(
-                "SELECT regime, stat, hits, opps FROM ratios WHERE opps >= 40"):
+                "SELECT regime, player_id, stat, hits, opps FROM ratios WHERE opps >= 40"):
+            raw.setdefault((row["regime"], row["player_id"]), {})[row["stat"]] = (
+                row["hits"], row["opps"])
             if row["stat"].startswith(("seat:", "saw:", "act:", VS_HERO)):
                 continue
             rate = row["hits"] / row["opps"]
-            by.setdefault(row["regime"], {}).setdefault(row["stat"], []).append(
-                logit(min(max(rate, 0.005), 0.995)))
+            by[row["regime"]][row["stat"]].append(logit(min(max(rate, 0.005), 0.995)))
+            noise[row["regime"]][row["stat"]].append(
+                self._logit_noise(rate, row["opps"]))
+        # aggression:* is assembled from the raw action counters and never
+        # stored as a ratio row of its own, so scanning this table alone left
+        # it the one feature block with no fitted spread -- and therefore the
+        # one block still measured in the built-in constant, roughly twice the
+        # scatter this pool actually shows. `maniac`, whose entire identity is
+        # aggression, is the archetype that paid for it. Same assembly as
+        # :meth:`_observed_ranges` and :meth:`population_samples`.
+        for (regime, _pid), stats in raw.items():
+            for stat, (num_keys, den_keys) in DERIVED.items():
+                den = sum(stats.get(k, (0.0, 0.0))[0] for k in den_keys)
+                if den < 40:
+                    continue
+                num = sum(stats.get(k, (0.0, 0.0))[0] for k in num_keys)
+                by[regime][stat].append(logit(min(max(num / den, 0.005), 0.995)))
+                noise[regime][stat].append(self._logit_noise(num / den, den))
         out: dict[str, dict[str, float]] = {}
         for regime, stats in by.items():
             for stat, vals in stats.items():
                 if len(vals) < self.MIN_SPREAD_PLAYERS:
                     continue
-                sd = statistics.pstdev(vals)
-                if sd <= 0:
+                var = statistics.pvariance(vals) - statistics.fmean(noise[regime][stat])
+                if var <= 0:
                     continue
-                out.setdefault(regime, {})[stat] = min(max(sd, lo), hi)
+                out.setdefault(regime, {})[stat] = min(max(math.sqrt(var), lo), hi)
         return out
 
     def _observed_ranges(self) -> dict[str, dict[str, tuple[float, float]]]:

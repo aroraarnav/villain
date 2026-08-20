@@ -178,6 +178,23 @@ CONTINUOUS[FULL] = dict(CONTINUOUS[SHORT])
 #: measured in. Wider means the population genuinely disagrees about that
 #: statistic -- everyone limps at roughly no rate at all until somebody limps
 #: constantly, so ``limp`` spreads far more than ``wsd`` does.
+#:
+#: These are the fallback, used only until a database has enough players for
+#: ``villain fit`` to measure the real thing per regime -- see
+#: :func:`spread_of`, which prefers the fitted value per feature the moment one
+#: exists. They are online-pool figures and they disagree with what a home game
+#: actually fits by up to 2x in both directions.
+#:
+#: Substituting the fitted numbers here was tried and reverted, and the reason
+#: is worth keeping: this table and ``POPULATION`` are one model, not two
+#: knobs. The prototype deviations are measured *from* a mean *in units of* a
+#: spread, so a fitted spread against an online mean is a mixture of two pools
+#: and describes neither -- it made ``tag`` imply a 19.9% PFR against a 15.8%
+#: VPIP, a player who raises more hands than they play, and broke six tests
+#: that had nothing to do with archetypes. Either replace both with home-game
+#: measurements or leave both alone. Leaving both alone is what the fitted
+#: path makes safe: ``villain fit`` overrides mean and spread together, so a
+#: database with its own players never reads either of these.
 SPREAD = {
     "vpip": 0.50, "pfr": 0.55, "raise_share": 0.55, "three_bet": 0.55, "fold_to_three_bet": 0.45,
     "cbet:flop": 0.50, "cbet:turn": 0.50, "cbet:river": 0.52,
@@ -211,45 +228,56 @@ def spread_of(feature: str, table_regime: str = "",
     An archetype is a deviation from the field, and this is the unit that
     deviation is measured in -- so getting it wrong moves every prototype's
     target without moving any player. It was a global constant while the
-    population *mean* was fitted per regime, and on a real 63-player pool the
-    two disagreed by about 2x on every postflop feature:
+    population *mean* was fitted per regime, and the two disagree by up to 2x
+    in *both* directions on a real pool:
 
-        fold_vs_bet:turn   assumed 0.48   actual 0.22
-        fold_vs_bet:river  assumed 0.50   actual 0.25
-        wtsd               assumed 0.42   actual 0.23
-        raise_share        assumed 0.55   actual 0.83
+        fold_vs_bet:turn   assumed 0.48   fitted 0.20   ratio 0.42
+        fold_vs_bet:river  assumed 0.50   fitted 0.20   ratio 0.40
+        wwsf               assumed 0.32   fitted 0.15   ratio 0.47
+        raise_share        assumed 0.55   fitted 0.82   ratio 1.50
+        limp               assumed 1.00   fitted 1.60   ratio 1.60
 
-    Twice the real spread puts a -2.0 deviation twice as far out as it should
-    be, which is why station, maniac, nit and trapper asked for frequencies no
-    player in the pool posts and could never be anybody's label. Preflop
-    features were close, so preflop archetypes worked and postflop ones did
-    not.
+    Both directions matter, and they compound into the same failure. Where the
+    constant is too *large* -- every postflop feature -- a trait of -2.0
+    spreads asks for a frequency four or five real spreads out, which nobody
+    posts, so ``station``, ``maniac`` and ``nit`` could not be anybody's
+    label. Where it is too *small* -- ``raise_share``, ``limp``,
+    ``fold_to_three_bet`` -- the same trait lands barely one spread out, so
+    those features separated everybody cheaply and the preflop block decided
+    the archetype on its own. Fitting the spread narrows the postflop targets
+    into reachable territory and widens the preflop ones back to what the
+    field really is; the vocabulary becomes usable in one step because the
+    unit finally means the same thing everywhere.
 
-    Fitted from the observed scatter between players, not from a Beta
-    strength. That distinction is the whole reason this is now safe to fit:
-    where ``fit_empirical`` cannot separate the pool it returns a large
-    strength, implying a *tiny* spread, and a tiny spread amplifies every
-    deviation measured against it -- ten features hit that and drove
-    confidence to 1.00 on their own. Observed scatter has no such inversion;
-    when players really are alike it is simply small, and it is held inside
-    ``Store.SPREAD_BOUNDS`` besides.
+    Fitted from the *observed scatter between players with the sampling noise
+    subtracted*, not from a Beta strength -- see
+    :meth:`Store._spread_samples` for both halves of that. The Beta route is
+    the one that inverts: where the pool cannot be separated it returns a
+    large strength, implying a tiny spread, and a tiny spread amplifies every
+    deviation measured against it. Observed scatter has no such inversion, and
+    it is held inside ``Store.SPREAD_BOUNDS`` besides.
 
-    Fitting it from the pool was tried and measured: the observed scatter is
-    about half the assumed value on every postflop feature and 1.5x it on
-    ``raise_share``. Substituting those numbers made the model *worse* -- log
-    loss 1.295 -> 1.362, calibration error 0.003 -> 0.015, accuracy unchanged
-    -- because widening ``raise_share`` amplified the one feature that already
-    decided the label. Clamping the target into the observed band instead was
-    also tried and also rejected (1.343 / 0.566 / 0.022).
+    The built-in constants stay as the fallback, for the case this tool is
+    built for: a database too small to have fitted anything yet. They are
+    online-pool numbers, and a home game is not an online pool -- but a rough
+    unit everywhere beats no unit at all, and the fitted value replaces it
+    per feature as soon as ``villain fit`` has seen twelve players post it.
 
-    So the measurement stands, and whether the substitution helps is currently
-    unknowable. The reachability problem it was aimed at is still open, and
-    the evidence now points at the prototypes' own traits rather than at this
-    constant: they were authored as multiples of a spread without checking the
-    frequency that implies. Fix the harness before trying again, and do not
-    tune this against a handful of hand-labeled players -- that is how the
-    prototypes were overfitted twice already.
+    An earlier attempt at this was measured as a regression (log loss 1.295 ->
+    1.362) and reverted. Two things were wrong with that reading. The harness
+    could not judge it -- ``validate._best_supported`` built its ground truth
+    by calling ``target_frequency``, so the label and the thing predicting it
+    moved together -- and the traits were left at values authored for the old
+    unit, where the whole postflop block had been unreachable and was never
+    calibrated against anything. Changing the unit without re-authoring the
+    vectors written in it is not the same change. Judge it on
+    ``validate.predictive_loss``, which scores held-out *counts* and does not
+    consult ``target_frequency`` for its target.
     """
+    if priors:
+        fitted = priors.get(f"spread:{feature}")
+        if fitted:
+            return float(fitted)
     return SPREAD.get(feature, DEFAULT_SPREAD)
 
 
