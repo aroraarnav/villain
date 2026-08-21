@@ -164,6 +164,18 @@ RAISE_VALUE_CAP = {"flop": 0.08, "turn": 0.06, "river": 0.06}
 EP_POS = {"UTG", "UTG1", "UTG2", "MP", "LJ", "HJ"}
 STEAL_POS = {"CO", "BTN", "SB"}
 
+#: Continue rates for a seat that did not make the raise being answered.
+#:
+#: ``fold_to_three_bet`` is counted only on the opener and ``fold_to_four_bet``
+#: only on the 3-bettor -- features.py gates both on exactly that seat. A cold
+#: caller facing the same raise never posted either number, and handing them
+#: the opener's rate is how a blind cold-calls a 3-bet with a hand nobody cold
+#: calls, then calls off a 4-bet shove with it. Nothing measures this spot, so
+#: it takes a flat default: cold calling a re-raise is rare at every stake, and
+#: rarer the deeper the raise goes.
+COLD_CALL_VS_3BET = 0.06
+COLD_CALL_VS_4BET = 0.02
+
 
 def _polar_split(freq: float, value_cap: float) -> tuple[float, float]:
     """The value share and the bluff share of a betting frequency."""
@@ -634,22 +646,36 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
             # In and out of position facing a 3-bet are different decisions;
             # prefer the side we are actually on when it has sample.
             ipo = _ipo(hand, seat)
-            f3 = _chain(profile, [f"fold_to_three_bet:{ipo}", "fold_to_three_bet"],
-                        0.55, 20, vs=vs)
-            # A sampled fold-to-3-bet is the continue rate. The 0.70 cap was
-            # the same family as the old 0.16: a 10% folder still continued 70%.
-            measured_f3 = _any_sampled(profile, [
-                f"fold_to_three_bet:{ipo}", "fold_to_three_bet", VS_HERO + "fold_to_three_bet"])
-            cont = _clamp(1 - f3, 0.02, 0.98) if measured_f3 else _clamp(1 - f3, 0.05, 0.70)
-            cont_why = f"flats the 3-bet {ipo}"
+            # `fold_to_three_bet` is counted only for the player who *opened*
+            # (features.py gates it on ``d.seat == opener``). Someone who cold
+            # called the open and now faces a 3-bet never posted that number,
+            # and handing them the opener's continue rate is how a blind ends
+            # up cold-calling a 3-bet with a hand nobody cold-calls -- there is
+            # no measured rate for that spot at all, so it takes the tight
+            # default it deserves.
+            if getattr(hand, "opener", None) == seat:
+                f3 = _chain(profile, [f"fold_to_three_bet:{ipo}", "fold_to_three_bet"],
+                            0.55, 20, vs=vs)
+                cont = _clamp(1 - f3, 0.02, 0.98)
+                cont_why = f"flats the 3-bet {ipo}"
+            else:
+                cont = COLD_CALL_VS_3BET
+                cont_why = "cold-calls the 3-bet"
         elif level == 3:             # facing a 4-bet -> a 5-bet jam is QQ+/AK
             five_f = _freq_n(profile, "five_bet", 0.02, 10)   # GTO ~2%; sample-gated
             rr_gate, rr_label = 1 - five_f, "5-bets"
             rr_to = lg.max_raise_to
-            f4 = _freq_n(profile, "fold_to_four_bet", 0.50, 12)
-            cont = (_clamp(1 - f4, 0.02, 0.98) if _sampled(profile, "fold_to_four_bet")
-                    else _clamp(1 - f4, 0.03, 0.40))
-            cont_why = "calls the 4-bet"
+            # Same split as the 3-bet above: `fold_to_four_bet` is counted on
+            # the seat that made the 3-bet. A cold caller now facing a 4-bet
+            # never posted it, and lending them the 3-bettor's continue rate
+            # is how a 4-bet shove gets called by a hand that folds to a raise.
+            if getattr(hand, "three_bettor", None) == seat:
+                f4 = _freq_n(profile, "fold_to_four_bet", 0.50, 12)
+                cont = _clamp(1 - f4, 0.02, 0.98)
+                cont_why = "calls the 4-bet"
+            else:
+                cont = COLD_CALL_VS_4BET
+                cont_why = "cold-calls the 4-bet"
         else:                        # facing a 5-bet+ shove -- only the nuts
             rr_gate, rr_label = 0.99, f"{level + 2}-bets"
             rr_to = lg.max_raise_to

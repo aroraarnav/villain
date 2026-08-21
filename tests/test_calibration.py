@@ -209,3 +209,68 @@ def test_a_calling_station_3bet_defense_is_not_capped():
         folds += kind == "fold"
     assert n >= 300, f"only {n} 3-bet defense spots"
     assert folds / n < 0.22, f"fold_to_3bet realized {folds / n:.3f} over {n} vs 0.10"
+
+
+# -- a statistic belongs to the seat it was counted on ------------------------
+
+def _cold_caller_facing_a_three_bet(seed):
+    """Seat 1 cold-calls seat 0's open, seat 2 3-bets, action back on seat 1.
+
+    Three-handed the button acts first preflop, so the order is 0 (BTN),
+    1 (SB), 2 (BB) and the 3-bet lands while seat 1 still owes action -- which
+    is the whole point: seat 1 never raised anything.
+    """
+    h = Hand(_seats(400, 400, 400), button=0, sb=1, bb=2,
+             rng=np.random.default_rng(seed))
+    h.act("raise", 6)                       # seat 0 opens
+    if h.to_act != 1:
+        return None
+    h.act("call")                           # seat 1 cold-calls, never raised
+    if h.to_act != 2:
+        return None
+    h.act("raise", 24)                      # seat 2 3-bets
+    if h.over or h.to_act != 0:             # the opener answers first
+        return None
+    h.act("fold")
+    return h if (not h.over and h.to_act == 1) else None
+
+
+def test_a_cold_caller_does_not_inherit_the_openers_fold_to_three_bet():
+    """`fold_to_three_bet` is counted only on the seat that opened.
+
+    features.py gates it on ``d.seat == opener``. Lending it to a player who
+    merely called the open turns a 30%-folding opener into a blind that
+    cold-calls a 3-bet with a third of its range -- a spot the statistic never
+    described and nobody plays that way.
+    """
+    station = _Prof(rfi=0.4, three_bet=0.02, cold_call=0.35,
+                    fold_to_three_bet=0.10)        # continues 90% *as the opener*
+    rng = np.random.default_rng(11)
+    n = calls = 0
+    for seed in range(400):
+        h = _cold_caller_facing_a_three_bet(seed)
+        if h is None:
+            continue
+        assert h.opener == 0 and h.three_bettor == 2
+        n += 1
+        calls += decide(h, 1, station, rng)[0] in ("call", "raise")
+    assert n >= 100, f"only {n} cold-call-vs-3-bet spots"
+    assert calls / n < 0.20, (
+        f"a cold caller continued {calls / n:.0%} facing a 3-bet on the "
+        "opener's fold_to_three_bet")
+
+
+def test_the_opener_still_follows_its_own_fold_to_three_bet():
+    """The other half: the seat the number belongs to still gets it."""
+    station = _Prof(rfi=0.99, three_bet=0.02, four_bet=0.02,
+                    fold_to_three_bet=0.10)
+    defender = _Prof(three_bet=0.99, bb_defend=0.99, five_bet=0.01)
+    events = list(_play_preflop(station, defender, 900, seed=12))
+    n = folds = 0
+    for name, kind in events:
+        if name != "four_bet":
+            continue
+        n += 1
+        folds += kind == "fold"
+    assert n >= 200, f"only {n} spots"
+    assert folds / n < 0.25, f"the opener folded {folds / n:.0%} against a measured 10%"

@@ -106,6 +106,11 @@ class Hand:
         # Preflop shape carried onto later streets. c-betting a 3-bet pot is
         # not c-betting a limped one, and the policy used one number for both.
         self.opener: int | None = None            # first preflop raiser
+        # Who made the 3-bet. `fold_to_three_bet` belongs to the opener and
+        # `fold_to_four_bet` to the 3-bettor -- features counts them on
+        # exactly those seats -- so the policy has to know which seat it is
+        # talking to before it hands anyone those numbers.
+        self.three_bettor: int | None = None
         self.pot_kind: str = "pre"                # limp / srp / 3bp after preflop
         self.called_street: set[int] = set()      # called a bet this street
         self.called_prev: set[int] = set()        # called a bet last street
@@ -289,6 +294,8 @@ class Hand:
             self.last_raiser = i
             if self.street == 0 and self.opener is None:
                 self.opener = i
+            elif self.street == 0 and self.raises == 2 and self.three_bettor is None:
+                self.three_bettor = i
             self.log.append(f"{s.name} raises to {actual}")
         else:
             raise ValueError(f"unknown action {kind!r}")

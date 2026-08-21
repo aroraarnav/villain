@@ -140,12 +140,41 @@ const handlers = {
     return out;
   },
 
-  /** One API request, answered exactly as the local server would answer it. */
+  /** One API request, answered exactly as the local server would answer it.
+   *
+   * Armed with a progress reporter because any request can be the one that
+   * finds the database a definitions bump behind and rebuilds it inline --
+   * about a minute on a real database. Unreported, that request is a page
+   * that looks hung; the page raises its own bar when the first tick lands.
+   */
   api: ({ method, path, body }) => {
-    const proxy = bridge.dispatch_json(method, path, body || "");
-    const out = proxy.toJs({ dict_converter: Object.fromEntries });
-    proxy.destroy();
-    return out;
+    let lastPaint = 0;
+    const report = (done, total, phase) => {
+      self.postMessage({
+        type: "rebuild",
+        done: Number(done),
+        total: Number(total),
+        phase: String(phase),
+      });
+      // Same reason as the hero walk: postMessage queues, but a tight WASM
+      // loop delivers every tick in one turn on the page unless the other
+      // thread is given a moment to actually paint.
+      const now = Date.now();
+      if (now - lastPaint >= 80) {
+        lastPaint = now;
+        const spin = now + 6;
+        while (Date.now() < spin) { /* other thread paints */ }
+      }
+    };
+    bridge.set_progress(report);
+    try {
+      const proxy = bridge.dispatch_json(method, path, body || "");
+      const out = proxy.toJs({ dict_converter: Object.fromEntries });
+      proxy.destroy();
+      return out;
+    } finally {
+      bridge.set_progress(null);
+    }
   },
 
   read: ({ path }) => {
