@@ -4,7 +4,7 @@ const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g,
   c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const SVG = "http://www.w3.org/2000/svg";
 const state = {tab: "players", session: null, player: null, roster: null, glossary: null, game: null, lastEvent: null, stepTimer: null, descOn: true, revealed: false, checkFold: false, checkFoldHand: null, heroPoll: null,
-               sessionId: null};
+               sessionId: null, paused: false};
 
 /* Hosted demo, signed out: the sample is readable, not writable. Set by the
    boot page. Absent under `villain test`, which has no accounts and must stay
@@ -1695,6 +1695,7 @@ async function viewPlay() {
       const data = await post("/api/sim/new", {villains: [...picked],
         stack: +$("#sit-stack").value, sb: +$("#sit-sb").value, bb: +$("#sit-bb").value});
       state.game = data;
+      state.paused = false;          // a hold belongs to the table you left
       renderTable($("#view"), data);
     } catch (err) { $("#sit-go").disabled = false; alert(err.message); }
   };
@@ -1841,6 +1842,8 @@ function renderTable(view, data) {
           id="desc-on" aria-pressed="${state.descOn}">Explain</button>
         <button class="act small cf-toggle${state.muted ? "" : " on"}"
           id="snd-on" aria-pressed="${!state.muted}">Sounds</button>
+        <button class="act small cf-toggle${state.paused ? " on" : ""}"
+          id="pause-on" aria-pressed="${state.paused}">Pause</button>
       </div>
       <button class="act small" id="end-session">End and analyze</button>
     </div>
@@ -1920,8 +1923,21 @@ function renderTable(view, data) {
     armToggle(e.currentTarget, !state.muted);
     if (!state.muted) ensureAudio();
   };
+  // Pause holds the *auto-advance*, not the game: the villains stop stepping
+  // and the next hand stops dealing itself, but your own controls stay live,
+  // so a spot you want to sit with does not disappear at the pace of a timer.
+  $("#pause-on").onclick = (e) => {
+    state.paused = !state.paused;
+    armToggle(e.currentTarget, state.paused);
+    if (state.paused) {
+      if (state.stepTimer) { clearTimeout(state.stepTimer); state.stepTimer = null; }
+    } else if (state.game) {
+      renderTable(view, state.game);          // resuming re-arms the timer
+    }
+  };
   $("#end-session").onclick = () => endSession();
   renderControls($("#controls"), data);
+  if (state.paused) return;                  // held: nothing schedules itself
   if (!st.over && !st.your_turn) {           // pace the villains so you can watch
     const wait = (state.lastEvent && state.lastEvent.action === "fold") ? 2000 : SIM_DELAY;
     state.stepTimer = setTimeout(() => stepBots(data.token), wait);
