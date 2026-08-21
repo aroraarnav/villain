@@ -35,6 +35,19 @@
 
   const sync = window.VillainSync;
   const authOn = sync.enabled;
+
+  //: Sign-out reloads the page with this on the URL, and it is trusted over
+  //: whatever the auth client says the session is.
+  //
+  // The SDK clears its stored session asynchronously, so the load immediately
+  // after signing out could still read the session it was in the middle of
+  // removing. That put you straight back into the app as a signed-in user --
+  // no landing page, and no "sign in to import your own hands" bar, because
+  // that bar only renders for a guest -- over a database that had just been
+  // wiped and reseeded from the sample. Reloading a second time, by which
+  // point the clear had landed, showed the gate correctly, which is what made
+  // it look intermittent rather than like a race.
+  const SIGNED_OUT = "signedout";
   const signInError = authOn && /error_description=([^&]+)/.exec(location.hash || "")
     ? decodeURIComponent(RegExp.$1.replace(/\+/g, " ")) : null;
   if (!authOn) {
@@ -152,8 +165,19 @@
   });
 
   try {
-    const user = authOn ? await sync.me() : null;
+    const leaving = new URLSearchParams(location.search).has(SIGNED_OUT);
+    let user = authOn ? await sync.me() : null;
     if (authOn) sync.tidyUrl();       // the magic link leaves a live token in the bar
+    if (leaving) {
+      // Finish the job rather than trusting it finished. Signing out again on
+      // a session that is already gone is a no-op, so this costs nothing in
+      // the ordinary case and closes the race in the one that matters.
+      if (user) { try { await sync.signOut(); } catch { /* leaving anyway */ } }
+      user = null;
+      const url = new URL(location.href);
+      url.searchParams.delete(SIGNED_OUT);
+      history.replaceState({}, "", url.pathname + url.search + url.hash);
+    }
     if (authOn && !user) await askTheGate();
 
     step("Starting the runtime…", 30);
@@ -429,7 +453,13 @@
           // busy worker made the button look dead. The leftover copy is
           // dropped on the next boot, once this page has already become the
           // gate.
+          //
+          // Signing out is not instant -- it is a request, then a reload, then
+          // a runtime start -- and with only the button greying out, the app
+          // sat there looking ignored. It borrows the same blocking veil the
+          // rest of the interface uses for work you cannot interrupt.
           button.disabled = true;
+          if (typeof showBusy === "function") showBusy("Signing out\u2026");
           cancelSave();
           flag.set(RESET, "1");
           flag.drop(ACCOUNT);
@@ -439,7 +469,11 @@
           } catch {
             /* storage is what the next load reads; try to leave anyway */
           }
-          location.replace(location.pathname + location.search);
+          // Say so on the URL rather than leaving the next load to work it out
+          // from a session that may still be halfway cleared.
+          const url = new URL(location.href);
+          url.searchParams.set(SIGNED_OUT, "1");
+          location.replace(url.pathname + url.search);
         };
         chip.append(status, gauge, who, button);
       } else {

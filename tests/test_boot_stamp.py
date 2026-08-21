@@ -144,3 +144,44 @@ def test_the_third_party_script_is_pinned_and_checked():
         assert 'crossorigin=' in tag, (
             f"{src} has an integrity hash the browser will ignore without "
             f"crossorigin")
+
+
+def test_signing_out_tells_the_next_load_rather_than_leaving_it_to_guess():
+    """Sign-out lands on the landing page, deterministically.
+
+    The auth client clears its stored session asynchronously, so the load
+    straight after signing out could still read the session it was in the
+    middle of removing -- dropping you back into the app signed in, with no
+    landing page and no guest sign-in bar, over a freshly reseeded sample
+    database. A second reload showed the gate correctly, which is what made it
+    look intermittent instead of like a race.
+
+    Both halves have to agree on the marker, so this checks they are written in
+    terms of the same constant rather than two matching string literals.
+    """
+    shell = SHELL.read_text()
+
+    assert re.search(r'const SIGNED_OUT = "\w+";', shell), (
+        "the marker should be one named constant, not a literal in two places")
+    # Sign-out sets it on the URL it navigates to.
+    assert "url.searchParams.set(SIGNED_OUT" in shell
+    # The next boot reads it, and does not simply trust the session.
+    assert "new URLSearchParams(location.search).has(SIGNED_OUT)" in shell
+    assert "url.searchParams.delete(SIGNED_OUT)" in shell, (
+        "the marker has to come back off the URL, or a later reload re-signs-out")
+    assert shell.count("SIGNED_OUT") >= 4
+
+    # `user` has to be reassignable for the marker to be able to override it.
+    assert "let user = authOn ? await sync.me() : null;" in shell, (
+        "a const here would make the signed-out override impossible")
+
+
+def test_signing_out_puts_up_the_blocking_veil():
+    """It is a request, then a reload, then a runtime start. With only the
+    button greying out, the app looked like it had ignored the click."""
+    shell = SHELL.read_text()
+    out = shell[shell.index("button.textContent = \"Sign out\""):]
+    out = out[:out.index("chip.append(")]
+    assert "showBusy(" in out, "sign-out should raise the same veil the rest of the UI uses"
+    assert out.index("showBusy(") < out.index("await sync.signOut()"), (
+        "the veil has to go up before the waiting starts, not after")
