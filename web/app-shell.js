@@ -76,6 +76,13 @@
       if (window.__villainProgress) window.__villainProgress(msg);
       return;
     }
+    // A rebuild nobody asked for, inside somebody's ordinary request. The page
+    // raises the bar itself on the first tick -- there is no way to know in
+    // advance which request will be the one that finds the database stale.
+    if (msg.type === "rebuild") {
+      if (window.__villainRebuild) window.__villainRebuild(msg);
+      return;
+    }
     const slot = waiting.get(msg.id);
     if (!slot) return;
     waiting.delete(msg.id);

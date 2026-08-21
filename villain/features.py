@@ -88,7 +88,7 @@ def _record_chunk(payload):
 
 
 def record_hands(hands: Iterable[Hand], books: Books | None = None,
-                 workers: int | None = None) -> Books:
+                 workers: int | None = None, progress=None) -> Books:
     """Extract stats for every hand.
 
     Timing uses a two-pass read: first accumulate each player's think times,
@@ -122,8 +122,14 @@ def record_hands(hands: Iterable[Hand], books: Books | None = None,
                   for i in range(0, len(hands), size)]
         try:
             with ProcessPoolExecutor(max_workers=n_workers) as pool:
+                done = 0
                 for part in pool.map(_record_chunk, chunks):
                     merge_books(books, part)
+                    # A chunk at a time is the only honest granularity here:
+                    # the workers do not report back mid-chunk.
+                    done = min(done + size, len(hands))
+                    if progress is not None:
+                        progress(done, len(hands), "reading players")
             return books
         except Exception:
             # A sandbox with no process spawning, a pickling failure, a worker
@@ -132,8 +138,12 @@ def record_hands(hands: Iterable[Hand], books: Books | None = None,
             # so start clean.
             books.clear()
 
-    for hand in hands:
+    for done, hand in enumerate(hands, 1):
         record_hand(hand, books, pace_locks=locks, hero=hero)
+        if progress is not None and done % 200 == 0:
+            progress(done, len(hands), "reading players")
+    if progress is not None:
+        progress(len(hands), len(hands), "reading players")
     return books
 
 

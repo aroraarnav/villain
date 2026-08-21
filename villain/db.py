@@ -134,9 +134,34 @@ DEFAULT_PATH = Path.home() / ".villain" / "villain.db"
 #: double-seating. Was 2, which refused ordinary mid-orbit reconnects.
 SPURIOUS_OVERLAP = 10
 
-#: Feature / display-stat definition stamp. Bump when ``rebuild`` is required
-#: for existing databases to grow new counters or fix old ones.
+#: Feature / display-stat definition stamp. Bump when existing databases need
+#: a rebuild to grow new counters or fix wrong ones.
+#:
+#: The rebuild runs inline inside ``Store()``, and the web layer opens a
+#: ``Store`` per request, so on a real database (71k hands, about a minute)
+#: the next page waits for the whole thing. That is only acceptable because
+#: the wait now reports itself -- see :data:`PROGRESS_HOOK`.
 DEFINITIONS_VERSION = "2026-08-21.position-depth-and-pot-type-splits"
+
+#: Set by a host that can show a progress bar. Called as
+#: ``hook(done, total, phase)`` while a rebuild works; ``total`` of zero means
+#: the phase cannot be counted, only reported as still going.
+#:
+#: A module-level hook rather than a parameter because the rebuild that needs
+#: it is the one nobody asked for: the migration inside ``Store()``, reached
+#: from any of seventeen request handlers. Threading an argument through all
+#: of them to reach one automatic call is how that migration would stay the
+#: single path with no feedback.
+PROGRESS_HOOK = None
+
+
+def _report(done: int, total: int, phase: str) -> None:
+    if PROGRESS_HOOK is None:
+        return
+    try:
+        PROGRESS_HOOK(int(done), int(total), str(phase))
+    except Exception:
+        pass                      # a broken reporter must not break a rebuild
 
 
 #: Prefix for a seat whose account resolves to no player -- the person was
@@ -683,7 +708,16 @@ class Store:
             query = ("SELECT h.site, h.payload FROM hands h"
                      " JOIN temp.rebuild_ids r ON r.hand_id = h.hand_id"
                      " ORDER BY h.started_at")
-        for row in self.conn.execute(query, params):
+        # Two phases worth reporting, because they are the two that take the
+        # time: decoding every stored hand, then walking them for features.
+        # Counted in hands rather than percent so the bar cannot claim a
+        # fraction the work does not have.
+        n_total = self.conn.execute(
+            "SELECT COUNT(*) AS c FROM hands").fetchone()["c"]
+        _report(0, n_total, "reading hands")
+        for seen, row in enumerate(self.conn.execute(query, params), 1):
+            if seen % 500 == 0:
+                _report(seen, n_total, "reading hands")
             data = json.loads(gzip.decompress(row["payload"]))
             hand = hand_from_dict(data)
             # Re-key seats onto internal player ids so merged aliases pool.
@@ -705,7 +739,7 @@ class Store:
             hands.append(hand)
         # Two-pass timing: freeze each player's snap/tank cutoffs from the
         # full sample, then tag every hand with those same thresholds.
-        books = record_hands(hands)
+        books = record_hands(hands, progress=_report)
 
         wanted_str = {str(p) for p in wanted} if wanted is not None else None
         written = 0

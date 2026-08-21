@@ -1031,6 +1031,46 @@ async function readFiles(list) {
   return payload;
 }
 
+/* A rebuild the reader did not ask for, reported while it runs.
+
+   A definitions bump makes the next request rebuild every book from every
+   stored hand -- about a minute on a real database -- inside whichever
+   request happened to arrive first. There is no way to know in advance which
+   one that is, so the bar raises itself when the first tick arrives and tears
+   itself down when the ticks stop.
+
+   The veil is deliberate, not decoration: it is what stops a second tab from
+   being opened mid-migration and starting a second rebuild behind the first.
+   Everything is a modal veil until the counters are whole. */
+const REBUILD_PHASES = {
+  "reading hands": "Reading your stored hands",
+  "reading players": "Rebuilding every player's numbers",
+};
+let rebuildBar = null, rebuildIdle = null;
+
+window.__villainRebuild = (msg) => {
+  if (!rebuildBar) {
+    rebuildBar = showBusy("Updating your database…");
+  }
+  const label = REBUILD_PHASES[msg.phase] || "Working";
+  const done = Number(msg.done), total = Number(msg.total);
+  if (total > 0) {
+    rebuildBar(`${label}… ${done.toLocaleString()} of ${total.toLocaleString()}`,
+               done / total);
+  } else {
+    rebuildBar(`${label}…`, undefined);
+  }
+  // No "finished" tick exists -- the rebuild simply stops calling. A short
+  // idle after the last one is what tells us it is over, and it has to be
+  // longer than the gap between ticks (~100ms at the slowest phase).
+  if (rebuildIdle) clearTimeout(rebuildIdle);
+  rebuildIdle = setTimeout(() => {
+    rebuildBar = rebuildIdle = null;
+    const modal = $("#modal");
+    if (modal) modal.innerHTML = "";
+  }, 1500);
+};
+
 /* Import straight into the database: one session for the whole batch, the
    identity questions asked once across all of it, then a single commit. */
 function showBusy(text) {

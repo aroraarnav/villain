@@ -104,6 +104,26 @@ def dispatch_json(method: str, path: str, body: str = "") -> dict:
                 path.split("?")[0])}
 
 
+def set_progress(hook=None) -> None:
+    """Route rebuild progress to the host, or stop routing it.
+
+    The rebuild that needs a bar is the migration inside ``Store()``, which no
+    caller asks for and every request can trigger. The host arms this around a
+    call it is willing to show a bar for; :data:`villain.db.PROGRESS_HOOK`
+    stays ``None`` the rest of the time, so nothing pays for a reporter nobody
+    is watching.
+    """
+    from .. import db
+    if hook is None:
+        db.PROGRESS_HOOK = None
+        return
+
+    def report(done, total, phase):
+        hook(int(done), int(total), str(phase))
+
+    db.PROGRESS_HOOK = report
+
+
 def build_hero(progress=None) -> dict:
     """The Hero payload, reporting progress while it is built.
 
