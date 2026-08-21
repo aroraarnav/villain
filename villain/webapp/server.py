@@ -29,9 +29,9 @@ from ..replay import replay
 from ..stats import VS_HERO
 from .assets import page, static
 from .heroview import _cached_hero_id, forget_hero, hero_begin, hero_payload, hero_status
+from .jsonutil import encode as json_encode
 from .leaderboard import leaderboard_payload
 from .payloads import MIN_ROSTER_HANDS, profile_payload, roster_payload, tab_availability
-from .jsonutil import encode as json_encode
 from .sessions import SESSIONS, SIM_GAMES, _reap_sessions, apply_answers, commit_session, parse_upload, question_payload, session_brief, session_payload
 
 #: Hostnames the UI may be reached on. Anything else is a rebinding attempt.
