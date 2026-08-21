@@ -22,6 +22,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 DIST = WEB / "dist"
+PLACEHOLDER = "BUILD_STAMP"
+
+
+def stamp_boot_page(html: str, stamp: str) -> str:
+    """Bake a deploy id into every cache-busted URL on the boot page.
+
+    The worker, the scripts, the faces, and a JS constant all share one
+    placeholder so a deploy cannot stamp one and miss another. Missing the
+    placeholder would ship an uncache-busted worker -- the failure this
+    exists to prevent -- so that is an error, not a silent no-op.
+    """
+    if PLACEHOLDER not in html:
+        raise ValueError("boot page is missing BUILD_STAMP")
+    return html.replace(PLACEHOLDER, stamp)
 
 
 def run(*args: str) -> None:
@@ -63,11 +77,12 @@ def main() -> int:
     # 4. The boot page, the sync client, the worker that runs the Python, the
     #    (possibly blank) sync config, and a manifest so the page never
     #    hardcodes a wheel filename.
-    # The worker is cached by URL, so the URL has to change when it does.
+    # Every URL the boot page and the worker fetch is stamped: GitHub Pages
+    # does not let us set Cache-Control, the wheel filename does not change
+    # between deploys, and a cached worker is the previous application.
     stamp = str(int(time.time()))
     (DIST / "index.html").write_text(
-        (WEB / "index.html").read_text().replace("worker.js?v=BUILD_STAMP",
-                                                 f"worker.js?v={stamp}"))
+        stamp_boot_page((WEB / "index.html").read_text(), stamp))
     shutil.copy(WEB / "config.js", DIST / "config.js")
     shutil.copy(WEB / "sync.js", DIST / "sync.js")
     shutil.copy(WEB / "worker.js", DIST / "worker.js")
@@ -83,6 +98,7 @@ def main() -> int:
         shutil.copy(face, DIST / face.name)
         print(f"+ font {face.name}")
     (DIST / "manifest.json").write_text(json.dumps({
+        "stamp": stamp,
         "wheel": wheel.name,
         "db": db.name,
         "hero_cache": hero_cache.name if hero_cache.exists() else None,

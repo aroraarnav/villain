@@ -993,7 +993,9 @@ function buildNarrator(box, profile) {
     visible = true;
     toggle.textContent = "Hide";
     try {
-      const result = await post("/api/narrate", {profile: profile});
+      const result = window.villainNarrate
+        ? await window.villainNarrate(profile)
+        : await post("/api/narrate", {profile: profile});
       out.innerHTML = `${renderBullets(result.text)}
         <div class="small muted" style="margin-top:8px">suggested by
           ${esc(result.model)} from the numbers on this page \u2014 it is given
@@ -1003,12 +1005,57 @@ function buildNarrator(box, profile) {
       button.textContent = "Generate again";
       toggle.disabled = false;
     } catch (err) {
-      out.innerHTML = `<div class="small err">${esc(err.message)}</div>`;
-      button.textContent = original;
-      toggle.disabled = true;
+      if (err.needsKey) {
+        out.innerHTML = "";
+        out.appendChild(llmSetupForm(() => button.click()));
+        button.textContent = original;
+        toggle.disabled = true;
+      } else {
+        out.innerHTML = `<div class="small err">${esc(err.message)}</div>`;
+        button.textContent = original;
+        toggle.disabled = true;
+      }
     }
     button.disabled = false;
   };
+}
+
+function llmSetupForm(onSave) {
+  /* Hosted: there is no ~/.villain/env inside the tab. The key stays in
+     this browser. A Gemini key is enough; an OpenAI-compatible URL is the
+     escape hatch for anything else. */
+  const wrap = document.createElement("div");
+  wrap.className = "llm-setup";
+  wrap.innerHTML = `<p class="small">This browser has no local model to call.
+      Paste an API key — a Gemini key is enough. Nothing is uploaded except
+      the numbers already on this page.</p>
+    <label class="small muted">API key</label>
+    <input type="password" name="key" autocomplete="off">
+    <label class="small muted">Endpoint <span class="muted">(optional)</span></label>
+    <input type="url" name="url" placeholder="Gemini by default" autocomplete="off">
+    <label class="small muted">Models <span class="muted">(optional, comma-separated)</span></label>
+    <input type="text" name="models" placeholder="gemini-flash-lite-latest, \u2026" autocomplete="off">
+    <button class="act small" type="button">Save and generate</button>`;
+  const saved = window.villainLlmConfig && window.villainLlmConfig.get();
+  if (saved) {
+    if (saved.key) wrap.querySelector("[name=key]").value = saved.key;
+    if (saved.url) wrap.querySelector("[name=url]").value = saved.url;
+    if (saved.models) wrap.querySelector("[name=models]").value = saved.models;
+  }
+  wrap.querySelector("button").onclick = () => {
+    const key = wrap.querySelector("[name=key]").value.trim();
+    if (!key) {
+      wrap.querySelector("[name=key]").focus();
+      return;
+    }
+    const url = wrap.querySelector("[name=url]").value.trim();
+    const models = wrap.querySelector("[name=models]").value.trim();
+    window.villainLlmConfig.set({
+      key, url: url || undefined, models: models || undefined,
+    });
+    onSave();
+  };
+  return wrap;
 }
 
 /* The trigger and what it produces are the same element.
@@ -2184,19 +2231,21 @@ async function viewHero() {
       starting: "Opening your database",
       finding: "Finding which seat is yours",
       loading: "Reading your hand histories",
+      measuring: "Measuring the hands you played",
       reading: "Scoring every hand you played",
       fitting: "Fitting the model to what you held",
       grading: "Grading your folds and your sizing",
     };
     window.__villainProgress = (msg) => {
       const label = PHASES[msg.phase] || "Working";
-      if (msg.total > 0) {
-        done(`${label}\u2026 ${msg.done.toLocaleString()} of ${msg.total.toLocaleString()}`,
-             msg.done / msg.total);
+      const counted = Number(msg.done);
+      const total = Number(msg.total);
+      if (total > 0) {
+        done(`${label}\u2026 ${counted.toLocaleString()} of ${total.toLocaleString()}`,
+             counted / total);
       } else {
-        // No total means this phase cannot be counted -- or has not started
-        // counting yet. Name it and show the travelling bar rather than a
-        // number nobody measured, so there is never a spinner on its own.
+        // No total means this phase cannot be counted -- fitting the trees,
+        // where the only true thing to report is that it is still going.
         done(`${label}\u2026`, undefined);
       }
     };

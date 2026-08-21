@@ -20,6 +20,7 @@
 let pyodide = null;
 let bridge = null;
 let manifest = null;
+let deployStamp = "";
 
 const DIR = "/persist";
 const DB = `${DIR}/villain.db`;
@@ -33,6 +34,17 @@ const exists = (path) => pyodide.FS.analyzePath(path).exists;
 const toDisk = (fromDisk) => new Promise((done, fail) =>
   pyodide.FS.syncfs(fromDisk, (err) => (err ? fail(err) : done())));
 
+const withStamp = (url) => {
+  const u = new URL(url);
+  if (deployStamp) u.searchParams.set("v", deployStamp);
+  return u;
+};
+
+const grab = async (url) => {
+  const res = await fetch(withStamp(url), { cache: "no-store" });
+  return res.ok ? new Uint8Array(await res.arrayBuffer()) : null;
+};
+
 /** Create an empty database, the way a first sign-in needs one. */
 function emptyDb() {
   pyodide.runPython(`
@@ -42,7 +54,8 @@ with Store("${DB}"):
 `);
 }
 
-async function boot(base) {
+async function boot(base, stamp) {
+  deployStamp = stamp || "";
   step("Downloading the Python runtime…", 8);
   importScripts("https://cdn.jsdelivr.net/pyodide/v0.27.2/full/pyodide.js");
   pyodide = await self.loadPyodide();
@@ -51,11 +64,13 @@ async function boot(base) {
   await pyodide.loadPackage(["numpy", "scipy", "scikit-learn", "sqlite3", "micropip"]);
 
   step("Installing Villain…", 55);
-  manifest = await (await fetch(new URL("manifest.json", base))).json();
+  // no-store + a deploy stamp: the wheel filename does not change between
+  // releases (it is pinned at 0.1.0), so a cached copy is the previous UI.
+  manifest = await (await fetch(withStamp(new URL("manifest.json", base)), { cache: "no-store" })).json();
   // Absolute, not the bare filename out of the manifest: micropip resolves a
   // relative name against its own notion of the current directory and lands on
   // file:///, which it then refuses as a non-remote location.
-  await pyodide.pyimport("micropip").install(new URL(manifest.wheel, base).href, { deps: false });
+  await pyodide.pyimport("micropip").install(withStamp(new URL(manifest.wheel, base)).href, { deps: false });
 
   // The working copy lives in this browser either way, signed in or not.
   // IndexedDB is reachable from a worker; localStorage is not, which is why
@@ -72,14 +87,10 @@ async function boot(base) {
 /** The demo database, for a visitor who has not signed in. */
 async function seedDemo(base) {
   if (exists(DB)) return { seeded: false };
-  const grab = async (name) => {
-    const res = await fetch(new URL(name, base));
-    return res.ok ? new Uint8Array(await res.arrayBuffer()) : null;
-  };
-  const db = await grab(manifest.db);
+  const db = await grab(new URL(manifest.db, base));
   if (db) pyodide.FS.writeFile(DB, db);
   if (manifest.hero_cache) {
-    const hero = await grab(manifest.hero_cache);
+    const hero = await grab(new URL(manifest.hero_cache, base));
     if (hero) pyodide.FS.writeFile(HERO, hero);
   }
   await toDisk(false);
@@ -87,7 +98,7 @@ async function seedDemo(base) {
 }
 
 const handlers = {
-  boot: ({ base }) => boot(base),
+  boot: ({ base, stamp }) => boot(base, stamp),
   seedDemo: ({ base }) => seedDemo(base),
 
   /**
@@ -98,12 +109,36 @@ const handlers = {
    * calls straight back into this function as it walks.
    */
   hero: () => {
-    const report = (done, total, phase) =>
-      self.postMessage({ type: "hero", done, total, phase });
-    const proxy = bridge.build_hero(report);
-    const out = proxy.toJs({ dict_converter: Object.fromEntries });
-    proxy.destroy();
-    return out;
+    // create_proxy so the callback is not collected mid-walk, and Number()
+    // so a PyProxy does not arrive on the page as an object the bar cannot
+    // divide.
+    let lastPaint = 0;
+    const report = pyodide.ffi.create_proxy((done, total, phase) => {
+      self.postMessage({
+        type: "hero",
+        done: Number(done),
+        total: Number(total),
+        phase: String(phase),
+      });
+      // postMessage queues immediately, but a tight WASM loop can deliver
+      // every tick in one turn on the page -- the bar then jumps to the last
+      // fraction. A few milliseconds here lets the other thread paint the
+      // real one. Throttled so the pause is not itself the wait.
+      const now = Date.now();
+      if (now - lastPaint >= 80) {
+        lastPaint = now;
+        const spin = now + 6;
+        while (Date.now() < spin) { /* other thread paints */ }
+      }
+    });
+    try {
+      const proxy = bridge.build_hero(report);
+      const out = proxy.toJs({ dict_converter: Object.fromEntries });
+      proxy.destroy();
+      return out;
+    } finally {
+      report.destroy();
+    }
   },
 
   /** One API request, answered exactly as the local server would answer it. */
