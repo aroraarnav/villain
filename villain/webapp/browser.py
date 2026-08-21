@@ -19,7 +19,7 @@ from __future__ import annotations
 import io
 from pathlib import Path
 
-from .server import Handler
+from .server import Handler, writes_to_disk
 
 
 class _Headers:
@@ -93,7 +93,15 @@ def dispatch_json(method: str, path: str, body: str = "") -> dict:
     code, out, content_type = dispatch(method, path, headers, raw)
     # The API is JSON throughout; decode as text so the JS side can hand it
     # straight to a Response without a copy through the pyodide buffer proxy.
-    return {"status": code, "body": out.decode("utf-8"), "content_type": content_type}
+    #
+    # `wrote` is how the hosted page knows to upload the database to the
+    # account. It is answered here, by the module that owns the routes, because
+    # the page used to answer it with a regex of its own -- and a regex that
+    # does not know about a route added later says "nothing changed" for it,
+    # which is a silent failure to save somebody's import.
+    return {"status": code, "body": out.decode("utf-8"), "content_type": content_type,
+            "wrote": method == "POST" and code < 400 and writes_to_disk(
+                path.split("?")[0])}
 
 
 def build_hero(progress=None) -> dict:

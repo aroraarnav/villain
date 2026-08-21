@@ -8,6 +8,8 @@ reason to carry.
 
 from __future__ import annotations
 
+import copy
+
 from ..analyze import as_dict, enrich
 from ..archetypes import ARCHETYPE_BY_NAME, deviations
 from ..db import Store
@@ -142,8 +144,55 @@ def profile_payload(profile, player_id: int | None = None) -> dict:
 MIN_ROSTER_HANDS = 5
 
 
+#: The roster is the Database tab's whole payload, and it costs one full
+#: profile assembly -- shrinkage, archetype match, leak pricing, GTO compare --
+#: per player. On a home-game database of 160 players that is 1.4 seconds of
+#: arithmetic per visit to the tab, repeated for an answer that only changes
+#: when the stored hands do. The hosted app runs the same code single-threaded
+#: in a Pyodide worker with nothing repainting while it works, which is where
+#: that cost stopped being merely wasteful.
+_ROSTER_CACHE: dict[str, tuple[tuple, list[dict]]] = {}
+
+
+def _roster_fingerprint(store: Store) -> tuple:
+    """Everything the roster is computed from, cheaply enough to check first.
+
+    Row *counts* alone are not enough and the difference matters: refitting
+    priors rewrites the same number of rows in ``fitted_priors`` with different
+    values, and every profile is read through them, so a count-keyed cache would
+    serve pre-fit reads forever. Summing the columns catches a value that
+    changed without the shape changing.
+
+    Measured against the live database: 4ms, versus 1,440ms to rebuild -- so
+    this is checked on every request rather than invalidated by hand from the
+    routes that write. An invalidation hook is a thing to forget; this is not.
+    """
+    hands, players = store.conn.execute(
+        "SELECT (SELECT COUNT(*) FROM hands), (SELECT COUNT(*) FROM players)"
+    ).fetchone()
+    ratios = tuple(store.conn.execute(
+        "SELECT COUNT(*), SUM(hits), SUM(opps) FROM ratios").fetchone())
+    priors = tuple(store.conn.execute(
+        "SELECT COUNT(*), SUM(strength) FROM fitted_priors").fetchone())
+    return (hands, players, ratios, priors)
+
+
 def roster_payload(store: Store) -> list[dict]:
     """One row per player. Table sizes are pooled, not listed separately."""
+    key = str(store.path)
+    fingerprint = _roster_fingerprint(store)
+    cached = _ROSTER_CACHE.get(key)
+    if cached is not None and cached[0] == fingerprint:
+        # Copied out: the caller owns what it gets back, and one caller sorting
+        # or annotating the list in place would otherwise corrupt every later
+        # reader. 0.4ms against the 1,440ms this is avoiding.
+        return copy.deepcopy(cached[1])
+    rows = _build_roster(store)
+    _ROSTER_CACHE[key] = (fingerprint, rows)
+    return copy.deepcopy(rows)
+
+
+def _build_roster(store: Store) -> list[dict]:
     from ..gto import compare as _gto_compare
     from ..gto import rating as _gto_rating
     rows = []

@@ -442,18 +442,17 @@ function renderGtoBadge(gto) {
   return wrap;
 }
 
-function profileCard(p, opts) {
-  opts = opts || {};
-  const isHero = p.is_hero || (opts.heroId != null && p.player_id === opts.heroId);
-  const hero = opts.hero || isHero;
-  _heroVoice = hero;                     // glossary tooltips read in your voice
-  const card = document.createElement("div");
-  card.className = isHero ? "dash hero-scope" : "dash";
-  const leaks = p.leaks;
-  // Full-width tiles are placed last: dropped mid-grid they force a row break
-  // and strand whatever tile precedes them alone on a line.
-  const wideTiles = [];
+/* ---- the profile card ----
+   One tile per question the reader is asking, each with its own function.
+   This was a single 554-line renderer feeding the Database, Sessions and Hero
+   tabs at once: every change to any one panel put all three at risk, and the
+   only way to find a section was to count braces. The sections were already
+   here -- each had its own comment block -- they just had no names.
 
+   `hero` means "this is you", which changes the wording rather than the shape. */
+
+function profileHead(p, isHero, hero) {
+  /* Identity on the left, the two figures that rank them on the right. */
   // Header band: identity on the left, the two figures that rank them on the
   // right. The old header was a name, one sentence and a link stacked in the
   // top-left of a 195px card -- the number the whole page is about ("this
@@ -487,7 +486,6 @@ function profileCard(p, opts) {
     $("#skill-ring", head).prepend(skillGauge(p.skill.score));
   }
   $("#worth-stat .k", head).appendChild(info(termTip("available")));
-  card.appendChild(head);
   // The archetype essay goes behind a click, same words -- not on the first
   // screen. A mid-session read that requires scrolling past two paragraphs of
   // boilerplate before the first leak is one you will not use.
@@ -508,16 +506,6 @@ function profileCard(p, opts) {
 
   // One rating panel rather than two peers: the skill components and the GTO
   // rating are both 0-100 judgments of how well they play, and splitting them
-  // across two tiles made the reader compare a bar chart with a badge.
-  const skillBox = document.createElement("div");
-  skillBox.className = "panel wide p-skill";
-  skillBox.innerHTML =
-    `<div class="spread"><h2>Skill breakdown <span class="muted" style="font-weight:400">\u00b7 ` +
-    `${esc(p.skill.tier)}</span></h2></div>` +
-    `<div class="skill-side two-up" id="skill-side"></div>`;
-  const gtoBadge = renderGtoBadge(p.gto);
-  if (gtoBadge) $(".spread", skillBox).appendChild(gtoBadge);
-
   const badge = $("#skill-ring", head);
   bindTip(badge, p.skill.measured === false
     ? `<b>unknown</b><br>${termTip("unknown")}`
@@ -574,7 +562,22 @@ function profileCard(p, opts) {
 
   // Seven bars spanning 77-100 rank a player without telling you anything.
   // Each component now carries what it measures, the figure behind it, and
-  // whether it is the part of their game that is actually costing them.
+  return head;
+}
+
+
+function skillPanel(p) {
+  /* One rating panel rather than two peers: the skill components and the GTO
+     rating are both 0-100 judgments of how well they play, and splitting them
+     across two tiles made the reader compare a bar chart with a badge. */
+  const skillBox = document.createElement("div");
+  skillBox.className = "panel wide p-skill";
+  skillBox.innerHTML =
+    `<div class="spread"><h2>Skill breakdown <span class="muted" style="font-weight:400">\u00b7 ` +
+    `${esc(p.skill.tier)}</span></h2></div>` +
+    `<div class="skill-side two-up" id="skill-side"></div>`;
+  const gtoBadge = renderGtoBadge(p.gto);
+  if (gtoBadge) $(".spread", skillBox).appendChild(gtoBadge);
   const skillSide = $("#skill-side", skillBox);
   skillSide.innerHTML = "";
   const comps = p.skill_components || p.skill.components;
@@ -602,12 +605,17 @@ function profileCard(p, opts) {
 
   // The tile the screen exists for, and the only one wearing the primary
   // surface. bb/100 available moved up into the header band, where it is a
-  // figure rather than a caption on this panel's own title.
+  return skillBox;
+}
+
+
+function whatToDoTile(p, hero, leaks) {
+  /* The tile the screen exists for, and the only one on the primary surface:
+     priced leaks, then the unconfirmed watchlist, then the synthesis row. */
   const doBox = document.createElement("div");
   doBox.className = "panel wide primary p-do";
   doBox.innerHTML = `<h2>${hero ? "Your biggest leaks" : "What to do"}</h2>
     <div class="leaks"></div>`;
-  card.appendChild(doBox);
 
   const leakBox = $(".leaks", doBox);
   if (!leaks.length) {
@@ -718,28 +726,6 @@ function profileCard(p, opts) {
     leakBox.appendChild(div);
   }
 
-  if (false && (p.weak_spots || []).length) {
-    const weak = document.createElement("div");
-    weak.className = "leak weakspots";
-    weak.innerHTML = `<div class="headline"><b>Weakest parts of their game</b>
-        <span class="tag">from the rating</span></div>
-      <div class="small muted" style="margin:4px 0 8px">
-        Not priced leaks \u2014 where their game is thinnest.</div>`;
-    for (const spot of p.weak_spots) {
-      const row = document.createElement("div");
-      row.className = "metric";
-      const label = document.createElement("span");
-      label.className = "small";
-      label.textContent = spot.name + (spot.note ? ` \u2014 ${spot.note}` : "");
-      const val = document.createElement("span");
-      val.className = "small muted"; val.style.textAlign = "right";
-      val.textContent = spot.score.toFixed(0);
-      row.append(label, bar(spot.score, 100, "var(--mark-2)", 150), val);
-      if (spot.meaning) bindTip(row, `<b>${esc(spot.name)}</b><br>${esc(spot.meaning)}`);
-      weak.appendChild(row);
-    }
-    leakBox.appendChild(weak);
-  }
 
   // Not a priced row -- a synthesis of the rows above it -- so it stops
   // borrowing their shape: no price cell, a recessed ground, and it sits at
@@ -755,7 +741,14 @@ function profileCard(p, opts) {
 
   // How they play *you*. Rendered only when there is something in it: most
   // players against most opponents have no adjustment, and an empty panel
-  // takes a column off a screen that is meant to be read mid-hand.
+  return doBox;
+}
+
+
+function adjustmentsTile(p) {
+  /* How they play *you*, or null. Most players against most opponents have no
+     adjustment, and an empty panel takes a column off a screen meant to be
+     read mid-hand. */
   const adjustments = p.adjustments || [];
   if (adjustments.length) {
     const adjBox = document.createElement("div");
@@ -816,9 +809,15 @@ function profileCard(p, opts) {
       numbers.appendChild(info(statTip(a.stat, a.behavior)));
       adjGrid.appendChild(div);
     }
-    wideTiles.push(adjBox);
+    return adjBox;
   }
+  return null;
+}
 
+
+function timingTellsTile(p) {
+  /* Null unless some cell actually has a tell -- a grid of "not enough data"
+     is noise wearing a panel's clothes. */
   const tells = p.timing_tells || [];
   // Render only when some cell actually has a tell -- a grid of "not enough
   // data" is noise wearing a panel's clothes.
@@ -890,12 +889,15 @@ function profileCard(p, opts) {
       block.appendChild(grid);
       timingBox.appendChild(block);
     }
-    wideTiles.push(timingBox);
+    return timingBox;
   }
+  return null;
+}
 
-  card.appendChild(skillBox);
-  for (const tile of wideTiles) card.appendChild(tile);
 
+function keyNumbersTile(p, hero) {
+  /* The HUD line: the six every tracker prints, in the order they print them,
+     because that order is what a player's eye already knows. */
   // The HUD line: the six every tracker prints, in the order they print them,
   // because that order is what a player's eye already knows. Cutting this to
   // three rows of a table did not make the screen calmer -- it left a column
@@ -991,9 +993,38 @@ function profileCard(p, opts) {
     };
     $(".hud-actions", hudBox).appendChild(link);
   }
+  return hudBox;
+}
+
+
+function profileCard(p, opts) {
+  opts = opts || {};
+  const isHero = p.is_hero || (opts.heroId != null && p.player_id === opts.heroId);
+  const hero = opts.hero || isHero;
+  _heroVoice = hero;                     // glossary tooltips read in your voice
+  const card = document.createElement("div");
+  card.className = isHero ? "dash hero-scope" : "dash";
+  const leaks = p.leaks;
+  // Full-width tiles are placed last: dropped mid-grid they force a row break
+  // and strand whatever tile precedes them alone on a line.
+  const wideTiles = [];
+
+  const head = profileHead(p, isHero, hero);
+  card.appendChild(head);
+
+  const doBox = whatToDoTile(p, hero, leaks);
+  card.appendChild(doBox);
+
+  for (const tile of [adjustmentsTile(p), timingTellsTile(p)]) {
+    if (tile) wideTiles.push(tile);
+  }
+
+  card.appendChild(skillPanel(p));
+  for (const tile of wideTiles) card.appendChild(tile);
+
   // Between the header band and What to do: the six are reference you read
   // before the plan, not after it.
-  card.insertBefore(hudBox, doBox);
+  card.insertBefore(keyNumbersTile(p, hero), doBox);
   return card;
 }
 

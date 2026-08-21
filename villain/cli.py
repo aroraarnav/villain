@@ -495,7 +495,7 @@ def _cmd_rebuild(args) -> int:
 
 
 def _cmd_test(args) -> int:
-    from .web import serve
+    from .webapp import serve
     serve(db=args.db, port=args.port, open_browser=not args.no_browser)
     return 0
 

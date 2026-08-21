@@ -14,7 +14,12 @@ before any change leaves this repo — read it before opening a PR, not after.
   (priced leaks and the against-you read), `sim.py`/`botplay.py`/`holdem.py`
   (the practice simulator), `glossary.py` (every stat's definition — required
   for anything that reaches the UI), `cli.py` (the `villain` command).
-- `villain/webapp/` — the UI's Python side; `web.py` is a re-export shim.
+- `villain/webapp/` — the UI's Python side. `server.py` owns the routes and
+  says which of them write (`WRITING_POST_ROUTES`); `browser.py` runs the same
+  handler under Pyodide for the hosted app.
+- `web/` — the hosted app around that: `index.html` is the boot screen,
+  `app-shell.js` the auth/sync/database lifecycle, `sync.js` the Supabase
+  client, `worker.js` the Pyodide thread, `build.py` assembles `web/dist/`.
 - `villain/parsers/` — one module per poker site; `pokernow.py` is the only
   one today. New sites plug in without touching anything downstream.
 - `tests/` — plain `pytest`, config in `pyproject.toml`. Run it before and

@@ -311,10 +311,6 @@ class Estimate:
     beta: float = 1.0
     strength: float = 0.0  # prior weight in pseudo-opportunities
 
-    @property
-    def confident(self) -> bool:
-        return self.weight >= 0.5
-
     def _beta_prob(self, threshold: float, above: bool, *, prior: bool = False) -> float:
         """A finite probability. scipy's Beta is undefined at α/β = 0.
 

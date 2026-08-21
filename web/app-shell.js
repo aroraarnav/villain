@@ -1,0 +1,535 @@
+(async () => {
+  // Stamped by web/build.py. A cached index.html keeps the old value, so a
+  // deploy would keep serving the previous worker, wheel and shim. The live
+  // stamp lives in manifest.json, fetched bypassing the HTTP cache; if it
+  // disagrees, reload this document under a query the browser has not stored.
+  // localStorage (the session) and IndexedDB (the database) are origin-scoped
+  // and survive.
+  const STAMP = "BUILD_STAMP";
+  let deployStamp = STAMP;
+  try {
+    const fresh = await fetch("manifest.json", { cache: "no-store" })
+      .then((r) => r.ok ? r.json() : null);
+    if (fresh && fresh.stamp && fresh.stamp !== STAMP) {
+      const url = new URL(location.href);
+      if (url.searchParams.get("v") !== fresh.stamp) {
+        url.searchParams.set("v", fresh.stamp);
+        location.replace(url.href);
+        return;
+      }
+      deployStamp = fresh.stamp;
+    }
+  } catch { /* serving the source tree, or offline; boot what we have */ }
+
+  const boot = document.getElementById("boot");
+  const stepEl = document.getElementById("step");
+  const barEl = document.querySelector("#bar > i");
+  const step = (msg, pct) => { stepEl.textContent = msg; if (pct != null) barEl.style.width = pct + "%"; };
+  const fail = (err) => {
+    boot.classList.add("err");
+    step("Could not start.\n\n" + (err && err.message ? err.message : err) +
+         "\n\nA hard refresh usually clears a half-loaded runtime.");
+    barEl.style.background = "var(--danger)";
+    console.error(err);
+  };
+
+  const sync = window.VillainSync;
+  const authOn = sync.enabled;
+  const signInError = authOn && /error_description=([^&]+)/.exec(location.hash || "")
+    ? decodeURIComponent(RegExp.$1.replace(/\+/g, " ")) : null;
+  if (!authOn) {
+    document.getElementById("note").textContent =
+      "The whole tool is running in your browser. Hands are parsed here, not on a server. " +
+      "The sample roster is a guest demo; drop your own export on the Database tab.";
+  }
+
+  // Start the runtime before anyone has chosen anything. It is ~30 MB from a
+  // CDN and is the same download either way, so a visitor reading the sign-in
+  // page is spending time that would otherwise be spent staring at a bar.
+  // Python runs in a worker, so the page can keep drawing while it works. Every
+  // call is a message with an id and exactly one reply.
+  // Stamped by web/build.py. Browsers cache a worker script hard, and a stale
+  // one is worse than a stale page: it silently answers with an older set of
+  // calls while the page assumes the new ones exist.
+  const worker = new Worker("worker.js?v=" + deployStamp);
+  let nextCall = 0;
+  const waiting = new Map();
+  worker.onmessage = (event) => {
+    const msg = event.data || {};
+    if (msg.type === "step") return step(msg.text, msg.pct);
+    // Progress from inside a long Python call. Whoever put the veil up
+    // registers for it; nobody else needs to know it happened.
+    if (msg.type === "hero") {
+      if (window.__villainProgress) window.__villainProgress(msg);
+      return;
+    }
+    const slot = waiting.get(msg.id);
+    if (!slot) return;
+    waiting.delete(msg.id);
+    if (msg.ok) slot.done(msg);
+    else slot.fail(new Error(msg.error || "the runtime failed"));
+  };
+  worker.onerror = (e) => {
+    for (const slot of waiting.values()) slot.fail(new Error(e.message || "the runtime stopped"));
+    waiting.clear();
+  };
+  const call = (kind, args = {}, transfer = []) => new Promise((done, fail) => {
+    const id = ++nextCall;
+    waiting.set(id, { done, fail });
+    worker.postMessage({ id, kind, ...args }, transfer);
+  });
+
+  let manifest = null;
+  const runtime = call("boot", { base: location.href, stamp: deployStamp })
+    .then((out) => { manifest = out.manifest; return out; });
+  runtime.catch(() => {});            // the gate reports it; don't trip "unhandled"
+
+  // The hosted-only styles, started now rather than at injection time: they are
+  // a few kilobytes from the same host and have no reason to wait behind a 30 MB
+  // runtime. Requested through the pristine fetch because `window.fetch` is
+  // replaced further down and a stylesheet is not an API call. An empty string
+  // on failure is deliberate -- a missing account chip style is a wart, and
+  // refusing to open the app over it would be worse than the wart.
+  const shellCssReady = fetch("app-shell.css?v=" + deployStamp)
+    .then((r) => (r.ok ? r.text() : ""))
+    .catch(() => "");
+
+  /**
+   * Ask an unauthenticated visitor which way in they want.
+   *
+   * Resolves once they have chosen the demo. Choosing email does not resolve:
+   * that path ends in a redirect back here with a session, and the page starts
+   * again on the other side of it.
+   */
+  const askTheGate = () => new Promise((chose) => {
+    const said = document.getElementById("said");
+    const form = document.getElementById("signin");
+    const loading = document.getElementById("loading");
+    const submit = form.querySelector("button[type='submit']");
+    const label = form.querySelector(".label");
+    boot.classList.add("gate");
+
+    runtime.then(() => {},
+                 () => {
+                   loading.hidden = false;
+                   loading.textContent = "The runtime failed to load — try a hard refresh.";
+                 });
+
+    const say = (text, bad) => {
+      said.textContent = text;
+      said.classList.toggle("bad", !!bad);
+      said.classList.toggle("ok", !bad && !!text);
+    };
+    if (signInError) say(signInError, true);
+
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      const email = form.email.value.trim();
+      if (!email) return;
+      say("");
+      boot.classList.add("sending");
+      boot.classList.remove("sent");
+      form.email.disabled = true;
+      submit.disabled = true;
+      label.textContent = "Sending";
+      try {
+        await sync.sendLink(email);
+        boot.classList.remove("sending");
+        boot.classList.add("sent");
+        say("Check your inbox — we sent a link to " + email + ".");
+      } catch (err) {
+        boot.classList.remove("sending");
+        form.email.disabled = false;
+        submit.disabled = false;
+        label.textContent = "Email me a link";
+        say(err.message, true);
+      }
+    };
+    document.getElementById("demo").onclick = () => {
+      boot.classList.remove("gate");
+      chose();
+    };
+  });
+
+  try {
+    const user = authOn ? await sync.me() : null;
+    if (authOn) sync.tidyUrl();       // the magic link leaves a live token in the bar
+    if (authOn && !user) await askTheGate();
+
+    step("Starting the runtime…", 30);
+    await runtime;
+
+    // The working copy lives in this browser either way, signed in or not --
+    // but it lives in the worker's filesystem now, so reading and writing it
+    // are messages rather than calls. Bytes are transferred, not copied.
+    const { db: DB, hero: HERO } = await call("paths");
+    const toDisk = (fromDisk) => call("flush", { fromDisk });
+    const exists = async (path) => (await call("exists", { path })).exists;
+    const readFile = async (path) => (await call("read", { path })).bytes;
+    const writeFile = (path, bytes) =>
+      call("write", { path, bytes: bytes.buffer }, [bytes.buffer]);
+    const wipe = async () => {
+      for (const path of [DB, HERO]) await call("remove", { path });
+    };
+    const emptyDb = () => call("fresh");
+
+    const flag = {
+      get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+      set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
+      drop: (k) => { try { localStorage.removeItem(k); } catch { /* nothing to clear */ } },
+    };
+    const ACCOUNT = "villain.account";
+    const RESET = "villain.reset-local";
+
+    let persistWrite = async () => {};
+    let cancelSave = () => {};                 // drop a save that is only queued
+    let saveNote = () => {};                   // replaced once the header exists
+    let brokenRemote = false;                  // the stored copy could not be read back
+    let showProgress = () => {};               // replaced once the header exists
+
+    if (user) {
+      step("Loading your database…", 78);
+      // A second account signing in on the same laptop must not inherit the
+      // first one's database. The version check below would catch it, but only
+      // after having decided the local copy was current.
+      if (flag.get(ACCOUNT) !== user.sub) {
+        wipe();
+        flag.set(ACCOUNT, user.sub);
+      }
+
+      const remote = await sync.head(user.sub, "db");
+      if (remote.absent) {
+        // First sign-in: an empty database of their own, never the demo roster,
+        // which a guest cannot have added to anyway.
+        await wipe();
+        await emptyDb();
+        await toDisk(false);
+        // Deliberately not uploaded. An empty database is worth nothing to
+        // another device, and writing one means a fresh account -- or one just
+        // emptied -- always has objects in it. The first real change saves.
+      } else if (!(await exists(DB))
+                 || remote.version !== sync.knownVersion(user.sub, "db")) {
+        // Either this browser has never held it, or it changed elsewhere. A big
+        // database arrives in several parts, so say so rather than looking hung.
+        // The boot screen already has a bar; give it the real fraction rather
+        // than a fixed step, so a big database shows movement instead of
+        // sitting at one number for a minute.
+        step("Downloading your database…", 82);
+        try {
+          const pulled = await sync.get(user.sub, "db", (fraction) => {
+            step("Downloading your database…", 82 + Math.round(fraction * 8));
+          });
+          if (pulled.bytes) await writeFile(DB, pulled.bytes);
+          const hero = await sync.get(user.sub, "hero").catch(() => ({ bytes: null }));
+          if (hero.bytes) await writeFile(HERO, hero.bytes);
+          else await call("remove", { path: HERO });
+          await toDisk(false);
+        } catch (err) {
+          // An unreadable copy on the server must not cost you the working one
+          // in this browser. Keep it, say so, and write a whole one back over
+          // the broken remote rather than refusing to start.
+          if (!err.incomplete || !(await exists(DB))) throw err;
+          sync.forget(user.sub);          // drop the version guard: this is a repair
+          brokenRemote = true;
+        }
+      }
+
+      let timer = 0;
+      let pending = false;
+      const upload = async (report) => {
+        pending = false;
+        // `report` is passed when a caller is already showing progress of its
+        // own -- the import, under its veil. Otherwise it goes to the header.
+        const onProgress = report || showProgress;
+        try {
+          if (!report) saveNote("Saving…");
+          await toDisk(false);
+          await sync.put(user.sub, "db", await readFile(DB), onProgress);
+          if (!report) showProgress(null);
+          // A hero cache that no longer exists here has to be removed there
+          // too. Sweeping only runs while writing, so a file that is never
+          // written again would keep every version it ever had.
+          const heroBytes = await readFile(HERO);
+          if (heroBytes) await sync.put(user.sub, "hero", heroBytes);
+          else await sync.drop(user.sub, "hero");
+          const took = sync.tookOver();
+          if (!report) saveNote(took ? "Saved — replaced a newer copy from another tab." : "");
+        } catch (err) {
+          // Loudly. A failed save that only reaches the console is how somebody
+          // imports a session, closes the tab and loses it.
+          if (!report) showProgress(null);
+          if (report) throw err;      // the caller is showing this one
+          saveNote(`Not saved — ${err.message}`);
+        }
+      };
+      persistWrite = async () => {
+        pending = true;
+        clearTimeout(timer);
+        timer = setTimeout(upload, 800);
+      };
+
+      // Let the interface wait for a save and show its own progress, so an
+      // import is not "finished" while its hands are still going up.
+      window.villainSaveNow = async (report) => {
+        clearTimeout(timer);
+        await upload(report);
+      };
+      cancelSave = () => { clearTimeout(timer); pending = false; };
+      if (brokenRemote) {
+        // Write the good local copy over the unreadable stored one at once.
+        upload();
+      }
+
+      // pagehide is too late to start a request; browsers routinely kill one
+      // begun during teardown. visibilitychange fires while the page can still
+      // finish it, and covers switching tabs as well as closing them.
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden" && pending) { clearTimeout(timer); upload(); }
+      });
+    } else {
+      // Guest: the preloaded sample, kept in this browser only.
+      step("Loading the sample database…", 78);
+      // Sign-out navigates here before it can wipe: a leftover account copy
+      // would otherwise become the "demo", because seedDemo keeps any file
+      // that is already on disk.
+      if (flag.get(ACCOUNT) || flag.get(RESET)) {
+        const leftover = flag.get(ACCOUNT);
+        await wipe();
+        await toDisk(false);
+        if (leftover) sync.forget(leftover);
+        flag.drop(ACCOUNT);
+        flag.drop(RESET);
+      }
+      await call("seedDemo", { base: location.href });
+      // Nothing a guest does reaches the database, so there is nothing to
+      // write back. Keeping the demo pristine is the point.
+      persistWrite = async () => {};
+    }
+
+
+    // The demo is readable by anyone and writable by nobody. A guest can open
+    // every screen and play the simulator; importing, merging, renaming and
+    // resetting all need an account, because they are the operations whose
+    // results are worth keeping and a guest has nowhere to keep them.
+    //
+    // Enforced here rather than in the Python: the same server module backs
+    // `villain test` on a laptop, which has no accounts and must stay writable.
+    const GUEST_MAY_POST = /^\/api\/sim\//;
+
+    let promptSignIn = () => {};                 // replaced once the header exists
+
+    // Python runs on this thread. Nothing repaints while it does, so a spinner
+    // put up immediately before a call is only drawn once the call is over --
+    // the window simply freezes, which reads as a crash rather than as work.
+    // Two frames is the reliable "let it paint" yield: the first schedules,
+    // the second runs after the compositor has been through.
+    const letItPaint = () => new Promise((done) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => done())));
+
+    // Only when the interface has already said it is busy, or is about to
+    // write. Yielding on every read would put two frames on each of the many
+    // small calls a page load makes, for no one to see.
+    const worthAFrame = (method) =>
+      method === "POST" || !!document.querySelector(".veil.busy");
+
+    const realFetch = window.fetch.bind(window);
+    window.fetch = async (input, init = {}) => {
+      const url = new URL(typeof input === "string" ? input : input.url, location.href);
+      if (!url.pathname.startsWith("/api")) return realFetch(input, init);
+      const method = (init.method || "GET").toUpperCase();
+      if (authOn && !user && method === "POST" && !GUEST_MAY_POST.test(url.pathname)) {
+        promptSignIn();
+        return new Response(
+          JSON.stringify({ error: "Sign in to add your own hands — the demo database is read-only." }),
+          { status: 403, headers: { "Content-Type": "application/json" } });
+      }
+      let body = "";
+      if (init.body) body = typeof init.body === "string" ? init.body : await new Response(init.body).text();
+      if (worthAFrame(method)) await letItPaint();
+      // The cold Hero build is the one call worth reporting from the inside.
+      // `peek` must stay on the ordinary path: it exists to be instant.
+      const r = (method === "GET" && url.pathname === "/api/hero"
+                 && !url.searchParams.has("peek"))
+        ? await call("hero")
+        : await call("api", { method, path: url.pathname + url.search, body });
+      // `r.wrote` is the server's own answer to "did that change the stored
+      // database". This page used to decide it with a regex of its own, which
+      // meant a route added to the handler and not to the regex worked
+      // perfectly on a laptop and silently never reached the account.
+      if (r.wrote) {
+        if (url.pathname === "/api/reset" && user) {
+          // "Delete everything" has to mean everything. Uploading the emptied
+          // database instead would leave the account holding a file, a version
+          // folder and a manifest, which is not what anybody means by delete.
+          cancelSave();          // do not let a queued save re-create it
+          await sync.drop(user.sub, "db").catch(() => {});
+          await sync.drop(user.sub, "hero").catch(() => {});
+        } else {
+          await persistWrite();
+        }
+      }
+      return new Response(r.body, { status: r.status, headers: { "Content-Type": r.content_type } });
+    };
+
+    step("Opening the interface…", 92);
+    const shell = (await call("api", { method: "GET", path: "/" })).body;
+    const css = (await call("api", { method: "GET", path: "/static/app.css" })).body;
+    const js = (await call("api", { method: "GET", path: "/static/app.js" })).body;
+    const html = shell
+      .replace(/<link[^>]*app\.css[^>]*>/i, "")
+      .replace(/<script[^>]*app\.js[^>]*><\/script>/i, "");
+
+    document.open();
+    document.write(html);
+    document.close();
+
+    const style = document.createElement("style");
+    style.textContent = css + (await shellCssReady);
+    document.head.appendChild(style);
+
+    window.villainGuest = !!(authOn && !user);
+    const script = document.createElement("script");
+    script.textContent = js;
+    document.body.appendChild(script);
+
+    const header = document.querySelector("header");
+    const theme = document.getElementById("theme");
+    if (header && authOn) {
+      const chip = document.createElement("div");
+      chip.className = "acct";
+      const status = document.createElement("span");
+      status.className = "msg";
+      const gauge = document.createElement("span");
+      gauge.className = "gauge";
+      gauge.innerHTML = "<i></i>";
+      // One fraction for the whole database, whether it went in one piece or
+      // six. How it is stored is not the reader's problem.
+      showProgress = (fraction) => {
+        if (fraction == null) { gauge.classList.remove("on"); return; }
+        gauge.classList.add("on");
+        gauge.firstChild.style.width = Math.round(fraction * 100) + "%";
+      };
+      // Save state is the one thing on this page the user cannot verify for
+      // themselves, so it says so in the header rather than in the console.
+      saveNote = (text) => {
+        status.textContent = text;
+        status.classList.toggle("bad", text.startsWith("Not saved"));
+      };
+
+      if (user) {
+        const who = document.createElement("span");
+        who.className = "who";
+        who.textContent = user.name || "signed in";
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = "Sign out";
+        button.onclick = async () => {
+          // Session first, files second. A reload that raced sign-out used
+          // to restore the session from storage, and a wipe that waited on a
+          // busy worker made the button look dead. The leftover copy is
+          // dropped on the next boot, once this page has already become the
+          // gate.
+          button.disabled = true;
+          cancelSave();
+          flag.set(RESET, "1");
+          flag.drop(ACCOUNT);
+          sync.forget(user.sub);
+          try {
+            await sync.signOut();
+          } catch {
+            /* storage is what the next load reads; try to leave anyway */
+          }
+          location.replace(location.pathname + location.search);
+        };
+        chip.append(status, gauge, who, button);
+      } else {
+        const who = document.createElement("span");
+        who.className = "who";
+        who.textContent = "Not signed in";
+        chip.append(status, gauge, who);
+        if (signInError) saveNote(signInError);
+
+        // Say what an account is for where the reader already is, rather than
+        // waiting for them to try an import and be refused.
+        const bar = document.createElement("div");
+        bar.className = "guestbar";
+        bar.innerHTML = "<span>You are looking at a <b>sample database</b>. "
+          + "Sign in to import your own hand histories and keep them across devices.</span>";
+        const form = document.createElement("form");
+        form.className = "signin";
+        form.innerHTML = '<input type="email" name="email" placeholder="you@email" '
+          + 'autocomplete="email" required><button type="submit">'
+          + '<span class="spin" aria-hidden="true"></span><span class="label">Email me a link</span></button>';
+        bar.append(form);
+        const nav = document.querySelector("nav");
+        if (nav) nav.insertAdjacentElement("afterend", bar);
+
+        const say = (text, bad) => {
+          const note = form.querySelector(".formnote") || Object.assign(
+            document.createElement("span"), { className: "formnote" });
+          note.textContent = text;
+          note.classList.toggle("bad", !!bad);
+          form.append(note);
+        };
+        form.onsubmit = async (event) => {
+          event.preventDefault();
+          const email = form.email.value.trim();
+          if (!email) return;
+          const submit = form.querySelector("button");
+          const btnLabel = form.querySelector(".label");
+          submit.disabled = true;
+          form.email.disabled = true;
+          form.classList.add("sending");
+          btnLabel.textContent = "Sending";
+          say("", false);
+          try {
+            await sync.sendLink(email);
+            say("Check your inbox.", false);
+            btnLabel.textContent = "Sent";
+          } catch (err) {
+            say(err.message, true);
+            submit.disabled = false;
+            form.email.disabled = false;
+            btnLabel.textContent = "Email me a link";
+          }
+          form.classList.remove("sending");
+        };
+        // A refused write should point at the way forward, not just fail.
+        promptSignIn = () => {
+          saveNote("Sign in to add your own hands.");
+          bar.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          form.email.focus();
+        };
+
+        // Catch writes before they open a picker or a confirm dialog. The
+        // fetch guard would refuse them anyway, but only after the guest had
+        // already chosen files or typed "delete everything".
+        const stopWrite = (event) => {
+          const hit = event.target.closest && event.target.closest(
+            "#db-add, #reset, #db-drop, #drop, #save, .player-actions button");
+          if (!hit) return;
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          promptSignIn();
+        };
+        document.addEventListener("click", stopWrite, true);
+        document.addEventListener("drop", (event) => {
+          if (!(event.dataTransfer && event.dataTransfer.files
+                && event.dataTransfer.files.length)) return;
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          promptSignIn();
+        }, true);
+        document.addEventListener("dragover", (event) => {
+          if (event.dataTransfer
+              && [...event.dataTransfer.types].includes("Files")) {
+            event.preventDefault();
+          }
+        }, true);
+      }
+      header.insertBefore(chip, theme);
+    }
+  } catch (err) {
+    fail(err);
+  }
+})();

@@ -18,7 +18,6 @@ them:
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from dataclasses import dataclass, field
 from enum import IntEnum
 
@@ -201,18 +200,6 @@ class Hand:
                 return s
         raise KeyError(f"seat {seat} not in hand {self.hand_id}")
 
-    @property
-    def seat_map(self) -> dict[int, Seat]:
-        return {s.seat: s for s in self.seats}
-
-    def street_actions(self, street: Street) -> Iterator[Action]:
-        return (a for a in self.actions if a.street is street)
-
-    def voluntary(self, street: Street | None = None) -> Iterator[Action]:
-        for a in self.actions:
-            if a.is_voluntary and (street is None or a.street is street):
-                yield a
-
     def reached(self, street: Street) -> bool:
         """True if the hand got far enough for that street's cards to be dealt."""
         return len(self.board) >= _CARDS_BY_STREET[street]
@@ -221,15 +208,8 @@ class Hand:
         return self.board[: _CARDS_BY_STREET[street]]
 
     @property
-    def players_dealt(self) -> int:
-        return len(self.seats)
-
-    @property
     def bb(self) -> float:
         return float(self.big_blind)
-
-    def in_bb(self, chips: int) -> float:
-        return chips / self.big_blind if self.big_blind else 0.0
 
 
 _CARDS_BY_STREET = {Street.PREFLOP: 0, Street.FLOP: 3, Street.TURN: 4, Street.RIVER: 5}

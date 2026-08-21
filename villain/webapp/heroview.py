@@ -355,12 +355,12 @@ def _build_hero_payload(store: Store, hero_id: int | None, progress=None) -> dic
             "worst": [_fold_json(g) for g in report.worst()],
         }
 
-    def _tell_json(tell, avg_attr):
+    def _tell_json(tell):
         tell_streets = {s for s, _ in tell.tells()}
         return {
             STREET_LABELS.get(street, street): {
-                "strong": {"hands": strong.hands, "avg": getattr(strong, avg_attr)},
-                "weak": {"hands": weak.hands, "avg": getattr(weak, avg_attr)},
+                "strong": {"hands": strong.hands, "avg": strong.avg},
+                "weak": {"hands": weak.hands, "avg": weak.avg},
                 "in_words": tell.describe(street, lead=False),
                 "is_tell": street in tell_streets,
             }
@@ -383,8 +383,8 @@ def _build_hero_payload(store: Store, hero_id: int | None, progress=None) -> dic
         "missed_value": None if missed_report is None else _bucketed_json(
             missed_report, "missed", "missed_rate"),
         "grade_error": grade_error,
-        "sizing": _tell_json(sizing, "avg_size"),
-        "timing": _tell_json(timing, "avg_think_s"),
+        "sizing": _tell_json(sizing),
+        "timing": _tell_json(timing),
         "narrowing": [
             {"street": STREET_LABELS.get(s.street, s.street), "hands": s.hands,
              "avg_strength": round(s.avg_strength, 4)}

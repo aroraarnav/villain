@@ -5,20 +5,19 @@ import pytest
 from villain.db import Store
 from villain.hero import (
     MARGIN,
-    MIN_SIZING_HANDS,
-    MIN_TIMING_HANDS,
+    MIN_TELL_HANDS,
     MISSED_VALUE_MARGIN,
+    SIZING,
     SIZING_TELL_GAP,
+    TIMING,
     TIMING_TELL_GAP,
+    Bucket,
     FoldGrade,
     FoldReport,
     MissedValue,
     MissedValueReport,
-    SizeBucket,
-    SizingTell,
     StreetStrength,
-    TimeBucket,
-    TimingTell,
+    Tell,
     combined_grid,
     find_hero,
     fold_grades,
@@ -187,19 +186,23 @@ def test_mistake_rate_and_by_street_ignore_non_mistakes():
 
 # -- sizing_tell --------------------------------------------------------------
 
+def _tell(kind, strong_hands, strong_avg, weak_hands, weak_avg):
+    strong = Bucket("top half", hands=strong_hands, total=strong_hands * strong_avg)
+    weak = Bucket("bottom half", hands=weak_hands, total=weak_hands * weak_avg)
+    return Tell(by_street={1: (strong, weak)}, kind=kind)
+
+
 def _sizing(strong_hands, strong_avg, weak_hands, weak_avg):
-    strong = SizeBucket("top half", hands=strong_hands, total_fraction=strong_hands * strong_avg)
-    weak = SizeBucket("bottom half", hands=weak_hands, total_fraction=weak_hands * weak_avg)
-    return SizingTell(by_street={1: (strong, weak)})
+    return _tell(SIZING, strong_hands, strong_avg, weak_hands, weak_avg)
 
 
 def test_gap_needs_both_sides_thick_enough():
-    thin = _sizing(strong_hands=MIN_SIZING_HANDS - 1, strong_avg=0.9,
-                   weak_hands=MIN_SIZING_HANDS, weak_avg=0.4)
+    thin = _sizing(strong_hands=MIN_TELL_HANDS - 1, strong_avg=0.9,
+                   weak_hands=MIN_TELL_HANDS, weak_avg=0.4)
     assert thin.gap(1) is None
 
-    thick = _sizing(strong_hands=MIN_SIZING_HANDS, strong_avg=0.9,
-                    weak_hands=MIN_SIZING_HANDS, weak_avg=0.4)
+    thick = _sizing(strong_hands=MIN_TELL_HANDS, strong_avg=0.9,
+                    weak_hands=MIN_TELL_HANDS, weak_avg=0.4)
     assert thick.gap(1) == pytest.approx(0.5)
 
 
@@ -227,7 +230,7 @@ def test_sizing_tell_describe_names_the_gap_when_it_clears_the_bar():
     small_gap = _sizing(strong_hands=20, strong_avg=0.55, weak_hands=20, weak_avg=0.50)
     assert "observant opponent" not in small_gap.describe(1)
 
-    empty = SizingTell(by_street={})
+    empty = Tell(by_street={}, kind=SIZING)
     assert empty.describe(1) is None
 
 
@@ -334,18 +337,16 @@ def test_missed_value_produces_well_formed_grades(stored):
 # -- timing_tell --------------------------------------------------------------
 
 def _timing(strong_hands, strong_avg, weak_hands, weak_avg):
-    strong = TimeBucket("top half", hands=strong_hands, total_think_s=strong_hands * strong_avg)
-    weak = TimeBucket("bottom half", hands=weak_hands, total_think_s=weak_hands * weak_avg)
-    return TimingTell(by_street={1: (strong, weak)})
+    return _tell(TIMING, strong_hands, strong_avg, weak_hands, weak_avg)
 
 
 def test_timing_gap_needs_both_sides_thick_enough():
-    thin = _timing(strong_hands=MIN_TIMING_HANDS - 1, strong_avg=5.0,
-                   weak_hands=MIN_TIMING_HANDS, weak_avg=2.0)
+    thin = _timing(strong_hands=MIN_TELL_HANDS - 1, strong_avg=5.0,
+                   weak_hands=MIN_TELL_HANDS, weak_avg=2.0)
     assert thin.gap(1) is None
 
-    thick = _timing(strong_hands=MIN_TIMING_HANDS, strong_avg=5.0,
-                    weak_hands=MIN_TIMING_HANDS, weak_avg=2.0)
+    thick = _timing(strong_hands=MIN_TELL_HANDS, strong_avg=5.0,
+                    weak_hands=MIN_TELL_HANDS, weak_avg=2.0)
     assert thick.gap(1) == pytest.approx(3.0)
 
 

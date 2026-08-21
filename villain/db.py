@@ -1007,14 +1007,6 @@ class Store:
     MIN_SPREAD_PLAYERS = 12
     SPREAD_BOUNDS = (0.15, 1.60)
 
-    def fitted_spreads(self, regime: str) -> dict[str, float]:
-        return {
-            r["stat"]: float(r["spread"])
-            for r in self.conn.execute(
-                "SELECT stat, spread FROM fitted_priors"
-                " WHERE regime = ? AND spread IS NOT NULL", (regime,))
-        }
-
     @staticmethod
     def _logit_noise(rate: float, opps: float) -> float:
         """Variance a *single* player's log-odds carries purely from sampling.
