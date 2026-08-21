@@ -25,10 +25,11 @@ report of the numbers has to carry the caveat.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
-from .exploits import find_leaks
-from .features import record_hands
-from .profile import build_profile
+from villain.exploits import find_leaks
+from villain.features import record_hands
+from villain.profile import build_profile
 
 #: Chronological split point. Walk-forward, not interleaved: a leak claims
 #: something about the future, so it has to be tested against it.
@@ -132,3 +133,30 @@ def score(store, min_hands: int = 2 * MIN_HALF_HANDS) -> BacktestResult | None:
     if scored_players == 0:
         return None
     return BacktestResult(players=scored_players, tiers=tiers)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Walk leaks forward: found early, checked late.
+
+    A research instrument, not part of the product. It lives outside the
+    package so it does not ride into the browser inside the wheel.
+    """
+    import argparse
+
+    from villain.db import DEFAULT_PATH, Store
+
+    parser = argparse.ArgumentParser(prog="tools/backtest.py", description=__doc__)
+    parser.add_argument("--db", type=Path, default=DEFAULT_PATH)
+    args = parser.parse_args(argv)
+
+    with Store(args.db) as store:
+        result = score(store)
+    if result is None:
+        print("Not enough hands on any player to walk forward. Import more first.")
+        return 1
+    print(result)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

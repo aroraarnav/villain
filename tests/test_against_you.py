@@ -1,9 +1,8 @@
-"""Surfacing adjustments: the words, the card and the payload.
+"""Surfacing adjustments: the words and the payload.
 
 The arithmetic is tested in ``test_dynamics``. What matters here is that
-nothing reaches a reader without an explanation, that the section fits the
-card it has to share, and that a player with no adjustment produces no
-section rather than an empty one.
+nothing reaches a reader without an explanation, and that a player with no
+adjustment produces an empty list rather than a missing key.
 """
 
 import json
@@ -13,7 +12,6 @@ from villain.dynamics import adjustments
 from villain.features import record_hands
 from villain.glossary import VERSUS_BEHAVIOR, stat_help, versus_behavior
 from villain.profile import build_unified
-from villain.report import WIDTH, profile_card
 from villain.stats import VS_HERO, StatBook
 
 STRONG = {
@@ -83,51 +81,6 @@ def test_the_phrasing_names_the_reader():
 
 def test_an_unknown_stat_falls_back_to_its_key():
     assert versus_behavior("not_a_stat:flop") == "not_a_stat:flop"
-
-
-# -- the card ---------------------------------------------------------------
-
-
-def test_the_section_appears_with_what_it_is_measured_against():
-    card = profile_card(profile_with(STRONG))
-    assert "AGAINST YOU" in card
-    assert "Against their own game, not against the field." in card
-    assert "folds to your river bets" in card
-
-
-def test_no_adjustment_means_no_section():
-    """Most players have none. A section that appears every time to say so
-    costs a line of a card that has to fit on one screen."""
-    quiet = {k: v for k, v in STRONG.items() if not k.startswith(VS_HERO)}
-    assert "AGAINST YOU" not in profile_card(profile_with(quiet))
-
-
-def test_verbose_says_so_instead_of_staying_silent():
-    quiet = {k: v for k, v in STRONG.items() if not k.startswith(VS_HERO)}
-    card = profile_card(profile_with(quiet), verbose=True)
-    assert "no adjustment against you clears the bar yet" in card
-
-
-def test_the_section_fits_the_card():
-    card = profile_card(profile_with(STRONG)).splitlines()
-    start = next(i for i, line in enumerate(card) if line.startswith("AGAINST YOU"))
-    block = card[start:start + 2 + len(profile_with(STRONG).adjustments) + 1]
-    for line in block:
-        assert len(line) <= WIDTH, f"{len(line)} chars: {line!r}"
-
-
-def test_certainty_is_not_claimed():
-    """The interval comes from a normal approximation, which will happily
-    print a confidence it cannot have."""
-    card = profile_card(profile_with(STRONG))
-    assert "100% sure" not in card
-
-
-def test_a_profile_built_without_adjustments_still_renders():
-    """report only ever reads the attribute; nothing requires it to be set."""
-    profile = profile_with(STRONG)
-    profile.adjustments = []
-    assert profile_card(profile)
 
 
 # -- the payload ------------------------------------------------------------

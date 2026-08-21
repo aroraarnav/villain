@@ -90,6 +90,15 @@ def main() -> int:
 
     # 1. The package as a wheel. It is pure Python and carries the UI assets
     #    via package-data, so it installs in the browser under micropip.
+    #
+    #    build/ first, and this is not housekeeping: setuptools copies the
+    #    package into build/lib and never removes what is no longer there, so
+    #    a module deleted since the last build is still sitting in it and
+    #    still goes into the wheel. Deleting six modules and finding all six
+    #    in the wheel afterwards is how this was found.
+    stale = ROOT / "build"
+    if stale.exists():
+        shutil.rmtree(stale)
     run(sys.executable, "-m", "build", "--wheel", "--outdir", str(DIST))
     wheel = sorted(DIST.glob("villain-*.whl"))[-1]
     check_wheel_data(wheel)

@@ -1,64 +1,14 @@
-"""The learned layers: clusters from a pool, hand strength from revealed cards.
+"""Hand strength, learned from revealed cards.
 
-Both refuse to run on too little data, and that refusal is the behavior worth
-testing hardest -- a model fitted to six players will produce clusters, and
-they will be noise.
+It refuses to run on too little data, and that refusal is the behavior worth
+testing hardest -- a model fitted to a handful of showdowns will produce
+predictions, and they will be noise.
 """
 
-import numpy as np
 import pytest
 
-from villain.archetypes import ARCHETYPE_BY_NAME, target_frequency
-from villain.cluster import MIN_PROFILES, NotEnoughData, fit_clusters
-from villain.profile import PROFILE_FEATURES, build_profile
 from villain.reads import MIN_ROWS, build_dataset, fit, texture
 from villain.reads import NotEnoughData as ReadsNotEnoughData
-from villain.stats import StatBook
-
-
-def make_pool(kinds, per_kind=20, opps=60, seed=3):
-    rng = np.random.default_rng(seed)
-    profiles = []
-    for kind in kinds:
-        arch = ARCHETYPE_BY_NAME[kind]
-        for i in range(per_kind):
-            book = StatBook(player_id=f"{kind}{i}", name=f"{kind}{i}",
-                            regime="6max", hands=opps * 3)
-            for feature in PROFILE_FEATURES:
-                p = float(np.clip(target_frequency(arch, feature, "6max")
-                                  + rng.normal(0, 0.05), 0.02, 0.97))
-                book.ratios[feature].hits = rng.binomial(opps, p)
-                book.ratios[feature].opps = opps
-            book.meters["table_size"].add(6, 1)
-            profiles.append(build_profile(book))
-    return profiles
-
-
-def test_clustering_recovers_planted_groups():
-    model = fit_clusters(make_pool(["station", "nit", "maniac"]))
-    assert model.n_components == 3
-    for cluster in model.clusters:
-        kinds = {m.rstrip("0123456789") for m in cluster.members}
-        assert len(kinds) == 1, f"cluster {cluster.index} mixed {kinds}"
-
-
-def test_clusters_are_named_after_the_nearest_archetype():
-    model = fit_clusters(make_pool(["station", "nit", "maniac"]))
-    assert {c.label for c in model.clusters} == {"station", "nit", "maniac"}
-
-
-def test_clustering_refuses_a_small_pool():
-    with pytest.raises(NotEnoughData, match="textbook archetypes"):
-        fit_clusters(make_pool(["station"], per_kind=MIN_PROFILES - 5))
-
-
-def test_assign_places_a_new_player():
-    profiles = make_pool(["station", "nit", "maniac"])
-    model = fit_clusters(profiles)
-    newcomer = make_pool(["station"], per_kind=1, seed=99)[0]
-    cluster, strength = model.assign(newcomer)
-    assert cluster.label == "station"
-    assert strength > 0.5
 
 
 def test_strength_dataset_labels_only_known_cards(hands):
