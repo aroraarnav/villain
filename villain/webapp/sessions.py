@@ -232,10 +232,12 @@ def session_payload(token: str, store: Store | None = None) -> dict:
     def _unified(by_regime):
         # Same shrink as database profiles when this pool has fitted priors.
         priors = None
+        populations = None
         if store is not None and by_regime:
-            fitted = store.fitted_priors(primary_regime(by_regime))
+            populations = store.fitted_by_regime()
+            fitted = populations.get(primary_regime(by_regime))
             priors = fitted or None
-        profile = build_unified(by_regime, priors=priors)
+        profile = build_unified(by_regime, priors=priors, populations=populations)
         if profile is not None:
             # Store.profile attaches these for saved players; an uploaded
             # session has no store to do it, and a preview that silently drops
@@ -301,8 +303,10 @@ def session_payload(token: str, store: Store | None = None) -> dict:
             "table_mix": profile.table_mix,
             "hands": profile.hands, "sample_quality": profile.sample_quality,
             "archetype": profile.archetype, "confidence": profile.archetype_confidence,
-            "skill": profile.skill.score, "skill_tier": profile.skill.tier,
+            "skill": (None if not profile.skill.measured else profile.skill.base),
+            "skill_tier": profile.skill.tier,
             "skill_confidence": profile.skill.confidence,
+            "skill_measured": profile.skill.measured,
             "exploitability": profile.skill.exploitability,
             "top_leak": top.headline if top else None,
             "leak_count": len(profile.tags),

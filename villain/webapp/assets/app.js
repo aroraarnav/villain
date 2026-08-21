@@ -295,10 +295,19 @@ function rosterTable(players, opts) {
       const holder = document.createElement("div");
       holder.style.cssText = "display:flex;gap:8px;align-items:center;justify-content:flex-end";
       const label = document.createElement("span");
-      label.textContent = p.skill.toFixed(0);
-      // Mapped to the observed domain, not 0-100: anchored at zero the whole
-    // roster looked equally full -- p10 to p90 differed by 14px of bar.
-    holder.append(bar(Math.max(0, p.skill - 40), 55, "var(--mark-3)", 66), label);
+      if (p.skill == null || p.skill_tier === "unknown") {
+        label.className = "muted";
+        label.textContent = "\u2014";
+        bindTip(holder, `<b>unknown</b><br>${termTip("unknown")}`);
+        holder.append(label);
+      } else {
+        label.textContent = p.skill.toFixed(0);
+        // Mapped to the observed domain, not 0-100: anchored at zero the whole
+        // roster looked equally full -- p10 to p90 differed by 14px of bar.
+        holder.append(bar(Math.max(0, p.skill - 40), 55, "var(--mark-3)", 66), label);
+        bindTip(holder, `<b>${esc(p.skill_tier)}</b> ${p.skill.toFixed(0)}/100<br>
+          ${termTip("confidence")} ${fmtPct(p.skill_confidence)}`);
+      }
       // Sample quality moved onto the hands count as a tooltip: it qualifies
       // that number and nothing else, so it does not need its own line on
       // every row.
@@ -328,8 +337,6 @@ function rosterTable(players, opts) {
         $(".leakcell", tr).appendChild(info(esc(p.top_leak_note)));
       }
       tr.children[3].appendChild(holder);
-      bindTip(holder, `<b>${esc(p.skill_tier)}</b> ${p.skill.toFixed(0)}/100<br>
-        <span class="muted">confidence ${fmtPct(p.skill_confidence)}</span>`);
       body.appendChild(tr);
     }
     wrap.querySelectorAll("th").forEach(th => {
@@ -441,9 +448,9 @@ function profileCard(p, opts) {
       <div class="profile-stats">
         <div class="stat-pair ring">
           <div class="skill-ring" id="skill-ring">
-            <span class="score">${p.skill.score.toFixed(0)}</span>
+            <span class="score">${p.skill.measured === false ? "\u2014" : p.skill.score.toFixed(0)}</span>
           </div>
-          <span class="k">skill</span>
+          <span class="k">${p.skill.measured === false ? "unknown" : "skill"}</span>
         </div>
         <div class="stat-pair" id="worth-stat">
           <span class="v">${p.skill.exploitability_bb100.toFixed(1)}</span>
@@ -451,7 +458,9 @@ function profileCard(p, opts) {
         </div>
       </div>
     </div>`;
-  $("#skill-ring", head).prepend(skillGauge(p.skill.score));
+  if (p.skill.measured !== false) {
+    $("#skill-ring", head).prepend(skillGauge(p.skill.score));
+  }
   $("#worth-stat .k", head).appendChild(info(termTip("available")));
   card.appendChild(head);
   // The archetype essay goes behind a click, same words -- not on the first
@@ -485,7 +494,9 @@ function profileCard(p, opts) {
   if (gtoBadge) $(".spread", skillBox).appendChild(gtoBadge);
 
   const badge = $("#skill-ring", head);
-  bindTip(badge, `<b>${esc(p.skill.tier)}</b> ${p.skill.score.toFixed(0)}/100<br>
+  bindTip(badge, p.skill.measured === false
+    ? `<b>unknown</b><br>${termTip("unknown")}`
+    : `<b>${esc(p.skill.tier)}</b> ${p.skill.score.toFixed(0)}/100<br>
     <span class="muted">confidence ${fmtPct(p.skill.confidence)}</span>
     ${p.skill.observed_bb100 == null ? ""
       : `<br><span class="muted">${p.skill.observed_bb100.toFixed(1)} bb/100 observed</span>`}`);

@@ -918,12 +918,13 @@ class Store:
     #: session. Street-conditioned ones (fold vs turn bet, say) give a handful
     #: of observations in one sitting, which is enough for a story and not for
     #: a finding.
-    SESSION_STATS = ("vpip", "pfr", "three_bet", "limp",
-                     "aggression:flop", "aggression:turn", "wtsd")
+    SESSION_STATS = ("vpip", "pfr", "three_bet", "limp", "wtsd")
 
     #: A sitting needs this many opportunities before it is compared at all,
-    #: and the baseline needs this many on top of it.
-    SESSION_MIN_OPPS = 20
+    #: and the baseline needs this many on top of it. Twenty opportunities and
+    #: a 3 pp gap is a story, not a finding -- the copy already refuses a
+    #: missing baseline, and it should refuse a thin sitting the same way.
+    SESSION_MIN_OPPS = 40
     SESSION_MIN_BASELINE = 60
 
     def session_detail(self, session: dict) -> list[dict]:
@@ -977,19 +978,21 @@ class Store:
             deltas.sort(key=lambda d: -abs(d["delta"]))
             # A read built from this sitting alone, so the trends sit next to
             # what the player looked like while they were producing them.
-            from .archetypes import match
+            # Same finish step as Database/CLI -- a sitting that skipped
+            # enrich drifted the moment the next leak rule landed.
+            from .analyze import enrich
             from .profile import build_profile
-            from .skill import rate
             primary = max(by_regime.items(), key=lambda kv: kv[1].hands)[1]
-            snap = build_profile(primary, by_regime,
-                                 priors=self.fitted_priors(primary.regime) or None)
-            snap.skill = rate(snap)
-            arch, conf, _mix = match(snap)
+            snap = enrich(build_profile(
+                primary, by_regime,
+                priors=self.fitted_priors(primary.regime) or None))
             out.append({"player_id": int(pid), "name": names.get(pid, pid),
                         "hands": hands, "net_bb": round(net_bb, 1), "deltas": deltas,
                         "regimes": sorted(by_regime),
-                        "archetype": arch, "confidence": round(conf, 3),
-                        "skill": round(snap.skill.score, 1),
+                        "archetype": snap.archetype,
+                        "confidence": round(snap.archetype_confidence, 3),
+                        "skill": (None if not snap.skill.measured
+                                  else snap.skill.base),
                         "skill_tier": snap.skill.tier,
                         "sample_quality": snap.sample_quality,
                         "regime_label": snap.regime_label})
@@ -1176,18 +1179,23 @@ class Store:
                 out[f"range:{row['stat']}"] = (float(row["floor"]), float(row["ceiling"]))
         return out
 
+    def fitted_by_regime(self) -> dict[str, dict]:
+        """Every regime's fitted blob. Translation needs source *and* target."""
+        from .priors import REGIMES
+        return {r: blob for r in REGIMES if (blob := self.fitted_priors(r))}
+
     def profiles(self, player_id: int, min_hands: int = 1) -> list:
         """One profile per table size. The detailed view, not the default."""
         from .profile import build_profiles
         books = self.books(player_id)
         if not books:
             return []
-        regime = max(books.values(), key=lambda b: b.hands).regime
-        priors = self.fitted_priors(regime) or None
-        built = build_profiles(books, min_hands=min_hands, priors=priors)
+        populations = self.fitted_by_regime()
+        built = build_profiles(books, min_hands=min_hands, populations=populations)
         for profile in built:
             # This view is split by table size, so each profile gets only its
             # own -- pooling here would undo the split it exists to show.
+            priors = populations.get(profile.regime) or None
             profile.adjustments = adjustments(
                 {profile.regime: books[profile.regime]}, priors=priors)
             profile.versus = versus_read({profile.regime: books[profile.regime]},
@@ -1204,8 +1212,9 @@ class Store:
         books = self.books(player_id)
         if not books:
             return None
-        priors = self.fitted_priors(primary_regime(books)) or None
-        profile = build_unified(books, priors=priors)
+        populations = self.fitted_by_regime()
+        priors = populations.get(primary_regime(books)) or None
+        profile = build_unified(books, priors=priors, populations=populations)
         if profile is not None:
             profile.adjustments = adjustments(books, priors=priors)
             profile.versus = versus_read(books, priors=priors)

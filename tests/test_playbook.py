@@ -280,6 +280,18 @@ def test_pooling_carries_a_real_deviation_across_tables():
     assert translated > population_mean("vpip", "hu")
 
 
+def test_pooling_uses_fitted_means_when_they_exist():
+    """Builtin online VPIP 0.24 vs this pool's 0.42: translating against the
+    wrong field made a 6-max observation look like a huge HU deviation."""
+    from villain.profile import _translate_rate
+    from villain.stats import Ratio
+
+    pops = {"6max": {"vpip": (0.42, 25.0)}, "hu": {"vpip": (0.55, 25.0)}}
+    average = Ratio(hits=42, opps=100)
+    translated = _translate_rate("vpip", average, "6max", "hu", populations=pops)
+    assert translated == pytest.approx(0.55, abs=0.03)
+
+
 def test_other_tables_are_discounted_not_ignored(hands):
     """Related games, not the same game: they move the estimate, but less."""
     from villain.features import record_hands

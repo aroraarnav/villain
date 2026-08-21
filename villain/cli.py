@@ -311,7 +311,8 @@ def _cmd_scout(args) -> int:
 
     profiles = [
         p for p in (
-            build_unified(by, priors=fitted.get(primary_regime(by)) or None)
+            build_unified(by, priors=fitted.get(primary_regime(by)) or None,
+                          populations=fitted or None)
             for by in books.values() if by
         )
         if p is not None and p.hands >= args.min_hands

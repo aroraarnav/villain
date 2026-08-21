@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 
-from .priors import CONTINUOUS, NEIGHBORS, REGIME_LABELS, SHORT, Estimate, logit, population_mean, prior_for, regime, shrink, sigmoid
+from .priors import CONTINUOUS, NEIGHBORS, REGIME_LABELS, SHORT, Estimate, logit, prior_for, regime, shrink, sigmoid
 from .stats import VS_HERO, Meter, Ratio, StatBook
 
 # The features that define a player, in the order clustering expects.
@@ -234,10 +234,21 @@ def _personal_prior(stat: str, others: dict[str, StatBook], pop_mean: float,
 
 
 def build_profiles(by_regime: dict[str, StatBook], min_hands: int = 1,
-                   priors: dict[str, tuple[float, float]] | None = None) -> list[Profile]:
-    """One profile per regime the player has been seen in, busiest first."""
-    profiles = [build_profile(book, others=by_regime, priors=priors)
-                for reg, book in by_regime.items() if book.hands >= min_hands]
+                   priors: dict[str, tuple[float, float]] | None = None,
+                   populations: dict[str, dict] | None = None) -> list[Profile]:
+    """One profile per regime the player has been seen in, busiest first.
+
+    Each book is shrunk toward *that* table's fitted prior. Handing every
+    slice the busiest-regime blob is how a heads-up book of a 6-max regular
+    got measured against 6-max VPIP -- 55% is a nit heads-up and a maniac
+    at that prior.
+    """
+    profiles = []
+    for reg, book in by_regime.items():
+        if book.hands < min_hands:
+            continue
+        blob = (populations or {}).get(reg) or priors
+        profiles.append(build_profile(book, others=by_regime, priors=blob))
     profiles.sort(key=lambda p: -p.hands)
     return profiles
 
@@ -295,7 +306,9 @@ def primary_regime(by_regime: dict[str, StatBook]) -> str:
     return max(live.items(), key=lambda kv: kv[1].hands)[0]
 
 
-def unified_book(by_regime: dict[str, StatBook]) -> tuple[StatBook, dict[str, int], dict[str, float]]:
+def unified_book(by_regime: dict[str, StatBook],
+                 populations: dict[str, dict] | None = None,
+                 ) -> tuple[StatBook, dict[str, int], dict[str, float]]:
     """Fold every table size into one book on the primary table's scale."""
     live = {r: b for r, b in by_regime.items() if b.hands > 0}
     if not live:
@@ -331,7 +344,8 @@ def unified_book(by_regime: dict[str, StatBook]) -> tuple[StatBook, dict[str, in
             # does not describe it.
             if ratio.opps <= 0 or stat.startswith(VS_HERO):
                 continue
-            translated = _translate_rate(stat, ratio, reg, home)
+            translated = _translate_rate(stat, ratio, reg, home,
+                                         populations=populations)
             weight = CROSS_REGIME_DISCOUNT * ratio.opps
             merged.ratios[stat].hits += translated * weight
             merged.ratios[stat].opps += weight
@@ -354,16 +368,32 @@ def unified_book(by_regime: dict[str, StatBook]) -> tuple[StatBook, dict[str, in
     return merged, contributions, native
 
 
-def _translate_rate(stat: str, ratio: Ratio, source: str, target: str) -> float:
+def _pop_mean_strength(stat: str, regime: str,
+                       populations: dict[str, dict] | None = None,
+                       ) -> tuple[float, float]:
+    """Fitted (mean, strength) for this regime when we have one, else built-in."""
+    blob = (populations or {}).get(regime) or {}
+    fitted = blob.get(stat)
+    if isinstance(fitted, tuple) and len(fitted) >= 2:
+        return fitted[0], fitted[1]
+    return prior_for(stat, regime)
+
+
+def _translate_rate(stat: str, ratio: Ratio, source: str, target: str,
+                    populations: dict[str, dict] | None = None) -> float:
     """Re-express a rate measured in one regime on another regime's scale.
 
     Shrunk first, because an unshrunk 0% or 100% has no finite log-odds and a
-    tiny sample would translate into an extreme claim.
+    tiny sample would translate into an extreme claim. Source and target
+    populations must be the *same* field the rest of the pipeline uses --
+    fitted, once ``villain fit`` has run. Translating a home-game 6-max
+    observation against the online 24% VPIP table made it look like a huge
+    heads-up deviation, and shrinkage after the merge cannot undo that.
     """
-    mean, strength = prior_for(stat, source)
+    mean, strength = _pop_mean_strength(stat, source, populations)
     shrunk = shrink(ratio.hits, ratio.opps, mean, strength).value
-    source_pop = population_mean(stat, source)
-    target_pop = population_mean(stat, target)
+    source_pop = mean
+    target_pop = _pop_mean_strength(stat, target, populations)[0]
     if source_pop == target_pop:
         return shrunk
     deviation = logit(shrunk) - logit(source_pop)
@@ -371,9 +401,10 @@ def _translate_rate(stat: str, ratio: Ratio, source: str, target: str) -> float:
 
 
 def build_unified(by_regime: dict[str, StatBook],
-                  priors: dict[str, tuple[float, float]] | None = None) -> Profile | None:
+                  priors: dict[str, tuple[float, float]] | None = None,
+                  populations: dict[str, dict] | None = None) -> Profile | None:
     """One profile per player, informed by every table size they have played."""
-    book, contributions, native = unified_book(by_regime)
+    book, contributions, native = unified_book(by_regime, populations=populations)
     if not contributions:
         return None
     profile = build_profile(book, priors=priors, native=native)

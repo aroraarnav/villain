@@ -103,6 +103,19 @@ def test_preflop_strength_orders_hands():
     assert preflop_strength(hole("Ac", "Ad")) > preflop_strength(hole("7c", "2d"))
 
 
+def test_small_pairs_outscore_offsuit_broadway_for_defense():
+    """Chen ranked 33 with KTo. Blind defense is the other way around."""
+    from villain.cards import card_id
+    def hole(a, b):
+        return (int(card_id(a)), int(card_id(b)))
+    pair = preflop_strength(hole("3c", "3d"), "defend")
+    kto = preflop_strength(hole("Kc", "Td"), "defend")
+    junk = preflop_strength(hole("7c", "2d"), "defend")
+    assert pair > kto
+    assert pair > 0.85
+    assert junk < 0.20
+
+
 def test_opening_is_position_dependent_in_frequency_and_size():
     # A profile that opens tight/small UTG and wide/big on the button. The bot
     # must reproduce both the frequency and the size, per position.
@@ -392,3 +405,48 @@ def test_a_villain_without_regime_books_still_plays():
         regime, hands = "6max", 500
     pooled = Book()
     assert Villain(pooled).at(6) is pooled
+
+
+def _bb_faces_btn_open_3max(hole):
+    """Three-handed: button opens, SB folds, action on the BB with ``hole``."""
+    from villain.botplay import _position
+    from villain.cards import card_id
+    h = Hand(_seats(400, 400, 400), button=0, sb=1, bb=2,
+             rng=np.random.default_rng(1))
+    assert _position(h, h.to_act) == "BTN"
+    h.act("raise", 6)
+    h.act("fold")
+    assert _position(h, h.to_act) == "BB"
+    a, b = hole
+    h.seats[h.to_act].hole = (int(card_id(a)), int(card_id(b)))
+    return h
+
+
+def test_small_pairs_defend_the_bb_against_a_button_open():
+    """33 from the BB 3-handed vs a BTN open is a call even for a tight player.
+
+    Chen ranking put 22-55 below KTo, so a monotonic top-X% defend folded them.
+    Even a 35% defender still set-mines small pairs. 72o still folds.
+    """
+    tight = _Prof(bb_defend=0.35, three_bet=0.05, three_bet_vs_steal=0.05)
+    pair_calls = junk_calls = 0
+    n = 40
+    for i in range(n):
+        rng = np.random.default_rng(i + 1)
+        pair = _bb_faces_btn_open_3max(("3c", "3d"))
+        junk = _bb_faces_btn_open_3max(("7c", "2d"))
+        pair_calls += decide(pair, pair.to_act, tight, rng)[0] != "fold"
+        junk_calls += decide(junk, junk.to_act, tight, rng)[0] != "fold"
+    assert pair_calls >= n - 2, f"33 folded {n - pair_calls}/{n} times from the BB"
+    assert junk_calls <= 2
+
+
+def test_a_high_cbet_includes_the_bottom_of_the_range():
+    """A maniac who c-bets 80% was betting the best 80%, so the betting range
+    was too strong and practice taught folding to aggression."""
+    from villain.botplay import _polar_bet
+    assert _polar_bet(0.10, 0.80, 0.55) == "bluff"
+    assert _polar_bet(0.90, 0.80, 0.55) == "value"
+    assert _polar_bet(0.35, 0.80, 0.55) is None
+    assert _polar_bet(0.10, 0.30, 0.55) is None
+    assert _polar_bet(0.80, 0.30, 0.55) == "value"

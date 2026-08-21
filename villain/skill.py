@@ -27,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .archetypes import ARCHETYPE_BY_NAME, target_frequency
-from .exploits import Leak, find_leaks, leak_family
+from .exploits import MIN_CONFIDENCE, Leak, find_leaks, leak_family
 from .profile import Profile
 
 TIERS = [
@@ -67,14 +67,26 @@ class Skill:
     components: list[Component] = field(default_factory=list)
     winrate_bb100: float | None = None
     adjusted_bb100: float | None = None
+    base: float = 50.0              # unshrunk mix, before the sample-size lid
+    measured: bool = False          # False below 150 hands -- not a comparison
 
     @property
     def label(self) -> str:
+        if not self.measured:
+            return "unknown"
         return f"{self.tier} ({self.score:.0f}/100)"
 
 
+#: Hands before a rating is allowed to call itself a skill comparison.
+#: Below this the number is 50 plus a sample-size lid, and ranking a roster
+#: by it ranks who has been measured. Same cliff as ``sample_quality``.
+MEASURED_HANDS = 150
+
+
 def rate(profile: Profile) -> Skill:
-    exploitability = deduped_exploitability(find_leaks(profile, min_confidence=0.55))
+    # Same bar the profile list uses. A lower one here made "worth bb/100" on
+    # the roster disagree with the exploits on the page for the same player.
+    exploitability = deduped_exploitability(find_leaks(profile, min_confidence=MIN_CONFIDENCE))
     components = [
         _preflop_selection(profile),
         _preflop_aggression(profile),
@@ -97,13 +109,23 @@ def rate(profile: Profile) -> Skill:
 
     confidence = _confidence(profile)
     # With little evidence, pull toward the middle rather than announcing that
-    # a 20-hand sample plays like an expert.
+    # a 20-hand sample plays like an expert. The pulled number is not a skill
+    # comparison -- corr(hands, displayed score) was 0.49 on a real pool, and
+    # almost all of that was this lid. Below MEASURED_HANDS we refuse the
+    # tier rather than printing "competent (52)".
+    measured = profile.hands >= MEASURED_HANDS
     score = 50.0 + (base - 50.0) * confidence
-    tier, blurb = _tier(score)
+    if measured:
+        tier, blurb = _tier(score)
+    else:
+        tier, blurb = ("unknown",
+                       "Not enough hands to rate. Pulled to the middle on "
+                       "purpose -- this is not a skill comparison.")
     return Skill(
         score=round(score, 1), tier=tier, blurb=blurb, confidence=round(confidence, 2),
         exploitability=round(exploitability, 2), components=components,
         winrate_bb100=profile.winrate_bb100, adjusted_bb100=adjusted,
+        base=round(base, 1), measured=measured,
     )
 
 
@@ -356,8 +378,15 @@ def weaknesses(skill: Skill, limit: int = 3) -> list[Component]:
 
 
 def leaderboard(profiles: list[Profile]) -> list[Profile]:
-    """Players sorted by rating, with the least certain ratings last."""
+    """Players sorted by the unshrunk rating, unmeasured samples last.
+
+    Ranking by the displayed (pulled) score ranked sample size. Ranking by
+    ``base`` once there are enough hands is the comparison the number claims
+    to be; everyone below :data:`MEASURED_HANDS` goes to the bottom rather
+    than clustering at 50.
+    """
     for p in profiles:
         if p.skill is None:
             p.skill = rate(p)
-    return sorted(profiles, key=lambda p: (-p.skill.score, -p.skill.confidence))
+    return sorted(profiles, key=lambda p: (
+        0 if p.skill.measured else 1, -p.skill.base, -p.skill.confidence))

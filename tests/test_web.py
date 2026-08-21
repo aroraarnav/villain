@@ -313,6 +313,7 @@ def test_sample_quality_words_are_all_defined():
     for hands in (10, 100, 300, 900):
         quality = Profile("x", "x", hands, "hu", 2.0).sample_quality
         assert quality in TERMS, f"{quality!r} appears in the UI but is undefined"
+    assert "unknown" in TERMS
 
 
 def test_leak_tiers_are_all_defined():
@@ -719,16 +720,21 @@ def test_a_new_database_offers_neither_hero_nor_simulate(tmp_path):
     assert "Import" in tabs["hero"]["why"]
 
 
-def test_hands_without_an_identifiable_hero_open_simulate_but_not_hero(tmp_path, hands):
+def test_hands_without_an_identifiable_hero_open_simulate_but_not_hero(tmp_path, hands, monkeypatch):
     """The three states are distinct, and the middle one is the interesting
     case: there are hands and opponents to play, but nothing in them says
     which seat was yours, so Hero alone stays shut -- with a reason about
-    whose cards are visible rather than about the database being empty."""
-    from villain.webapp.payloads import tab_availability
+    whose cards are visible rather than about the database being empty.
+
+    Simulate's sample bar is tested separately; here it is dropped to 1 so
+    the fixture can stand in for a measured opponent.
+    """
+    from villain.webapp import payloads
+    monkeypatch.setattr(payloads, "MIN_SIM_HANDS", 1)
     with Store(tmp_path / "v.db") as store:
         store.add_hands(hands)
         store.rebuild()
-        tabs = tab_availability(store)
+        tabs = payloads.tab_availability(store)
     assert tabs["play"]["ok"] is True
     assert tabs["play"]["why"] is None
     assert tabs["hero"]["ok"] is False
@@ -740,6 +746,7 @@ def test_a_hero_and_opponents_open_both(tmp_path, hands, monkeypatch):
     """Hero detection needs more hands than the fixture has, so it is stubbed:
     what is under test is the availability logic, not find_hero."""
     from villain.webapp import payloads
+    monkeypatch.setattr(payloads, "MIN_SIM_HANDS", 1)
     with Store(tmp_path / "v.db") as store:
         store.add_hands(hands)
         store.rebuild()
@@ -748,6 +755,17 @@ def test_a_hero_and_opponents_open_both(tmp_path, hands, monkeypatch):
     assert tabs["hero"]["ok"] is True
     assert tabs["hero"]["why"] is None
     assert tabs["play"]["ok"] is True
+
+
+def test_simulate_stays_closed_until_an_opponent_is_measured(tmp_path, hands):
+    """Five hands is the prior with a name attached; the sim needs a real sample."""
+    from villain.webapp.payloads import MIN_SIM_HANDS, tab_availability
+    with Store(tmp_path / "v.db") as store:
+        store.add_hands(hands)
+        store.rebuild()
+        tabs = tab_availability(store)
+    assert tabs["play"]["ok"] is False
+    assert str(MIN_SIM_HANDS) in tabs["play"]["why"]
 
 
 def test_every_blocked_tab_says_why(tmp_path):

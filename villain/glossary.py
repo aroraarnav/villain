@@ -336,7 +336,9 @@ TERMS: dict[str, str] = {
                  "a two-thirds pot bet needs them to fold 40% of the time to "
                  "break even, so anything above that is profit.",
     "field": "What a typical player at this table size does — context for "
-             "whether a number is unusual, not a target to aim at.",
+             "whether a number is unusual, not a target to aim at. After "
+             "the pool has been fit, this is that pool, not a generic "
+             "online table.",
     "against you": "The same statistic counted only on the decisions where you "
                    "were the one they were facing. Read against their own game "
                    "rather than the field: the interesting thing is not that "
@@ -356,10 +358,16 @@ TERMS: dict[str, str] = {
                 "toward reality.",
     "95% range": "Where their true frequency probably sits. A wide range means "
                  "not enough hands yet.",
-    "available": "Roughly what a perfect opponent could win from their leaks, in "
-                 "big blinds per 100 hands, if they attacked every one.",
+    "available": "A ranking of which leaks to attack first, in big blinds per "
+                 "100 hands, scaled by a capture fraction (you cannot bluff "
+                 "every river you reach with the nuts). Ordering is the "
+                 "signal; do not bank the number as a live winrate.",
     "confidence": "How much of this read comes from their actual hands rather "
-                  "than from assumptions about players in general.",
+                  "than from assumptions about players in general. Archetype "
+                  "confidence is a 10-way posterior; skill confidence is "
+                  "coverage plus volume — same word, two formulas.",
+    "unknown": "Not enough hands for a skill comparison. The number would "
+               "mostly measure sample size, so it is withheld.",
     "percentile": "The share of every possible hole-card combination on that "
                   "board your hand beats -- not your chance to win the pot, "
                   "which depends on what the other hand actually is. "
