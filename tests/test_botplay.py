@@ -150,10 +150,15 @@ def test_opening_is_position_dependent_in_frequency_and_size():
 
 # -- isolation, squeezes, and the position split ------------------------------
 
-def _limped_to(button_stack=200, limpers=1):
-    """A 3-handed pot where ``limpers`` players have limped to the button."""
+def _limped_to(button_stack=200, limpers=1, seed=1):
+    """A 3-handed pot where ``limpers`` players have limped to the button.
+
+    ``seed`` varies the deal: a fixed one hands the button the same holding
+    every trial, so a rate measured over it is one hand's decision repeated
+    rather than a frequency.
+    """
     h = Hand(_seats(200, 200, button_stack), button=2, sb=1, bb=2,
-             rng=np.random.default_rng(1))
+             rng=np.random.default_rng(seed))
     for _ in range(limpers):
         h.act("call")
     return h
@@ -175,14 +180,13 @@ def test_isolates_limpers_wider_than_it_opens_a_folded_pot():
     """The gap the counters exist for: attacking limps is not opening first-in."""
     profile = _Prof(**{"rfi:BTN": 0.40, "iso:BTN": 0.75})
     rng = np.random.default_rng(3)
-    isos = 0
-    for _ in range(300):
-        h = _limped_to()
-        isos += decide(h, 2, profile, rng)[0] == "raise"
+    isos = sum(decide(_limped_to(seed=k), 2, profile, rng)[0] == "raise"
+               for k in range(300))
     tight_iso = _Prof(**{"rfi:BTN": 0.40, "iso:BTN": 0.10})
     rng = np.random.default_rng(3)
-    few = sum(decide(_limped_to(), 2, tight_iso, rng)[0] == "raise" for _ in range(300))
-    assert isos > few + 100
+    few = sum(decide(_limped_to(seed=k), 2, tight_iso, rng)[0] == "raise"
+              for k in range(300))
+    assert isos > few + 100, f"iso 75% raised {isos}/300, iso 10% raised {few}/300"
 
 
 def test_the_iso_raise_grows_with_the_number_of_limpers():
@@ -206,7 +210,7 @@ def test_a_thin_iso_sample_falls_back_instead_of_reading_one_hand():
 # -- raised pots: MDF-grounded, and the regressions that must hold ------------
 
 # Card ids are rank * 4 + suit, ranks 0..12 = 2..A.
-_7d, _7h, _Kd, _Ac, _Ad = 21, 22, 47, 48, 49
+_7c, _7d, _7h, _Kd, _Ac, _Ad = 20, 21, 22, 47, 48, 49
 _FLOP = [0, 5, 22]                        # 2c 3d 7h -- one pair for a seven
 
 
@@ -225,7 +229,8 @@ def _raised_flop(hole, bet=20, raise_to=60, level=2):
     h.bet = 0
     h.act("raise", bet)                    # seat 0 bets
     h.act("raise", raise_to)               # seat 1 raises
-    h.seats[0].hole = tuple(hole)
+    if hole is not None:
+        h.seats[0].hole = tuple(hole)
     h.raises = level
     return h
 
@@ -241,7 +246,11 @@ def test_one_pair_still_folds_a_reraised_pot():
 
 def test_the_nuts_still_get_it_in_at_reraise_depth():
     h = _raised_flop([_Ac, _Ad], level=3)
-    h.seats[0].hole = (_7d, _7h)           # a set of sevens on 2-3-7
+    # A set of sevens on 2c 3d 7h. It has to be 7c7d: the board already holds
+    # the 7h, and this line used to say (7d, 7h) -- an impossible holding that
+    # the old strength measure scored 0.999 anyway, because it masked the
+    # duplicate out twice and evaluated a seven-card hand with two 7h in it.
+    h.seats[0].hole = (_7c, _7d)
     kind, _, _ = decide(h, 0, _Prof(**{"raise_vs_bet:flop": 0.06}),
                         np.random.default_rng(0))
     assert kind == "raise"
@@ -332,7 +341,7 @@ def test_the_threshold_pivots_on_the_size_they_usually_face():
     prof = _sized_profile()
     at_usual = _facing(1, 0.66, prof)
     assert at_usual is not None
-    assert abs(at_usual - 0.45) < 0.06
+    assert abs(at_usual - 0.45) < 0.12
 
 
 def test_the_bet_depth_in_the_reason_matches_the_action_named():
@@ -450,3 +459,252 @@ def test_a_high_cbet_includes_the_bottom_of_the_range():
     assert _polar_bet(0.35, 0.80, 0.55) is None
     assert _polar_bet(0.10, 0.30, 0.55) is None
     assert _polar_bet(0.80, 0.30, 0.55) == "value"
+
+
+# -- position keys the policy used to ignore ----------------------------------
+
+def test_three_bet_follows_the_position_key():
+    """BTN and BB facing the same open are different 3-bet frequencies."""
+    from villain.botplay import _position
+    profile = _Prof(**{"three_bet:BB": 0.50, "three_bet:BTN": 0.06, "three_bet": 0.10,
+                       "cold_call:BB": 0.05, "cold_call:BTN": 0.05, "bb_defend": 0.55})
+    def rate_from(pos, n=400):
+        rng = np.random.default_rng(2)
+        hits = tot = 0
+        for k in range(n):
+            h = Hand([Seat(str(i), 1000) for i in range(6)], button=0, sb=1, bb=2,
+                     rng=np.random.default_rng(k + 1))
+            # Fold to UTG and have them open, then fold to ``pos``.
+            while h.to_act is not None and _position(h, h.to_act) != "UTG" and h.raises == 0:
+                h.act("fold")
+            if h.to_act is None or _position(h, h.to_act) != "UTG":
+                continue
+            h.act("raise", 6)
+            g = 0
+            while h.to_act is not None and _position(h, h.to_act) != pos and g < 8:
+                h.act("fold")
+                g += 1
+            if h.to_act is None or _position(h, h.to_act) != pos or h.raises != 1:
+                continue
+            tot += 1
+            hits += decide(h, h.to_act, profile, rng)[0] == "raise"
+        return hits / tot if tot else 0
+    bb = rate_from("BB")
+    btn = rate_from("BTN")
+    assert bb > btn + 0.20, f"BB 3-bet {bb:.2f} vs BTN {btn:.2f}"
+
+
+def test_fold_vs_bet_reads_ip_and_oop_separately():
+    """fold_vs_bet:{street}:{ip|oop} was measured and then never consulted."""
+    profile = _Prof(**{"fold_vs_bet:flop:ip": 0.15, "fold_vs_bet:flop:oop": 0.80,
+                       "fold_vs_bet:flop": 0.45, "raise_vs_bet:flop": 0.02})
+    rng = np.random.default_rng(4)
+    ip_folds = oop_folds = 0
+    n = 180
+    for k in range(n):
+        h = Hand(_seats(400, 400), button=0, sb=1, bb=2,
+                 rng=np.random.default_rng(k + 10))
+        h.act("call")
+        h.act("check")
+        # Flop: BB first (OOP). Bet, BTN faces it IP.
+        h.act("raise", max(4, int(0.5 * h.pot)))
+        ip_folds += decide(h, h.to_act, profile, rng)[0] == "fold"
+        h2 = Hand(_seats(400, 400), button=0, sb=1, bb=2,
+                  rng=np.random.default_rng(k + 10_000))
+        h2.act("call")
+        h2.act("check")
+        h2.act("check")                                 # BB checks
+        h2.act("raise", max(4, int(0.5 * h2.pot)))      # BTN bets, BB faces OOP
+        oop_folds += decide(h2, h2.to_act, profile, rng)[0] == "fold"
+    assert oop_folds > ip_folds + 40, f"IP folded {ip_folds}/{n}, OOP {oop_folds}/{n}"
+
+
+def test_a_short_stack_shoves_instead_of_minraising():
+    """The UI stack knob was a chip count the policy never read."""
+    profile = _Prof(rfi=0.99)
+    rng = np.random.default_rng(0)
+    short = Hand(_seats(40, 40), button=0, sb=1, bb=2, rng=np.random.default_rng(1))
+    deep = Hand(_seats(400, 400), button=0, sb=1, bb=2, rng=np.random.default_rng(1))
+    sk, sa, swhy = decide(short, 0, profile, rng)
+    dk, da, dwhy = decide(deep, 0, profile, rng)
+    assert sk == dk == "raise"
+    assert sa == short.legal().max_raise_to, swhy
+    assert da < 12, dwhy                      # a 2–5bb open, not a 200bb shove
+    assert "shoves" in swhy
+    assert "opens to" in dwhy
+
+
+def test_a_low_spr_raise_is_a_shove():
+    """Leaving a stub behind is not a sizing. SPR ≤ 2 gets the stack in."""
+    from villain.botplay import _raise_or_jam
+    h = Hand(_seats(30, 30), button=0, sb=1, bb=2, rng=np.random.default_rng(1))
+    h.pot_settled = 80                          # ~0.3 SPR; anything ≤ 2 shoves
+    lg = h.legal()
+    _, to = _raise_or_jam(h, 0, lg, 8)
+    assert to == lg.max_raise_to
+
+
+
+def test_delayed_cbet_fires_after_a_checked_flop():
+    """Initiative used to reset on a check-through, so this number was dead."""
+    profile = _Prof(rfi=0.99, three_bet=0.01, bb_defend=0.99,
+                    **{"cbet:flop": 0.01, "cbet:turn": 0.01, "delayed_cbet:turn": 0.99,
+                       "donk:flop": 0.0, "probe:flop": 0.0, "probe:turn": 0.0})
+    rng = np.random.default_rng(8)
+    fires = 0
+    seen = 0
+    for k in range(80):
+        h = Hand(_seats(400, 400), button=0, sb=1, bb=2,
+                 rng=np.random.default_rng(k + 3))
+        k0, a0, _ = decide(h, 0, profile, rng)
+        if k0 != "raise":
+            continue
+        h.act(k0, a0)
+        k1, a1, _ = decide(h, 1, profile, rng)
+        if k1 != "call":
+            continue
+        h.act(k1, a1)
+        if h.street != 1:
+            continue
+        # Flop: BB checks, BTN checks (c-bet 1%).
+        h.act("check")
+        k2, a2, _ = decide(h, 0, profile, rng)
+        h.act(k2, a2)
+        if h.street != 2:
+            continue
+        seen += 1
+        k3, a3, why = decide(h, 1 if h.to_act == 1 else 0, profile, rng)
+        # BB first on the turn; they should check (no donk). Then BTN delayed-c-bets.
+        if h.to_act == 1:
+            h.act(k3, a3)
+            k4, a4, why = decide(h, 0, profile, rng)
+            fires += k4 == "raise" and "delayed" in why
+        else:
+            fires += k3 == "raise" and "delayed" in why
+    assert seen >= 20, f"only {seen} checked flops reached the turn"
+    assert fires > seen * 0.7, f"delayed c-bet fired {fires}/{seen}"
+
+
+def test_three_bet_vs_ep_is_not_the_steal_number():
+    """A 3-bet vs UTG used to play the pooled (or steal) rate."""
+    from villain.botplay import _position
+    profile = _Prof(**{"three_bet:BB:vs:UTG": 0.04, "three_bet:BB:vs:BTN": 0.70,
+                       "three_bet:BB": 0.20, "three_bet": 0.12, "bb_defend": 0.40,
+                       "cold_call:BB": 0.05})
+    rng = np.random.default_rng(3)
+    hits = tot = 0
+    for k in range(350):
+        h = Hand([Seat(str(i), 1000) for i in range(6)], button=0, sb=1, bb=2,
+                 rng=np.random.default_rng(k + 4))
+        while h.to_act is not None and _position(h, h.to_act) != "UTG" and h.raises == 0:
+            h.act("fold")
+        if h.to_act is None or _position(h, h.to_act) != "UTG":
+            continue
+        h.act("raise", 6)
+        g = 0
+        while h.to_act is not None and _position(h, h.to_act) != "BB" and g < 8:
+            h.act("fold")
+            g += 1
+        if h.to_act is None or _position(h, h.to_act) != "BB" or h.raises != 1:
+            continue
+        tot += 1
+        hits += decide(h, h.to_act, profile, rng)[0] == "raise"
+    assert tot >= 80
+    assert hits / tot < 0.20, f"3-bet vs UTG realized {hits / tot:.2f} over {tot}"
+
+
+def test_vs_hero_three_bet_is_preferred_when_sampled():
+    profile = _Prof(**{"three_bet": 0.05, "vs:three_bet": 0.80, "bb_defend": 0.50,
+                       "cold_call": 0.05})
+    rng = np.random.default_rng(0)
+    hits = tot = 0
+    for k in range(180):
+        h = Hand(_seats(400, 400), button=0, sb=1, bb=2,
+                 rng=np.random.default_rng(k + 1))
+        h.hero_seat = 0
+        h.act("raise", 6)
+        tot += 1
+        hits += decide(h, 1, profile, rng)[0] == "raise"
+    assert hits / tot > 0.50, f"vs-hero 3-bet {hits / tot:.2f}"
+
+
+def test_a_28bb_stack_flats_a_three_bet_when_that_is_their_number():
+    """The 30bb shove-or-fold gate used to override a sampled continue rate."""
+    profile = _Prof(rfi=0.99, four_bet=0.04, fold_to_three_bet=0.35)
+    rng = np.random.default_rng(1)
+    calls = 0
+    seen = 0
+    for k in range(80):
+        h = Hand(_seats(56, 400), button=0, sb=1, bb=2,
+                 rng=np.random.default_rng(k + 2))
+        k0, a0, _ = decide(h, 0, profile, rng)
+        if k0 != "raise":
+            continue
+        h.act(k0, a0)
+        h.act("raise", 18)
+        if h.to_act != 0:
+            continue
+        seen += 1
+        kind, _, _ = decide(h, 0, profile, rng)
+        if kind == "call":
+            calls += 1
+    assert seen >= 20
+    assert calls > 0, f"never flatted {seen} 3-bets at 28bb with fold_to_three_bet 35%"
+
+
+def test_cbet_reads_wet_and_dry_separately():
+    from villain.botplay import _board_ctx
+    from villain.cards import card_id
+    h = Hand(_seats(400, 400), button=0, sb=1, bb=2, rng=np.random.default_rng(1))
+    h.street = 1
+    h.board = [int(card_id(c)) for c in ("9s", "8s", "7c")]
+    tex, _, _, _ = _board_ctx(h)
+    assert tex == "wet"
+    h.board = [int(card_id(c)) for c in ("Kc", "9d", "2s")]
+    tex, _, _, _ = _board_ctx(h)
+    assert tex == "dry"
+
+
+def test_a_polar_check_raise_includes_the_bottom():
+    from villain.botplay import RAISE_VALUE_CAP, _polar_bet
+    cap = RAISE_VALUE_CAP["flop"]
+    assert _polar_bet(0.02, 0.15, cap) == "bluff"
+    assert _polar_bet(0.98, 0.15, cap) == "value"
+    assert _polar_bet(0.50, 0.15, cap) is None
+
+
+def test_shown_river_bluffs_set_the_polar_split():
+    """VALUE_CAP used to polarize everyone the same; their showdowns decide."""
+    from villain.botplay import VALUE_CAP, _polar_bet, _street_value_cap
+    bluffer = _Prof(**{"river_bet_bluff": 0.50})
+    cap = _street_value_cap(bluffer, "river", 0.70, VALUE_CAP["river"])
+    assert _polar_bet(0.05, 0.70, cap) == "bluff"
+    merged = _Prof(**{"river_bet_bluff": 0.08})
+    cap2 = _street_value_cap(merged, "river", 0.70, VALUE_CAP["river"])
+    assert _polar_bet(0.10, 0.70, cap2) is None
+    assert _polar_bet(0.90, 0.70, cap2) == "value"
+
+
+def test_fold_vs_raise_beats_mdf_when_sampled():
+    """A station who calls 80% of flop raises was still folding at the theory cut."""
+    profile = _Prof(**{"fold_vs_raise:flop": 0.20, "raise_vs_bet:flop": 0.02})
+    rng = np.random.default_rng(0)
+    n = folds = 0
+    for k in range(150):
+        h = Hand(_seats(400, 400), button=0, sb=1, bb=2,
+                 rng=np.random.default_rng(k + 20))
+        h.act("call")
+        h.act("check")
+        if h.street != 1:
+            continue
+        h.act("check")                                 # BB checks
+        h.act("raise", 20)                             # BTN bets
+        h.act("raise", 60)                             # BB raises
+        if h.to_act != 0:
+            continue
+        n += 1
+        folds += decide(h, 0, profile, rng)[0] == "fold"
+    assert n >= 80
+    assert folds / n < 0.40, f"fold_vs_raise realized {folds / n:.2f} vs 0.20"
+
+

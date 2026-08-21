@@ -24,7 +24,7 @@ from .hero import hero_of
 from .model import Act, Hand, Street
 from .priors import regime as regime_of
 from .reads import texture
-from .stats import VS_HERO, HandView, StatBook, size_bucket
+from .stats import VS_HERO, HandView, StatBook, size_bucket, stack_bucket
 
 #: player id -> table-size regime -> book
 Books = dict[str, dict[str, StatBook]]
@@ -232,6 +232,7 @@ def _preflop(hand: Hand, view: HandView, books: Books, reg: str,
         a = d.action
         book = _book(hand, books, d.seat, reg)
         pos = hand.seat(d.seat).position
+        depth = stack_bucket(hand.seat(d.seat).stack / bb)
         raised = a.act is Act.RAISE
         called = a.act is Act.CALL
         folded = a.act is Act.FOLD
@@ -245,6 +246,7 @@ def _preflop(hand: Hand, view: HandView, books: Books, reg: str,
             # First in: nobody has voluntarily put money in yet.
             book.count("rfi", raised)
             book.count(f"rfi:{pos}", raised)
+            book.count(f"rfi:{pos}:{depth}", raised)
             book.count("limp", called)
             if pos in ("CO", "BTN", "SB"):
                 book.count("steal", raised)
@@ -259,6 +261,7 @@ def _preflop(hand: Hand, view: HandView, books: Books, reg: str,
             # in attacks limps far wider, and nothing recorded it.
             book.count("iso", raised)
             book.count(f"iso:{pos}", raised)
+            book.count(f"iso:{pos}:{depth}", raised)
             book.count("over_limp", called)
             if raised:
                 book.measure("iso_bb", a.to_amount / bb)
@@ -267,11 +270,21 @@ def _preflop(hand: Hand, view: HandView, books: Books, reg: str,
         elif d.aggression_level == 1 and d.seat != opener:
             # Facing a single raise.
             book.count("three_bet", raised)
+            book.count(f"three_bet:{pos}", raised)
+            book.count(f"three_bet:{depth}", raised)
+            if opener is not None:
+                opener_pos = hand.seat(opener).position
+                book.count(f"three_bet:{pos}:vs:{opener_pos}", raised)
+                if opener_pos in ("UTG", "UTG1", "UTG2", "MP", "LJ", "HJ"):
+                    book.count(f"three_bet:{pos}:vs:ep", raised)
             if pos == "BB":
                 book.count("bb_defend", raised or called)
                 book.count("bb_fold_to_open", folded)
             if d.seat not in voluntary:
                 book.count("cold_call", called)
+                book.count(f"cold_call:{pos}", called)
+                if opener is not None:
+                    book.count(f"cold_call:{pos}:vs:{hand.seat(opener).position}", called)
             if cold_callers and d.seat not in voluntary:
                 book.count("squeeze", raised)
             if opener is not None and hand.seat(opener).position in ("CO", "BTN", "SB") \
@@ -283,6 +296,8 @@ def _preflop(hand: Hand, view: HandView, books: Books, reg: str,
                 book.count("limp_raise", raised)
             if raised and open_size:
                 book.measure("three_bet_ratio", a.to_amount / open_size)
+                book.measure(f"three_bet_ratio:{'ip' if d.in_position else 'oop'}",
+                             a.to_amount / open_size)
             # The same decisions, sliced to the ones where the raise was yours.
             # Recorded alongside the pooled counter, never instead of it: the
             # pooled rate is the baseline this slice only means anything
@@ -352,6 +367,14 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
     Returns ``(seat, street) -> (pace, action)`` for the first timed
     check/call/aggro on each flop/turn, used by :func:`_results`.
     """
+    pf_raises = sum(1 for a in hand.actions
+                    if a.street is Street.PREFLOP and a.act.is_aggressive)
+    if pf_raises >= 2:
+        pot_type = "3bp"
+    elif pf_raises >= 1:
+        pot_type = "srp"
+    else:
+        pot_type = "limp"
     street = None
     first_bettor: int | None = None
     bettor_had_initiative = False
@@ -407,6 +430,7 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
         a = d.action
         book = _book(hand, books, d.seat, reg)
         s = street.label
+        ipo = "ip" if d.in_position else "oop"
         raised = a.act is Act.RAISE
         bet = a.act is Act.BET
         called = a.act is Act.CALL
@@ -469,7 +493,7 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
                     # different plans into one number describing neither: the
                     # same player c-bets small and often heads-up on a dry
                     # board and rarely into three people on a wet one.
-                    for slice_ in ("hu" if d.players_in <= 2 else "mw", tex):
+                    for slice_ in ("hu" if d.players_in <= 2 else "mw", tex, ipo, pot_type):
                         book.count(f"cbet:{s}:{slice_}", bet)
                         if bet:
                             book.measure(f"cbet_size:{s}:{slice_}", d.bet_fraction)
@@ -489,6 +513,7 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
             else:
                 # Nobody claimed the lead -- a probe or a stab at a dead pot.
                 book.count(f"probe:{s}", bet)
+                book.count(f"probe:{s}:{ipo}", bet)
             if bet:
                 book.measure(f"bet_size:{s}", d.bet_fraction)
                 book.count(f"overbet:{s}", d.bet_fraction > 1.0)
@@ -515,7 +540,14 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
                 book.count(f"fold_vs_bet:{s}:{pos_kind}", folded)
                 # An ace-high board and a low one are different bluffs.
                 book.count(f"fold_vs_bet:{s}:{hilo}", folded)
+                # Facing a raise is not facing a bet. fold_vs_bet pools them,
+                # so a player who folds 40% to flop raises was still defending
+                # at the MDF-scaled theory number.
+                if d.aggression_level >= 2:
+                    book.count(f"fold_vs_raise:{s}", folded)
+                    book.count(f"fold_vs_raise:{s}:{pos_kind}", folded)
                 book.count(f"raise_vs_bet:{s}", raised)
+                book.count(f"raise_vs_bet:{s}:{pos_kind}", raised)
                 book.count(f"call_vs_bet:{s}", called)
                 if called:
                     called_here.add(d.seat)

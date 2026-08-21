@@ -1825,6 +1825,7 @@ function renderTable(view, data) {
       </div>
       <div class="controls" id="controls"></div>
       <div class="handlog small muted" id="handlog"></div>
+      <div class="range-review small" id="range-review"></div>
     </div>
     <div class="sim-side">
       <div class="side-label">session P/L</div>
@@ -1893,6 +1894,15 @@ function renderTable(view, data) {
   });
   $("#board").innerHTML = st.board.length ? st.board.map(c => cardHtml(c, true)).join("") : "";
   $("#handlog").innerHTML = (st.log || []).map(l => `<div>${esc(l)}</div>`).join("");
+  const review = $("#range-review");
+  if (st.over && st.ranges && Object.keys(st.ranges).length) {
+    review.innerHTML = Object.entries(st.ranges).map(([name, classes]) =>
+      `<div><span class="muted">what ${esc(name)} can still hold</span> · ${
+        classes.map(c => `${esc(c.cls)} ${Math.round(c.share * 100)}%`).join(" · ")
+      }</div>`).join("");
+  } else {
+    review.innerHTML = "";
+  }
   $("#leave").onclick = () => {
     if (state.stepTimer) clearTimeout(state.stepTimer);
     state.game = null; state.lastEvent = null; viewPlay();
@@ -2050,6 +2060,9 @@ function renderAnalysis(view, a) {
       <div class="small muted">${a.pnl_bb >= 0 ? "+" : ""}${a.pnl_bb} bb · ${
         a.bb100 >= 0 ? "+" : ""}${a.bb100} bb/100 over ${a.hands} hands</div>
     </div>
+    ${(a.lessons && a.lessons.length) ? `<div class="lessons">${
+      a.lessons.map(l => `<div class="lesson">${esc(l)}</div>`).join("")
+    }</div>` : ""}
     <h3 style="margin:20px 0 8px">your line this session</h3>
     <div class="astats">${stat("VPIP", a.vpip)}${stat("PFR", a.pfr)}${
       stat("aggression", a.aggression)}${stat("to showdown", a.went_to_showdown)}${

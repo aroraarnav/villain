@@ -92,7 +92,25 @@ class Hand:
         self.limpers = 0                          # preflop calls before any raise
         self.callers = 0                          # preflop calls after a raise
         self.last_raiser: int | None = None       # seat of the most recent aggressor
-        self.initiative: int | None = None         # who bet last street -> has initiative now
+        self.initiative: int | None = None         # who bet last *claimed* street
+        # Seats that checked when they held the lead. Betting later is a
+        # delayed c-bet, not a second barrel -- features.py splits those two
+        # and the policy has to, or a flop check wipes the lead and the turn
+        # never fires the number that was counted for it.
+        self.declined_initiative: set[int] = set()
+        # A raise shorter than the minimum (an all-in for less) does not
+        # re-open action: players who have already acted can only call or
+        # fold. Tracked separately from ``acted`` because they still owe the
+        # extra chips.
+        self.raise_open: bool = True
+        # Preflop shape carried onto later streets. c-betting a 3-bet pot is
+        # not c-betting a limped one, and the policy used one number for both.
+        self.opener: int | None = None            # first preflop raiser
+        self.pot_kind: str = "pre"                # limp / srp / 3bp after preflop
+        self.called_street: set[int] = set()      # called a bet this street
+        self.called_prev: set[int] = set()        # called a bet last street
+        self.hero_seat: int | None = None         # set by the session, for vs-you keys
+        self._staged: tuple[int, object] | None = None   # see :meth:`stage`
         self.to_act: int | None = self._first_to_act_preflop()
 
     # -- setup ---------------------------------------------------------------
@@ -185,13 +203,30 @@ class Hand:
         # never more than the seat can put in.
         max_raise_to = s.street_put + s.stack
         min_raise_to = self.bet + self.min_raise
-        can_raise = max_raise_to > self.bet and s.stack > owed
+        # Incomplete all-ins do not re-open: a player who has already acted
+        # on the last *full* raise may call the extra or fold, not raise.
+        can_raise = (max_raise_to > self.bet and s.stack > owed
+                     and (self.raise_open or i not in self.acted))
         return Legal(
             can_check=can_check, can_call=can_call, call_amount=call_amount,
             can_raise=can_raise, min_raise_to=min(min_raise_to, max_raise_to),
             max_raise_to=max_raise_to, can_fold=owed > 0)
 
     # -- actions -------------------------------------------------------------
+
+    def stage(self, seat: int, commit) -> None:
+        """Hold a callback to run if ``seat``'s pending decision is played.
+
+        The villain policy learns something about a seat's range at the moment
+        it picks their action -- which slice of it the frequency it just used
+        would have acted this way with. That is only true if the action is
+        actually taken, and a caller is free to ask the policy what two
+        different profiles would do at the same node without playing either.
+        So the policy stages the update here and :meth:`act` commits it,
+        rather than mutating anything itself. Staging again replaces the slot;
+        the engine keeps no opinion about what the callback does.
+        """
+        self._staged = (seat, commit)
 
     def act(self, kind: str, amount: int = 0) -> None:
         """Apply the seat-to-act's decision. ``kind`` is ``fold``/``check``/
@@ -202,6 +237,10 @@ class Hand:
         i = self.to_act
         s = self.seats[i]
         legal = self.legal()
+        staged = getattr(self, "_staged", None)
+        self._staged = None
+        if staged is not None and staged[0] == i:
+            staged[1]()
 
         if kind == "fold":
             s.folded = True
@@ -210,6 +249,8 @@ class Hand:
             if not legal.can_check:
                 raise ValueError("cannot check facing a bet")
             self.acted.add(i)
+            if self.initiative == i:
+                self.declined_initiative.add(i)
             self.log.append(f"{s.name} checks")
         elif kind == "call":
             if self.street == 0:
@@ -217,6 +258,8 @@ class Hand:
                     self.limpers += 1
                 else:
                     self.callers += 1
+            if self.raises >= 1:
+                self.called_street.add(i)
             self._commit(i, self.bet)
             self.acted.add(i)
             self.log.append(f"{s.name} calls")
@@ -226,18 +269,27 @@ class Hand:
             to = max(min(amount, legal.max_raise_to), 1)
             if to < legal.min_raise_to and to != legal.max_raise_to:
                 raise ValueError("raise below the minimum")
-            full = to - self.bet >= self.min_raise      # a full (re-opening) raise
+            prev_bet = self.bet
             self._commit(i, to)
+            actual = self.seats[i].street_put
+            # Use chips actually in, not the requested ``to``: an all-in that
+            # asked for a full raise but could not make the number is still
+            # incomplete, and must not re-open players already square.
+            full = actual - prev_bet >= self.min_raise
             if full:
-                self.min_raise = self.seats[i].street_put - self.bet
-                self.bet = self.seats[i].street_put
+                self.min_raise = actual - prev_bet
+                self.bet = actual
                 self.acted = {i}                        # everyone else owes action again
+                self.raise_open = True
             else:
-                self.bet = max(self.bet, self.seats[i].street_put)
+                self.bet = max(self.bet, actual)
                 self.acted.add(i)
+                self.raise_open = False
             self.raises += 1
             self.last_raiser = i
-            self.log.append(f"{s.name} raises to {self.seats[i].street_put}")
+            if self.street == 0 and self.opener is None:
+                self.opener = i
+            self.log.append(f"{s.name} raises to {actual}")
         else:
             raise ValueError(f"unknown action {kind!r}")
 
@@ -257,12 +309,27 @@ class Hand:
         self.pot_settled += sum(s.street_put for s in self.seats)
         for s in self.seats:
             s.street_put = 0
+        if self.street == 0:
+            if self.raises >= 2:
+                self.pot_kind = "3bp"
+            elif self.raises >= 1:
+                self.pot_kind = "srp"
+            else:
+                self.pot_kind = "limp"
+        self.called_prev = set(self.called_street)
+        self.called_street = set()
         self.acted = set()
         self.bet = 0
         self.min_raise = self.bb
         self.raises = 0
         self.callers = 0
-        self.initiative = self.last_raiser       # carried into the next street
+        self.raise_open = True
+        # A checked street does not wipe the lead. Features counts a delayed
+        # c-bet as "they took the last *claimed* street and checked this one";
+        # assigning ``last_raiser`` (None after a check-through) here made
+        # that number unplayable -- the turn thought nobody had the lead.
+        if self.last_raiser is not None:
+            self.initiative = self.last_raiser
         self.last_raiser = None
         # If at most one player can still act, run the board out to showdown.
         if sum(1 for i in alive if self.seats[i].live) <= 1:
