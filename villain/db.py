@@ -167,6 +167,13 @@ SPURIOUS_OVERLAP = 10
 DEFINITIONS_VERSION = "2026-08-19.after-call-and-board-height"
 
 
+#: Prefix for a seat whose account resolves to no player -- the person was
+#: deleted, but the hand they sat in is still the source of truth for everyone
+#: else at that table. A site account can be any string, so the marker has to be
+#: something a real (integer) player id can never start with.
+UNATTRIBUTED = "?"
+
+
 def split_key(account: str, name: str) -> str:
     """Alias key for an account id the user has split between two people."""
     return f"{account}#{name.strip().lower()}"
@@ -711,6 +718,15 @@ class Store:
             for seat in hand.seats:
                 pid = resolve(hand.site, seat.player_id, seat.name)
                 if pid is None:
+                    # A seat whose account maps to nobody -- the player it
+                    # belonged to was deleted. It has to stay in the hand:
+                    # everybody else's read depends on how many were dealt in
+                    # and what this seat did. It just gets booked to nobody, so
+                    # it is keyed with a prefix no player id can collide with
+                    # and dropped below. Leaving the raw account here instead
+                    # booked stats under a site account string and then blew up
+                    # on int() at the write.
+                    seat.player_id = UNATTRIBUTED + str(seat.player_id)
                     continue
                 names[str(pid)] = seat.name or names.get(str(pid), "")
                 seat.player_id = str(pid)
@@ -722,6 +738,8 @@ class Store:
         wanted_str = {str(p) for p in wanted} if wanted is not None else None
         written = 0
         for pid, by_regime in books.items():
+            if pid.startswith(UNATTRIBUTED):
+                continue                      # seated, counted for others, owned by nobody
             if wanted_str is not None and pid not in wanted_str:
                 continue
             self._write_books(int(pid), by_regime, names.get(pid, ""))
@@ -1260,6 +1278,43 @@ class Store:
         if progress is not None:
             progress(total, total)
         return out
+
+    def delete_player(self, player_id: int) -> dict:
+        """Forget one person. Their hands stay exactly where they are.
+
+        A hand belongs to a table, not to a player: five other people sat in it
+        and their samples are built from the same rows. So this deletes the
+        identity and everything derived from it -- the player, the accounts
+        pointing at them, their notes, their books -- and leaves the hand log
+        untouched. Their seats simply stop resolving to anybody.
+
+        That is not a leak. :meth:`rebuild` maps seats through ``aliases`` and
+        returns None for an account it does not know, so a deleted player does
+        not reappear on the next rebuild. Importing hands with that account
+        again *does* create a fresh player, which is the right answer: you told
+        the tool to forget them, not to refuse to ever see them again.
+
+        Raises LookupError if there is no such player.
+        """
+        row = self.conn.execute(
+            "SELECT display_name FROM players WHERE id = ?", (player_id,)).fetchone()
+        if row is None:
+            raise LookupError(f"no player {player_id}")
+        hands = self.conn.execute(
+            "SELECT COALESCE(SUM(hands), 0) AS n FROM aliases WHERE player_id = ?",
+            (player_id,)).fetchone()["n"]
+        accounts = self.conn.execute(
+            "SELECT COUNT(*) AS c FROM aliases WHERE player_id = ?",
+            (player_id,)).fetchone()["c"]
+        for table in ("ratios", "meters", "books", "notes", "aliases"):
+            self.conn.execute(f"DELETE FROM {table} WHERE player_id = ?", (player_id,))
+        # Both columns: the pair is stored sorted, so the id can be on either side.
+        self.conn.execute("DELETE FROM distinct_pairs WHERE a = ? OR b = ?",
+                          (player_id, player_id))
+        self.conn.execute("DELETE FROM players WHERE id = ?", (player_id,))
+        self.conn.commit()
+        return {"player_id": player_id, "name": row["display_name"],
+                "hands": int(hands), "accounts": int(accounts)}
 
     def reset(self) -> dict[str, int]:
         """Empty the database, keeping the file and its schema.

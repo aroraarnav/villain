@@ -117,29 +117,87 @@ function el(tag, attrs, parent) {
    Interval band for the credible range, dot for the estimate, hairline tick
    for the field, warm tick for breakeven. Everything here is a frequency with
    uncertainty measured against a threshold, so it is all the same picture. */
-function statRow(row) {
-  const W = 300, H = 34, mid = 17, r = 5;
-  const x = v => Math.max(0, Math.min(1, v)) * W;
-  const svg = el("svg", {width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img",
-    "aria-label": `${row.label}: ${fmtPct(row.value)}, range ${fmtPct(row.lo)} to ${fmtPct(row.hi)}`});
-  el("line", {x1: 0, y1: mid, x2: W, y2: mid, stroke: "var(--grid)", "stroke-width": 1}, svg);
-  el("rect", {x: x(row.lo), y: mid - 6, width: Math.max(2, x(row.hi) - x(row.lo)),
-              height: 12, rx: 4, fill: "var(--band)"}, svg);
-  el("line", {x1: x(row.population), y1: mid - 10, x2: x(row.population), y2: mid + 10,
-              stroke: "var(--axis)", "stroke-width": 1}, svg);
-  if (row.breakeven != null) {
-    el("line", {x1: x(row.breakeven), y1: mid - 11, x2: x(row.breakeven), y2: mid + 11,
-                stroke: "var(--warn)", "stroke-width": 2, "stroke-linecap": "round"}, svg);
-  }
-  el("circle", {cx: x(row.value), cy: mid, r: r + 2, fill: "var(--panel)"}, svg);
-  el("circle", {cx: x(row.value), cy: mid, r: r, fill: "var(--mark-3)"}, svg);
-  const hit = el("rect", {x: 0, y: 0, width: W, height: H, fill: "transparent"}, svg);
-  bindTip(hit, `<b>${esc(row.label)}</b> \u2014 ${fmtPct(row.value)}<br>
+function statTipHtml(row) {
+  return `<b>${esc(row.label)}</b> \u2014 ${fmtPct(row.value)}<br>
     <span class="muted">95% range ${fmtPct(row.lo)}\u2013${fmtPct(row.hi)}</span><br>
     raw ${row.raw == null ? "\u2014" : fmtPct(row.raw)} of ${row.opps} ${esc(row.denominator)}<br>
     field ${fmtPct(row.population)}${row.breakeven != null
       ? `<br><span style="color:var(--warn)">${esc(row.breakeven_label)} ${fmtPct(row.breakeven)}</span>` : ""}
-    ${fieldRead(row)}`);
+    ${fieldRead(row)}`;
+}
+
+function statRow(row) {
+  // 44 rather than 34, and a 16px band rather than 12. This is the one picture
+  // the whole tool turns on -- estimate, uncertainty, the field, the price of
+  // being wrong -- and at the old scale the band read as a smudge and the
+  // quarter marks did not exist, so the chart was decoration on a page whose
+  // argument it was supposed to be carrying.
+  const W = 300, H = 44, mid = 22, r = 6;
+  const x = v => Math.max(0, Math.min(1, v)) * W;
+  const svg = el("svg", {width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img",
+    "aria-label": `${row.label}: ${fmtPct(row.value)}, range ${fmtPct(row.lo)} to ${fmtPct(row.hi)}`});
+  // Quarter marks: without them the axis has no scale and 22% and 42% land in
+  // visually identical places.
+  for (const q of [0.25, 0.5, 0.75]) {
+    el("line", {x1: x(q), y1: mid - 13, x2: x(q), y2: mid + 13,
+                stroke: "var(--grid)", "stroke-width": 1}, svg);
+  }
+  el("line", {x1: 0, y1: mid, x2: W, y2: mid, stroke: "var(--grid)", "stroke-width": 1}, svg);
+  // The interval gets an edge as well as a fill: a wash alone disappears into
+  // the panel at any surface lighter than the page.
+  const bw = Math.max(3, x(row.hi) - x(row.lo));
+  el("rect", {x: x(row.lo), y: mid - 8, width: bw, height: 16, rx: 5,
+              fill: "var(--band)", stroke: "var(--band-line)", "stroke-width": 1}, svg);
+  // The field is a reference, not a measurement of this player, so it is
+  // dashed -- solid hairline and solid dot read as two of the same kind.
+  el("line", {x1: x(row.population), y1: mid - 13, x2: x(row.population), y2: mid + 13,
+              stroke: "var(--axis)", "stroke-width": 1, "stroke-dasharray": "2 2"}, svg);
+  if (row.breakeven != null) {
+    el("line", {x1: x(row.breakeven), y1: mid - 14, x2: x(row.breakeven), y2: mid + 14,
+                stroke: "var(--warn)", "stroke-width": 2.5, "stroke-linecap": "round"}, svg);
+  }
+  el("circle", {cx: x(row.value), cy: mid, r: r + 2.5, fill: "var(--panel)"}, svg);
+  el("circle", {cx: x(row.value), cy: mid, r: r, fill: "var(--mark-3)"}, svg);
+  const hit = el("rect", {x: 0, y: 0, width: W, height: H, fill: "transparent"}, svg);
+  bindTip(hit, statTipHtml(row));
+  return svg;
+}
+
+/* The same picture at HUD size: band, estimate, breakeven. No field hairline
+   and no quarter marks -- at 12px tall they collide with the dot, and the cell
+   already carries the figure in type. Hover gives the full reading. */
+function sparkRow(row) {
+  const W = 100, H = 12, mid = 6;
+  const x = v => Math.max(0, Math.min(1, v)) * W;
+  const svg = el("svg", {viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none",
+    role: "img", "aria-label": `${row.label}: ${fmtPct(row.value)}`});
+  el("line", {x1: 0, y1: mid, x2: W, y2: mid, stroke: "var(--grid)", "stroke-width": 1}, svg);
+  el("rect", {x: x(row.lo), y: mid - 3.5, width: Math.max(2, x(row.hi) - x(row.lo)),
+              height: 7, rx: 3, fill: "var(--band)", stroke: "var(--band-line)",
+              "stroke-width": 0.75}, svg);
+  if (row.breakeven != null) {
+    el("line", {x1: x(row.breakeven), y1: mid - 5.5, x2: x(row.breakeven), y2: mid + 5.5,
+                stroke: "var(--warn)", "stroke-width": 1.5}, svg);
+  }
+  el("circle", {cx: x(row.value), cy: mid, r: 3.6, fill: "var(--inset)"}, svg);
+  el("circle", {cx: x(row.value), cy: mid, r: 2.6, fill: "var(--mark-3)"}, svg);
+  return svg;
+}
+
+/* A 0-100 score as a filled arc. The score was a number inside a bordered
+   circle, which drew a ring whose length said nothing; the arc is the same
+   footprint with the quantity actually in it. */
+function skillGauge(score, tone) {
+  const S = 62, c = S / 2, r = 26, circ = 2 * Math.PI * r;
+  const frac = Math.max(0, Math.min(100, score)) / 100;
+  const svg = el("svg", {viewBox: `0 0 ${S} ${S}`, "aria-hidden": "true"});
+  const g = el("g", {transform: `rotate(-90 ${c} ${c})`}, svg);
+  // The track has to be visible or the arc is just a shape: "62" is only
+  // readable as sixty-two out of a hundred if the hundred is drawn too.
+  el("circle", {cx: c, cy: c, r, fill: "none", stroke: "var(--band)", "stroke-width": 3}, g);
+  el("circle", {cx: c, cy: c, r, fill: "none", stroke: tone || "var(--mark-3)",
+                "stroke-width": 3, "stroke-linecap": "round",
+                "stroke-dasharray": `${(frac * circ).toFixed(2)} ${circ.toFixed(2)}`}, g);
   return svg;
 }
 
@@ -151,7 +209,6 @@ function bar(value, max, color, width) {
   el("rect", {x: 0, y: 3, width: w, height: 8, rx: 4, fill: color}, svg);
   return svg;
 }
-const TIER_COLOR = {strong: "var(--mark-3)", likely: "var(--mark-2)", tentative: "var(--mark-1)"};
 
 async function get(url) {
   const res = await fetch(url);
@@ -166,15 +223,29 @@ async function post(url, body) {
   return data;
 }
 
+/* The one loading state. Three places had grown their own -- a muted line of
+   text reading "loading…", "reading the sitting…", "loading hand…" -- while
+   the tab switch used a spinner, so whether the tool looked busy or looked
+   broken depended on which corner of it you were in. */
+function loadingBlock(label) {
+  const div = document.createElement("div");
+  div.className = "loading";
+  div.innerHTML = `<span class="spinner" aria-hidden="true"></span>
+    <span>${esc(label)}</span>`;
+  return div;
+}
+
 /* ---- shared renderers ---- */
 function rosterTable(players, opts) {
   const wrap = document.createElement("div");
   wrap.className = "scroller";
+  // GTO dropped as a default column: a bare 0-100 integer beside the skill
+  // bar reads as a second, differently-encoded skill score. It is still one
+  // click away, on the profile it links to.
   wrap.innerHTML = `<table><thead><tr>
       <th data-k="name">player</th>
       <th data-k="hands" class="num">hands</th><th data-k="archetype">read</th>
       <th data-k="skill" class="num">skill</th>
-      <th data-k="gto" class="num">GTO</th>
       <th data-k="exploitability" class="num">worth bb/100</th>
       <th data-k="top_leak">biggest leak</th>
     </tr></thead><tbody></tbody></table>`;
@@ -215,10 +286,8 @@ function rosterTable(players, opts) {
             ${linkBits.length
               ? `<div class="small muted">${linkBits.join(" \u00b7 ")}</div>` : ""}</td>
         <td class="num">${p.hands}</td>
-        <td><span class="tag arch ${p.confidence >= 0.5 ? "on" : ""}">${esc(p.archetype)}</span>
-            <div class="small muted">${fmtPct(p.confidence)} sure</div></td>
+        <td><span class="tag arch ${p.confidence >= 0.5 ? "on" : ""}">${esc(p.archetype)}</span></td>
         <td class="num"></td>
-        <td class="num gto-cell">${p.gto != null ? Math.round(p.gto) : "\u2014"}</td>
         <td class="num worth${p.exploitability > 10 ? " big" : ""}">${
           p.exploitability ? p.exploitability.toFixed(1) : "\u2014"}</td>
         <td class="small leakcell">${p.top_leak ? esc(p.top_leak)
@@ -238,6 +307,12 @@ function rosterTable(players, opts) {
         hcell.classList.add("q-" + String(p.sample_quality).split(" ")[0]);
         bindTip(hcell, `<b>${esc(p.sample_quality)}</b><br>${termTip(p.sample_quality)}`);
       }
+      // Confidence moves into the pill's own tooltip -- dashed vs solid
+      // already carries the fact that it's uncertain; the number is one
+      // hover away rather than a second line on every row of the roster.
+      const archTag = $(".tag.arch", tr);
+      if (archTag) bindTip(archTag, `${termTip("confidence")}<br><br>
+        ${fmtPct(p.confidence)} sure`);
       /* An unconfirmed read still belongs in the column -- "none clears the
          bar" left the weakest player at the table looking like the safest.
          The marker says which kind of claim it is. */
@@ -274,22 +349,16 @@ function rosterTable(players, opts) {
 /* vs GTO -- how close a player's frequencies sit to an optimal baseline, with
    one rating. Preflop rows are a solver reference (exact as category
    frequencies), postflop are board-averaged benchmarks; the fidelity rides
-   every row and the tooltip says which is which. */
-function renderGto(gto) {
-  if (!gto || gto.rating == null || !(gto.rows || []).length) return null;
-  const box = document.createElement("div");
-  box.className = "panel";
-  box.innerHTML = `<div class="spread"><h2 style="margin:0">vs GTO</h2>
-      <span class="gto-badge"><b>${Math.round(gto.rating)}</b><span class="of">/100</span></span>
-    </div><div class="gto-rows"></div>`;
-  $(".gto-badge", box).appendChild(info(`<span class="hl">GTO rating</span><br>
-    How close these frequencies sit to a game-theory-optimal baseline — the
-    part of a game a perfect opponent still could not exploit.<br><br>
-    <b>Preflop</b> is a solver reference at 100bb, exact as category
-    frequencies.<br><b>Postflop</b> is an equilibrium benchmark, board-averaged
-    — not a live solver. Preflop rows weigh double in the score.`));
-  const host = $(".gto-rows", box);
-  for (const r of gto.rows.slice(0, 8)) {
+   every row and the tooltip says which is which.
+
+   Rendered as a rating badge plus a link into every row, rather than a full
+   panel of eight rows sitting beside Key numbers -- the same idea (a
+   frequency next to a baseline) with less certainty drawn, taking a whole
+   peer tile on the one screen meant to be read mid-hand. */
+function gtoRows(rows) {
+  const host = document.createElement("div");
+  host.className = "gto-rows";
+  for (const r of rows) {
     const dir = r.deviation > 0 ? "+" : "−";
     const row = document.createElement("div");
     row.className = "gto-row";
@@ -301,34 +370,44 @@ function renderGto(gto) {
       <span class="gto-dev">${dir}${Math.round(Math.abs(r.deviation) * 100)}</span>`;
     host.appendChild(row);
   }
-  if (gto.rows.length > 8) {
-    const link = document.createElement("button");
-    link.className = "linkbtn how-link";
-    link.textContent = `See all ${gto.rows.length}`;
-    link.onclick = () => {
-      const modal = $("#modal");
-      modal.innerHTML = `<div class="veil"><div class="sheet">
-        <div class="spread"><h2 style="margin:0">vs GTO — every stat</h2>
-          <button class="act" id="close">Close</button></div>
-        <div class="gto-rows" id="gto-all"></div></div></div>`;
-      const all = $("#gto-all", modal);
-      for (const r of gto.rows) {
-        const dir = r.deviation > 0 ? "+" : "−";
-        const row = document.createElement("div");
-        row.className = "gto-row";
-        row.innerHTML = `
-          <span class="gto-name">${esc(statLabel(r.stat, null))}<span
-            class="gto-fid ${r.fidelity === "solver" ? "solver" : ""}">${
-            r.fidelity === "solver" ? "solver" : "bench"}</span></span>
-          <span class="gto-nums small muted">you ${fmtPct(r.player)} · gto ${fmtPct(r.target)}</span>
-          <span class="gto-dev">${dir}${Math.round(Math.abs(r.deviation) * 100)}</span>`;
-        all.appendChild(row);
-      }
-      $("#close").onclick = () => { modal.innerHTML = ""; };
-    };
-    box.appendChild(link);
-  }
-  return box;
+  return host;
+}
+
+function gtoExplainer() {
+  return `<span class="hl">GTO rating</span><br>
+    How close these frequencies sit to a game-theory-optimal baseline — the
+    part of a game a perfect opponent still could not exploit.<br><br>
+    <b>Preflop</b> is a solver reference at 100bb, exact as category
+    frequencies.<br><b>Postflop</b> is an equilibrium benchmark, board-averaged
+    — not a live solver. Preflop rows weigh double in the score.`;
+}
+
+function openGtoModal(gto) {
+  const modal = $("#modal");
+  modal.innerHTML = `<div class="veil"><div class="sheet">
+    <div class="spread"><h2 style="margin:0">vs GTO — every stat</h2>
+      <button class="act" id="close">Close</button></div></div></div>`;
+  $(".sheet", modal).appendChild(gtoRows(gto.rows));
+  $("#close").onclick = () => { modal.innerHTML = ""; };
+}
+
+/* A compact rating badge, `you N/100 GTO`, plus a link to the full row list --
+   for a panel header, not a panel of its own. */
+function renderGtoBadge(gto) {
+  if (!gto || gto.rating == null || !(gto.rows || []).length) return null;
+  const wrap = document.createElement("span");
+  wrap.className = "small muted";
+  wrap.style.cssText = "display:inline-flex;align-items:center;gap:6px";
+  const badge = document.createElement("span");
+  badge.className = "gto-badge";
+  badge.innerHTML = `<b>${Math.round(gto.rating)}</b><span class="of">/100 GTO</span>`;
+  badge.appendChild(info(gtoExplainer()));
+  const link = document.createElement("button");
+  link.className = "linkbtn";
+  link.textContent = "See vs GTO";
+  link.onclick = () => openGtoModal(gto);
+  wrap.append(badge, link);
+  return wrap;
 }
 
 function profileCard(p, opts) {
@@ -343,61 +422,96 @@ function profileCard(p, opts) {
   // and strand whatever tile precedes them alone on a line.
   const wideTiles = [];
 
+  // Header band: identity on the left, the two figures that rank them on the
+  // right. The old header was a name, one sentence and a link stacked in the
+  // top-left of a 195px card -- the number the whole page is about ("this
+  // player is worth 9.6 bb/100 to you") was a 12.5px caption further down.
   const head = document.createElement("div");
   head.className = "panel wide";
   head.innerHTML = `
-    <div class="hero-row">
-      <div class="hero-name">
-        <div class="hero">${esc(p.name || p.archetype)}</div>
-        <div class="hero-sub">${esc(p.archetype)}</div>
+    <div class="profile-head">
+      <div class="profile-id">
+        <div class="hero">${esc(p.name || p.archetype)}${
+          isHero ? '<span class="hero-badge">you</span>' : ""}</div>
+        <div class="read-meta" id="read-meta"></div>
+        <div class="read-copy">
+          <p class="summary">${esc(p.summary)}</p>
+        </div>
       </div>
-      <div class="skill-badge" id="skill-badge">
-        <span class="score">${p.skill.score.toFixed(0)}</span>
-        <span class="of">/100</span>
+      <div class="profile-stats">
+        <div class="stat-pair ring">
+          <div class="skill-ring" id="skill-ring">
+            <span class="score">${p.skill.score.toFixed(0)}</span>
+          </div>
+          <span class="k">skill</span>
+        </div>
+        <div class="stat-pair" id="worth-stat">
+          <span class="v">${p.skill.exploitability_bb100.toFixed(1)}</span>
+          <span class="k">bb/100 available</span>
+        </div>
       </div>
-    </div>
-    <div class="read-meta" id="read-meta"></div>
-    <div class="read-copy">
-      <p class="summary">${esc(p.summary)}</p>
-      ${hero ? "" : `<p class="plan">${esc(p.plan)}</p>`}
     </div>`;
-  if (isHero) $(".hero-sub", head).insertAdjacentHTML(
-    "afterbegin", '<span class="hero-badge">you</span> ');
+  $("#skill-ring", head).prepend(skillGauge(p.skill.score));
+  $("#worth-stat .k", head).appendChild(info(termTip("available")));
   card.appendChild(head);
+  // The archetype essay goes behind a click, same words -- not on the first
+  // screen. A mid-session read that requires scrolling past two paragraphs of
+  // boilerplate before the first leak is one you will not use.
+  if (!hero && p.plan) {
+    const planLink = document.createElement("button");
+    planLink.className = "linkbtn how-link";
+    planLink.textContent = "How to play them";
+    planLink.onclick = () => {
+      const modal = $("#modal");
+      modal.innerHTML = `<div class="veil"><div class="sheet">
+        <div class="spread"><h2 style="margin:0">How to play ${esc(p.name || p.archetype)}</h2>
+          <button class="act" id="close">Close</button></div>
+        <div class="how-body">${esc(p.plan)}</div></div></div>`;
+      $("#close").onclick = () => { modal.innerHTML = ""; };
+    };
+    $(".read-copy", head).appendChild(planLink);
+  }
 
-  const cols = document.createElement("div");
-  cols.className = "dash-cols wide";
-  card.appendChild(cols);
-
+  // One rating panel rather than two peers: the skill components and the GTO
+  // rating are both 0-100 judgments of how well they play, and splitting them
+  // across two tiles made the reader compare a bar chart with a badge.
   const skillBox = document.createElement("div");
-  skillBox.className = "panel";
+  skillBox.className = "panel wide p-skill";
   skillBox.innerHTML =
-    `<h2>Skill breakdown <span class="muted" style="font-weight:400">\u00b7 ` +
-    `${esc(p.skill.tier)}</span></h2><div class="skill-side" id="skill-side"></div>`;
+    `<div class="spread"><h2>Skill breakdown <span class="muted" style="font-weight:400">\u00b7 ` +
+    `${esc(p.skill.tier)}</span></h2></div>` +
+    `<div class="skill-side two-up" id="skill-side"></div>`;
+  const gtoBadge = renderGtoBadge(p.gto);
+  if (gtoBadge) $(".spread", skillBox).appendChild(gtoBadge);
 
-  const badge = $("#skill-badge", head);
+  const badge = $("#skill-ring", head);
   bindTip(badge, `<b>${esc(p.skill.tier)}</b> ${p.skill.score.toFixed(0)}/100<br>
     <span class="muted">confidence ${fmtPct(p.skill.confidence)}</span>
     ${p.skill.observed_bb100 == null ? ""
       : `<br><span class="muted">${p.skill.observed_bb100.toFixed(1)} bb/100 observed</span>`}`);
 
+  // The meta row is a flex row on a spacing step, so nothing in it carries a
+  // hand-set margin any more.
   const meta = $("#read-meta", head);
+  // The archetype now lives here as a pill, not as a subtitle under the name
+  // plus a second sentence repeating it -- dashed means the read hasn't
+  // cleared 50%, solid means it has, same convention the roster already uses.
+  const archPill = document.createElement("span");
+  archPill.className = "tag arch" + (p.archetype_confidence >= 0.5 ? " on" : "");
+  archPill.textContent = p.archetype;
+  archPill.appendChild(info(`${termTip("confidence")}<br><br>
+    ${fmtPct(p.archetype_confidence)} sure<br><br>
+    <span class="hl">also plausibly</span><br>${
+      p.archetype_mix.slice(1, 4).map(([n, v]) => `${esc(n)} ${fmtPct(v)}`).join("<br>")}`));
   const line = document.createElement("span");
   line.append(document.createTextNode(`${p.hands} hands`));
   line.appendChild(info(`<b>${esc(p.sample_quality)}</b><br>${termTip(p.sample_quality)}`));
-  const conf = document.createElement("span");
-  conf.style.marginLeft = "12px";
-  conf.append(document.createTextNode(
-    `${esc(p.archetype)} ${fmtPct(p.archetype_confidence)} sure`));
-  conf.appendChild(info(`${termTip("confidence")}<br><br>
-    <span class="hl">also plausibly</span><br>${
-      p.archetype_mix.slice(1, 4).map(([n, v]) => `${esc(n)} ${fmtPct(v)}`).join("<br>")}`));
+  meta.append(archPill, line);
   // Who they are on the hands they played against you. Only here, never on
   // the roster: the roster is how everybody plays the field, and two
   // references in one list is how "tag" stopped meaning anything.
   if (p.versus) {
     const vs = document.createElement("span");
-    vs.style.marginLeft = "12px";
     vs.innerHTML = `<span class="tag arch on">vs you: ${esc(p.versus.archetype)}</span>`;
     vs.appendChild(info(`<span class="hl">against you</span><br>
       On the ${p.versus.decisions.toLocaleString()} decisions they made with you
@@ -410,19 +524,10 @@ function profileCard(p, opts) {
       One table size, never pooled: a player can be one thing against you
       heads-up and another six-handed, and the average of those describes
       neither table you sat at.`));
-    line.appendChild(vs);
+    meta.appendChild(vs);
   }
-  const fieldChip = document.createElement("span");
-  fieldChip.style.marginLeft = "12px";
-  fieldChip.textContent = "vs the field";
-  fieldChip.appendChild(info(`<span class="hl">the field</span><br>
-    The average of the other players in your database at ${esc(p.regime_label)}.
-    Your own pool once you have 8+ players; generic online norms before that.
-    Empirical \u2014 not a GTO solver.`));
-  meta.append(line, conf, fieldChip);
   if (p.contributions && Object.keys(p.contributions).length > 1) {
     const where = document.createElement("span");
-    where.style.marginLeft = "12px";
     where.textContent = p.regime_label;
     where.appendChild(info(`<span class="hl">one read, several table sizes</span><br>
       Each table's hands are measured against that table's own norms, then
@@ -443,8 +548,11 @@ function profileCard(p, opts) {
     row.innerHTML = `<span class="comp-name">${esc(c.name)}</span>
       <span class="comp-bar"></span>
       <span class="comp-score">${c.score.toFixed(0)}</span>`;
-    $(".comp-bar", row).appendChild(
-      bar(c.score, 100, c.weak ? "var(--red)" : "var(--mark-1)", 999));
+    // Stretched to the cell rather than scaled into it: with the aspect ratio
+    // preserved a 999-wide bar in a 250px column drew a 3px hairline.
+    const compBar = bar(c.score, 100, c.weak ? "var(--warn)" : "var(--mark-1)", 999);
+    compBar.setAttribute("preserveAspectRatio", "none");
+    $(".comp-bar", row).appendChild(compBar);
     // The sentence, the figure it rests on, and what it means all live in the
     // tooltip now, so the breakdown reads as a scorecard, not a wall of prose.
     const bits = [`<b>${esc(c.name)}</b>`];
@@ -456,15 +564,14 @@ function profileCard(p, opts) {
     skillSide.appendChild(row);
   }
 
+  // The tile the screen exists for, and the only one wearing the primary
+  // surface. bb/100 available moved up into the header band, where it is a
+  // figure rather than a caption on this panel's own title.
   const doBox = document.createElement("div");
-  doBox.className = "panel";
-  doBox.innerHTML = `<div class="spread"><h2>${hero ? "your biggest leaks" : "What to Do"}</h2>
-      <span class="small muted worth"></span></div><div class="leaks"></div>`;
-  const worthLabel = $(".worth", doBox);
-  worthLabel.append(document.createTextNode(
-    leaks.length ? `${p.skill.exploitability_bb100.toFixed(1)} bb/100 available` : ""));
-  if (leaks.length) worthLabel.appendChild(info(termTip("available")));
-  cols.appendChild(doBox);
+  doBox.className = "panel wide primary p-do";
+  doBox.innerHTML = `<h2>${hero ? "Your biggest leaks" : "What to do"}</h2>
+    <div class="leaks"></div>`;
+  card.appendChild(doBox);
 
   const leakBox = $(".leaks", doBox);
   if (!leaks.length) {
@@ -477,14 +584,31 @@ function profileCard(p, opts) {
   }
   for (const l of leaks) {
     const div = document.createElement("div");
-    div.className = "leak";
+    div.className = `leak priced t-${esc(l.tier)}`;
+    // The glance view gets the first clause -- ranked by bb/100, this is the
+    // column that should read as a scorecard, not a stack of essays. The full
+    // sentence is never dropped, only moved into "Why, and what not to do".
+    const doFirst = l.do ? l.do.split(/\.\s+/)[0].replace(/\.+$/, "") + "." : "";
+    const doTruncated = !!(l.do && doFirst.length < l.do.length);
+    // One decimal on the glance surface, two only in the numbers line beside
+    // the sample it rests on. A leak under 0.1 prints as "<0.1" rather than
+    // "0.00": a list sorted by price should never show a price of zero, and
+    // rounding a real figure to nothing is the one thing worse than the extra
+    // digit.
+    const thin = l.severity_bb100 < 0.1;
     div.innerHTML = `
-      <div class="leak-head">
+      <div class="leak-price${thin ? " thin" : ""}">
+        <span class="v">${thin ? "&lt;0.1" : l.severity_bb100.toFixed(1)}</span>
+        <span class="u">bb/100</span>
+      </div>
+      <div class="leak-body">
         <div class="headline"><b>${esc(l.headline)}</b>
-          <span class="tag tier">${esc(l.tier)}</span></div>
-        <div class="num small muted">${l.severity_bb100.toFixed(2)} bb/100</div></div>
-      ${hero ? "" : `<div class="leak-advice">${esc(l.do)}</div>`}
-      <div class="small muted numbers"></div>`;
+          <span class="tag tier ${esc(l.tier)}">${esc(l.tier)}</span></div>
+        ${hero ? "" : `<div class="leak-advice">${esc(doFirst)}</div>`}
+        <div class="small muted numbers"></div>
+      </div>`;
+    bindTip($(".leak-price", div), `<span class="hl">${
+      l.severity_bb100.toFixed(2)} bb/100</span><br>${termTip("available")}`);
     $(".tier", div).after(info(`${termTip(l.tier)}<br><br>${esc(l.priority)}`));
 
     const numbers = $(".numbers", div);
@@ -504,9 +628,16 @@ function profileCard(p, opts) {
 
     // A popup, not an inline <details>: expanding it in place grew this panel
     // after the columns were balanced, which is what threw the layout off. Same
-    // sheet the hands open in.
-    const whydont = [["Why", l.why], ["Do not", l.dont]].filter(([, t]) => t);
+    // sheet the hands open in. "Do" only appears here when the glance view cut
+    // it short -- otherwise the one sentence already on screen is the whole of it.
+    const whydont = [doTruncated ? ["Do", l.do] : null, ["Why", l.why], ["Do not", l.dont]]
+      .filter(Boolean).filter(([, t]) => t);
+    // On the evidence line rather than a line of its own. Five leaks with a
+    // disclosure each was five extra rows of height on the one panel that has
+    // to fit above the fold, and the link belongs with the rest of the
+    // "where this came from" apparatus anyway.
     if (!hero && whydont.length) {
+      numbers.appendChild(document.createTextNode(" · "));
       const link = document.createElement("button");
       link.className = "linkbtn how-link";
       link.textContent = "Why, and what not to do";
@@ -526,21 +657,28 @@ function profileCard(p, opts) {
         }
         $("#close").onclick = () => { modal.innerHTML = ""; };
       };
-      div.appendChild(link);
+      numbers.appendChild(link);
     }
     leakBox.appendChild(div);
   }
 
+  // Same row shape as a priced leak, because it is the same kind of claim one
+  // step short of the evidence bar -- but the left cell holds the confidence
+  // rather than a price, and the rail is dashed, so it never reads as another
+  // number in the ranking.
   for (const w of (p.watchlist || [])) {
     const div = document.createElement("div");
-    div.className = "leak watch";
+    div.className = "leak priced watch";
     div.innerHTML = `
-      <div class="leak-head">
+      <div class="leak-price thin">
+        <span class="v">${fmtPct(w.confidence)}</span>
+        <span class="u">sure</span>
+      </div>
+      <div class="leak-body">
         <div class="headline"><b>${esc(w.headline)}</b>
           <span class="tag tier">watch</span></div>
-        <div class="num small muted">${fmtPct(w.confidence)} sure</div></div>
-      <div class="small muted numbers">${esc(w.in_words)}</div>`;
-    $(".tier", div).after(info(termTip("watch")));
+      </div>`;
+    $(".tier", div).after(info(`${termTip("watch")}<br><br>${esc(w.in_words)}`));
     leakBox.appendChild(div);
   }
 
@@ -567,9 +705,12 @@ function profileCard(p, opts) {
     leakBox.appendChild(weak);
   }
 
+  // Not a priced row -- a synthesis of the rows above it -- so it stops
+  // borrowing their shape: no price cell, a recessed ground, and it sits at
+  // the foot of the list where a summary belongs.
   for (const c of (p.combinations || [])) {
     const block = document.createElement("div");
-    block.className = "leak";
+    block.className = "leak compound";
     block.innerHTML = `<div class="headline"><b>${esc(c.headline)}</b>
       <span class="tag">these compound</span></div>
       <div class="leak-advice">${esc(c.body)}</div>`;
@@ -586,8 +727,8 @@ function profileCard(p, opts) {
     // masonry: a short reads-only panel could never balance against the tall
     // skill breakdown without leaving dead space on one side or the other.
     adjBox.className = "panel wide adjust hero-scope";
-    adjBox.innerHTML = `<h2 style="margin-bottom:6px">Against You<span class="hero-badge">hero</span></h2>
-      <div class="small muted" style="margin:0 0 14px">
+    adjBox.innerHTML = `<h2>Against you<span class="hero-badge">hero</span></h2>
+      <div class="panel-lead">
         Measured against how they play everybody else, not against the
         field.</div>`;
     // The mark rides the title itself, like every other panel header (see the
@@ -642,19 +783,6 @@ function profileCard(p, opts) {
     wideTiles.push(adjBox);
   }
 
-  if (opts.narrate) {
-    const suggestBox = document.createElement("div");
-    suggestBox.className = "panel wide";
-    suggestBox.innerHTML = `<h2>suggested exploits</h2>
-      <div class="small muted" style="margin:-6px 0 12px">
-        Not measured reads \u2014 check them against the hands.</div>`;
-    const narrateBox = document.createElement("div");
-    narrateBox.className = "narrate";
-    suggestBox.appendChild(narrateBox);
-    wideTiles.push(suggestBox);
-    buildNarrator(narrateBox, p);
-  }
-
   const tells = p.timing_tells || [];
   // Render only when some cell actually has a tell -- a grid of "not enough
   // data" is noise wearing a panel's clothes.
@@ -667,7 +795,7 @@ function profileCard(p, opts) {
     title.className = "headline";
     const h2 = document.createElement("h2");
     h2.style.margin = "0";
-    h2.textContent = "Timing Tells";
+    h2.textContent = "Timing tells";
     const flag = document.createElement("span");
     flag.className = "flag";
     flag.textContent = "!";
@@ -729,33 +857,28 @@ function profileCard(p, opts) {
     wideTiles.push(timingBox);
   }
 
-  cols.appendChild(skillBox);
-  const gtoBox = renderGto(p.gto);
-  if (gtoBox) cols.appendChild(gtoBox);
-
-  const detail = document.createElement("div");
-  detail.className = "panel";
-  detail.innerHTML = `<h2>Key numbers</h2><div class="detail-body"></div>`;
-  cols.appendChild(detail);
+  card.appendChild(skillBox);
   for (const tile of wideTiles) card.appendChild(tile);
-  requestAnimationFrame(() => balanceColumns(cols));
-  const body = $(".detail-body", detail);
 
-  // Six headline numbers, the rest one click away. Rendering all seventeen
-  // open made this panel taller than the read, the plan and the exploits put
-  // together, and it was the whole reason the page scrolled.
-  const HEADLINE = ["vpip", "pfr", "three_bet", "fold_to_three_bet",
-                    "cbet:flop", "fold_vs_bet:flop"];
-  const rank = (r) => {
-    const i = HEADLINE.indexOf(r.stat);
-    return i === -1 ? HEADLINE.length : i;
-  };
+  // The HUD line: the six every tracker prints, in the order they print them,
+  // because that order is what a player's eye already knows. Cutting this to
+  // three rows of a table did not make the screen calmer -- it left a column
+  // 300px empty beside a full one. Six figures in one strip is more numbers in
+  // less height than three rows were, and it reads as an instrument.
+  const HUD = [["vpip", "VPIP"], ["pfr", "PFR"], ["three_bet", "3-bet"],
+               ["fold_to_three_bet", "Fold to 3B"], ["cbet:flop", "C-bet flop"],
+               ["fold_vs_bet:flop", "Fold v bet F"]];
   const TIMING = /^(tank_fold|snap_call)(:|$)/;
+  const byStat = Object.fromEntries(p.rows.map((r) => [r.stat, r]));
   const ordered = [...p.rows]
     .filter((r) => !TIMING.test(r.stat))
-    .sort((a, b) => rank(a) - rank(b));
-  const headline = ordered.filter((r) => HEADLINE.includes(r.stat));
-  const rest = ordered.filter((r) => !HEADLINE.includes(r.stat));
+    .sort((a, b) => {
+      const rank = (r) => {
+        const i = HUD.findIndex(([s]) => s === r.stat);
+        return i === -1 ? HUD.length : i;
+      };
+      return rank(a) - rank(b);
+    });
 
   const makeTable = () => {
     const table = document.createElement("div");
@@ -781,14 +904,42 @@ function profileCard(p, opts) {
     }
   };
 
-  const first = makeTable();
-  fill(first, headline.length ? headline : ordered);
-  body.appendChild(first);
-  if (rest.length) {
-    // The rest open in the sheet popup rather than an inline <details>, so
-    // this panel never changes height after the columns are balanced.
+  const hudBox = document.createElement("div");
+  hudBox.className = "panel wide p-hud";
+  hudBox.innerHTML = `<div class="spread"><h2>Key numbers</h2>
+    <span class="small muted hud-actions"></span></div><div class="hud"></div>`;
+  const hudHost = $(".hud", hudBox);
+  for (const [stat, label] of HUD) {
+    const row = byStat[stat];
+    const cell = document.createElement("div");
+    cell.className = "hud-cell" + (row ? "" : " thin");
+    // The percent sign is a unit, not a digit: at full weight beside a 21px
+    // figure it competes with the number it is qualifying.
+    cell.innerHTML = `<div class="k">${esc(label)}</div>
+      <div class="v">${row ? `${(100 * row.value).toFixed(0)}<span class="pc">%</span>`
+                           : "—"}</div>`;
+    if (row) {
+      cell.appendChild(sparkRow(row));
+      // One hover gives what the strip cannot: what the figure counts, the
+      // interval around it, the sample under it, and the threshold. Composed
+      // here rather than concatenating the two existing tip builders, which
+      // between them would print the label and the field reading twice.
+      bindTip(cell, `${statTip(row.stat, row.label, row)}
+        <div class="dir"><span class="muted">95% range ${fmtPct(row.lo)}–${fmtPct(row.hi)}
+        · ${row.opps} ${esc(row.denominator)} · field ${fmtPct(row.population)}</span></div>${
+        row.breakeven == null ? ""
+          : `<div class="dir" style="color:var(--warn)">${
+             esc(row.breakeven_label)} ${fmtPct(row.breakeven)}</div>`}`);
+    } else {
+      bindTip(cell, `<b>${esc(label)}</b><br>No sample for this yet.`);
+    }
+    hudHost.appendChild(cell);
+  }
+  if (ordered.length) {
+    // The rest open in the sheet popup rather than an inline <details>, so the
+    // strip never changes height after it is drawn.
     const link = document.createElement("button");
-    link.className = "linkbtn how-link";
+    link.className = "linkbtn";
     link.textContent = `See all ${ordered.length} numbers`;
     link.onclick = () => {
       _heroVoice = hero;
@@ -802,8 +953,12 @@ function profileCard(p, opts) {
       $(".modal-numbers", modal).appendChild(full);
       $("#close").onclick = () => { modal.innerHTML = ""; };
     };
-    body.appendChild(link);
+    $(".hud-actions", hudBox).appendChild(link);
   }
+  // Between the header band and What to do: the six are reference you read
+  // before the plan, not after it.
+  card.insertBefore(hudBox, doBox);
+  if (opts.narrate) addSuggestTrigger(card, p);
   return card;
 }
 
@@ -854,6 +1009,39 @@ function buildNarrator(box, profile) {
     }
     button.disabled = false;
   };
+}
+
+/* The trigger and what it produces are the same element.
+
+   Two earlier arrangements were each half right. A panel that existed only to
+   hold a button was a blank card below the fold on every profile. Moving the
+   button to the top of "What to do" fixed that and broke something worse: you
+   pressed a link in the header and the answer appeared several hundred pixels
+   further down, past four panels, with nothing to say it had. So the trigger
+   sits where the output belongs -- at the foot of the profile, which is where
+   an unmeasured suggestion should be -- and the row it lives in grows into the
+   panel rather than spawning one elsewhere. */
+function addSuggestTrigger(card, profile) {
+  const box = document.createElement("div");
+  box.className = "panel wide suggest";
+  const trigger = document.createElement("button");
+  trigger.className = "act small";
+  trigger.textContent = "Suggest additional exploits";
+  const lead = document.createElement("span");
+  lead.className = "small muted";
+  lead.textContent = "Not measured reads — a model reading the numbers on this page.";
+  box.append(trigger, lead);
+  trigger.onclick = () => {
+    box.classList.remove("suggest");
+    box.innerHTML = `<h2>Suggested exploits</h2>
+      <div class="panel-lead">Not measured reads — check them against the hands.</div>`;
+    const narrateBox = document.createElement("div");
+    narrateBox.className = "narrate";
+    box.appendChild(narrateBox);
+    buildNarrator(narrateBox, profile);
+    narrateBox.querySelector(".narrate-actions button").click();
+  };
+  card.appendChild(box);
 }
 
 /* The model returns bullets. Render them as a list rather than a wall of
@@ -1142,26 +1330,56 @@ async function viewSessions() {
 
 async function drawSession(id) {
   const body = $("#sess-body");
-  body.innerHTML = `<div class="empty">reading the sitting\u2026</div>`;
+  body.innerHTML = "";
+  body.appendChild(loadingBlock("Reading the sitting\u2026"));
   const data = await get(`/api/session-detail?id=${id}`);
   body.innerHTML = "";
   for (const p of data.players) {
     const div = document.createElement("div");
-    div.className = "leak" + (p.is_hero ? " hero-scope hero-sitting" : "");
+    div.className = "sess-row" + (p.is_hero ? " hero-scope hero-sitting" : "");
     const netTxt = p.net_bb > 0 ? `+${p.net_bb}` : `${p.net_bb}`;
-    div.innerHTML = `<div class="leak-head">
-        <div class="sess-who"><b class="linkish">${esc(p.name)}</b>${
-          p.is_hero ? '<span class="tag hero-tag">you</span>' : ""}
-          <span class="tag arch ${p.confidence >= 0.5 ? "on" : ""}">${esc(p.archetype)}</span>
-          <span class="small muted">${p.hands} hands \u00b7 ${esc(p.regime_label || "")}</span>
+    // Net bb and skill are the only measurements on this page, and they were
+    // 12.5px muted text at the right margin. Same stat-pair the profile header
+    // uses -- one figure treatment across the app, not a per-screen decision.
+    div.innerHTML = `<div class="sess-head">
+        <div class="sess-id">
+          <div class="sess-who"><b class="linkish">${esc(p.name)}</b>${
+            p.is_hero ? '<span class="tag hero-tag">you</span>' : ""}
+            <span class="tag arch ${p.confidence >= 0.5 ? "on" : ""}">${esc(p.archetype)}</span>
+            <span class="sitting-note">this sitting</span>
+          </div>
+          <div class="small muted">${p.hands} hands \u00b7 ${esc(p.regime_label || "")}</div>
         </div>
-        <div class="num small"><b>${netTxt}</b> <span class="muted">bb \u00b7 ${p.skill} skill</span></div></div>
+        <div class="sess-stats">
+          <div class="stat-pair">
+            <span class="v ${p.net_bb >= 0 ? "up" : "down"}">${netTxt}</span>
+            <span class="k">bb</span>
+          </div>
+          <div class="stat-pair sess-skill">
+            <span class="v">${Math.round(p.skill)}</span>
+            <span class="k">skill</span>
+          </div>
+        </div>
+      </div>
       <div class="sess-deltas"></div>`;
     $("b", div).onclick = () => switchTab("players", p.player_id);
+    const skillBar = bar(p.skill, 100, "var(--mark-2)", 999);
+    skillBar.setAttribute("preserveAspectRatio", "none");
+    $(".sess-skill", div).appendChild(skillBar);
+    // This pill is a sitting-only read, not the pooled one on their Database
+    // page -- Database and Sessions disagreeing about the same person is
+    // correct (a sitting can look nothing like the season), but only if it
+    // says so rather than looking like the same claim twice.
+    $(".sitting-note", div).appendChild(info(`<span class="hl">this sitting</span><br>
+      Measured on just tonight's hands here, not the pooled read on their
+      Database page. The two can disagree, and when they do the difference is
+      the point.`));
     const box = $(".sess-deltas", div);
     if (!p.deltas.length) {
-      box.innerHTML = `<div class="small muted">No trend yet \u2014 not enough
-        hands at this table size outside this sitting to say what is usual.</div>`;
+      // One line on the row, not a paragraph per player. Six of these stacked
+      // was the whole page on a database with no outside sample yet.
+      box.innerHTML = `<div class="small muted sess-none">No outside sample at
+        this table size to compare tonight against.</div>`;
     } else {
       // One table size at a time, picked with a tab, rather than every table
       // size stacked under its own heading. Rendering a row per (stat,
@@ -1178,17 +1396,37 @@ async function drawSession(id) {
       }
       const regimes = [...byRegime.keys()];
       const rows = document.createElement("div");
+      // Tonight against usually, as two bars on one scale -- the same picture
+      // the against-you panel draws, for the same reason: the finding is the
+      // gap, and a four-column text grid makes the reader do the subtraction
+      // that a pair of bars does for them.
       const drawRows = label => {
         rows.innerHTML = "";
-        for (const d of byRegime.get(label)) {
+        const set = byRegime.get(label);
+        const max = Math.max(...set.flatMap(d => [d.session, d.usual]), 0.01);
+        for (const d of set) {
           const row = document.createElement("div");
           row.className = "sess-delta";
           const up = d.delta > 0;
-          row.innerHTML = `<span>${esc(statLabel(d.stat, null))}</span>
-            <span class="num">${fmtPct(d.session)}</span>
-            <span class="small ${up ? "up" : "down"}">${up ? "\u25b2" : "\u25bc"}${
-              Math.abs(Math.round(d.delta * 100))}pp</span>
-            <span class="small muted">usually ${fmtPct(d.usual)}</span>`;
+          row.innerHTML = `<div class="sess-delta-head">
+              <span class="sess-stat">${esc(statLabel(d.stat, null))}</span>
+              <span class="small ${up ? "up" : "down"}">${up ? "\u25b2" : "\u25bc"}${
+                Math.abs(Math.round(d.delta * 100))}pp</span>
+            </div>`;
+          for (const [name, v, color] of [["tonight", d.session, "var(--mark-3)"],
+                                          ["usually", d.usual, "var(--mark-1)"]]) {
+            const line = document.createElement("div");
+            line.className = "metric";
+            const label2 = document.createElement("span");
+            label2.className = "small muted"; label2.textContent = name;
+            const val = document.createElement("span");
+            val.className = "small tellval"; val.textContent = fmtPct(v);
+            const drawn = bar(v, max, color, 150);
+            drawn.setAttribute("preserveAspectRatio", "none");
+            line.append(label2, drawn, val);
+            row.appendChild(line);
+          }
+          bindTip($(".sess-stat", row), statTip(d.stat, statLabel(d.stat, null)));
           rows.appendChild(row);
         }
       };
@@ -1244,6 +1482,62 @@ function rangeGrid(grid) {
 const POSITION_ORDER =
   ["UTG", "UTG1", "UTG2", "MP", "MP1", "MP2", "LJ", "HJ", "CO", "BTN", "SB", "BB"];
 
+/* Position, drawn as the table it describes. A six-row bar chart is a correct
+   picture of the same numbers and a worse one: a player does not hold "UTG,
+   HJ, CO, BTN, SB, BB" as a list, they hold it as a ring with the button on
+   it, and the whole point of the panel is how much wider the seats near the
+   button get played. Shade carries magnitude, the same convention the range
+   grid uses -- normalized against this player's own widest seat, because
+   played frequencies live in a 14-23% band and a 0-100% ramp would render all
+   six the same near-empty tint. */
+function positionRing(ranges) {
+  const seats = ranges.filter(r => r.hands)
+    .sort((a, b) => POSITION_ORDER.indexOf(a.position) - POSITION_ORDER.indexOf(b.position));
+  if (seats.length < 2) return null;
+  const played = seats.map(r => (r.raised + r.called) / r.hands);
+  const max = Math.max(...played) || 1;
+  const W = 340, H = 208, cx = W / 2, cy = H / 2, rx = 122, ry = 66;
+  const bw = 58, bh = 38;
+  const svg = el("svg", {viewBox: `0 0 ${W} ${H}`, class: "pos-ring", role: "img",
+    "aria-label": "how often each seat is played"});
+  // The button anchors the diagram at the bottom right, so the picture is the
+  // same shape whatever table size produced it.
+  const btn = Math.max(0, seats.findIndex(r => r.position === "BTN"));
+  const step = 360 / seats.length;
+  // A filled oval, not an outline: the seats have to sit on something for the
+  // arrangement to read as a table rather than as six boxes in a circle.
+  el("ellipse", {cx, cy, rx: rx - 6, ry: ry - 6, fill: "var(--inset)",
+                 stroke: "var(--line)", "stroke-width": 1}, svg);
+  seats.forEach((r, i) => {
+    const a = ((55 + (i - btn) * step) * Math.PI) / 180;
+    const x = cx + rx * Math.cos(a), y = cy + ry * Math.sin(a);
+    const shade = 0.12 + 0.78 * (played[i] / max);
+    const g = el("g", {transform: `translate(${(x - bw / 2).toFixed(1)} ${(y - bh / 2).toFixed(1)})`}, svg);
+    el("rect", {width: bw, height: bh, rx: 8, stroke: "var(--line)", "stroke-width": 1,
+      fill: `color-mix(in oklab, var(--ink) ${Math.round(shade * 100)}%, var(--panel))`}, g);
+    const ink = shade > 0.55 ? "var(--panel)" : "var(--ink)";
+    const name = el("text", {x: bw / 2, y: 16, "text-anchor": "middle", fill: ink,
+      "font-size": 11, "font-weight": 700, "letter-spacing": ".04em"}, g);
+    name.textContent = r.position;
+    const val = el("text", {x: bw / 2, y: 29, "text-anchor": "middle", fill: ink,
+      "font-size": 11, class: "fig-t"}, g);
+    val.textContent = fmtPct(played[i]);
+    if (r.position === "BTN") {
+      // The dealer disc: the one seat whose name every player reads as a
+      // position on a circle rather than as a label.
+      el("circle", {cx: bw + 11, cy: bh / 2, r: 8, fill: "var(--panel)",
+                    stroke: "var(--edge)", "stroke-width": 1}, g);
+      const d = el("text", {x: bw + 11, y: bh / 2 + 3.5, "text-anchor": "middle",
+        fill: "var(--ink)", "font-size": 9, "font-weight": 700}, g);
+      d.textContent = "D";
+    }
+    const hit = el("rect", {width: bw, height: bh, rx: 8, fill: "transparent"}, g);
+    bindTip(hit, `<b>${esc(r.position)}</b> — played ${fmtPct(played[i])}<br>
+      <span class="muted">${r.raised} raised · ${r.called} called of ${r.hands} dealt</span>`);
+  });
+  return svg;
+}
+
 /* A graded report (fold grades / missed value) shares one shape: graded,
    flagged, rate, by_street, by_texture, worst[]. One renderer for both. */
 function renderGradedSection(el, section, opts) {
@@ -1251,27 +1545,48 @@ function renderGradedSection(el, section, opts) {
     el.innerHTML = `<div class="small muted">${esc(opts.emptyText)}</div>`;
     return;
   }
-  const summary = document.createElement("p");
-  summary.innerHTML = `<b>${section.graded}</b> ${esc(opts.noun)} graded, <b>${
-      section.flagged}</b> (${fmtPct(section.rate)}) ${esc(opts.verdict)}`;
+  // Two counts and the proportion between them, as figures and a bar rather
+  // than a sentence with two bold numbers buried in it. How many were graded
+  // and how many of those were wrong is the finding; the sentence made the
+  // reader parse it out of prose every time.
+  const summary = document.createElement("div");
+  summary.className = "graded-head";
+  summary.innerHTML = `
+    <div class="stat-pair"><span class="v">${section.graded}</span>
+      <span class="k">graded</span></div>
+    <div class="stat-pair"><span class="v${section.flagged ? " warnv" : ""}">${
+      section.flagged}</span><span class="k">flagged</span></div>
+    <div class="graded-rate">
+      <div class="small muted graded-verdict">${esc(opts.verdict)}</div>
+      <div class="graded-bar"></div>
+      <div class="small muted graded-pct">${fmtPct(section.rate)} of ${
+        esc(opts.noun)} graded</div>
+    </div>`;
+  const rateBar = bar(section.rate, 1, section.flagged ? "var(--warn)" : "var(--mark-1)", 999);
+  rateBar.setAttribute("preserveAspectRatio", "none");
+  $(".graded-bar", summary).appendChild(rateBar);
   // The by-street and by-texture splits are detail -- one hover away, not two
   // more lines of muted text under every section.
   const byStreet = Object.entries(section.by_street)
     .map(([k, v]) => `${k} ${fmtPct(v.flagged / v.graded)}`).join(" \u00b7 ");
   const byTex = Object.entries(section.by_texture)
     .map(([k, v]) => `${k} ${fmtPct(v.flagged / v.graded)}`).join(" \u00b7 ");
-  summary.appendChild(info(
+  $(".graded-verdict", summary).appendChild(info(
     `<b>by street</b><br>${byStreet}<br><br><b>by texture</b><br>${byTex}`));
   el.appendChild(summary);
 
   for (const g of section.worst) {
     const row = document.createElement("div");
     row.className = "fold-row";
+    // The same card chips the table and the replay draw. These were the one
+    // place hole cards were rendered as mono text instead, so "9d Th" here and
+    // a pair of cards everywhere else meant the same fact twice, two ways.
     row.innerHTML = `
       <span class="small muted">${esc(g.street)}</span>
-      <span class="mono">${g.hole_cards.map(esc).join(" ")}</span>
+      <span class="fold-cards"></span>
       <span class="small fold-summary">${esc(g.summary)}</span>
       <span class="small muted">${esc(g.texture)} board</span>`;
+    $(".fold-cards", row).appendChild(cardsEl(g.hole_cards, {small: true}));
     bindTip($(".fold-summary", row), esc(g.in_words));
     row.onclick = () => showReplay(g.hand_id, opts.heroId,
       `${g.street} ${opts.noun.replace(/s$/, "")} -- ${g.hole_cards.join(" ")}`);
@@ -1285,90 +1600,111 @@ const TELL_EMPTY_TEXT = "Not enough postflop bets or raises with a clean line to
 
 /* sizing_tell and timing_tell share a shape too: street -> {strong, weak,
    in_words}. One renderer for both. */
-function renderTellSection(el, section) {
+/* A sizing or timing tell is one comparison -- what you do with the top half
+   of your range against what you do with the bottom half -- and the tell is
+   the *gap* between them. A sentence makes the reader hold two numbers in
+   their head and subtract. Two bars on a shared scale make the gap the thing
+   you see, which is the same reason the against-you panel is drawn this way,
+   and this reuses that pattern rather than inventing a second one.
+
+   `fmt` renders a bucket's average: pot fraction for sizing, seconds for
+   timing. `unit` names it once per row instead of on both bars. */
+function renderTellSection(el, section, opts) {
   const rows = Object.entries(section || {});
   if (!rows.length) {
     el.innerHTML = `<div class="small muted">${esc(TELL_EMPTY_TEXT)}</div>`;
     return;
   }
+  opts = opts || {};
+  const fmt = opts.fmt || fmtPct;
+  // One scale across every street, so the flop bar and the river bar mean the
+  // same length. Per-street scaling would make every street look like a tell.
+  const max = Math.max(...rows.flatMap(([, v]) =>
+    [v.strong && v.strong.avg, v.weak && v.weak.avg].filter(x => x != null)), 0) || 1;
   for (const [street, v] of rows) {
-    const row = document.createElement("div");
-    row.className = "metric";
-    row.innerHTML = `<span>${esc(street)}${
-        v.is_tell ? '<span class="tag hero-tag" style="margin-left:8px">tell</span>' : ""
-      }</span><span class="small">${esc(v.in_words || "")}</span>`;
-    el.appendChild(row);
+    const block = document.createElement("div");
+    block.className = "tellblock" + (v.is_tell ? " on" : "");
+    block.innerHTML = `<div class="tellhead"><span class="street-label">${esc(street)}</span>${
+      v.is_tell ? '<span class="tag hero-tag">tell</span>' : ""}</div>`;
+    for (const [key, color] of [["strong", "var(--mark-3)"], ["weak", "var(--mark-1)"]]) {
+      const b = v[key];
+      if (!b || b.avg == null) continue;
+      const row = document.createElement("div");
+      row.className = "metric";
+      const name = document.createElement("span");
+      name.className = "small muted";
+      name.textContent = key === "strong" ? "top half" : "bottom half";
+      const val = document.createElement("span");
+      val.className = "small tellval";
+      val.textContent = fmt(b.avg);
+      const drawn = bar(b.avg, max, color, 150);
+      drawn.setAttribute("preserveAspectRatio", "none");
+      row.append(name, drawn, val);
+      bindTip(row, `<b>${esc(key === "strong" ? "top half" : "bottom half")} of your range</b><br>
+        ${esc(fmt(b.avg))}${opts.unit ? " " + esc(opts.unit) : ""} over ${b.hands} hands`);
+      block.appendChild(row);
+    }
+    if (v.in_words) {
+      const note = document.createElement("div");
+      note.className = "small muted tellnote";
+      note.textContent = v.in_words;
+      block.appendChild(note);
+    }
+    el.appendChild(block);
   }
 }
 
-/* Hero read through the ordinary villain machinery -- their own priced leaks
-   and headline numbers, since hero is just another player in the database.
-   Rendered blue (the dash is hero-scoped) and framed for self-coaching. */
-function renderHeroSelf(dash, self) {
-  if (!self) return;
-  const leaks = self.leaks || [];
-  if (leaks.length) {
-    const box = document.createElement("div");
-    box.className = "panel wide";
-    box.innerHTML = `<h2>your biggest leaks</h2>
-      <div class="small muted" style="margin:-6px 0 14px">
-        What a sharp opponent studying you would target, priced in the bb/100
-        they could win from it. Fix the dear ones first.</div>
-      <div class="leaks"></div>`;
-    const host = $(".leaks", box);
-    for (const l of leaks) {
-      const div = document.createElement("div");
-      div.className = "leak";
-      div.innerHTML = `
-        <div class="leak-head">
-          <div class="headline"><b>${esc(l.headline)}</b>
-            <span class="tag tier">${esc(l.tier)}</span></div>
-          <div class="num small muted">${l.severity_bb100.toFixed(2)} bb/100</div></div>
-        <div class="small muted numbers"></div>`;
-      const numbers = $(".numbers", div);
-      if (self.player_id != null) {
-        const link = document.createElement("button");
-        link.className = "linkbtn";
-        link.textContent = `seen about ${Math.round(l.sample)} times`;
-        link.title = "show the hands behind this";
-        link.onclick = () => showEvidence(self.player_id, l.stat, l.headline);
-        numbers.appendChild(link);
-      } else {
-        numbers.appendChild(document.createTextNode(
-          `seen about ${Math.round(l.sample)} times`));
-      }
-      numbers.appendChild(info(statTip(l.stat, l.headline)));
-      host.appendChild(div);
-    }
-    dash.appendChild(box);
+/* Average strength of the hands still live, street by street. A continuing
+   range is supposed to get stronger as the wide parts give up along the way,
+   so the shape of the line *is* the finding -- printed as "flop 48% (61)
+   turn 52% (39) river 55% (22)" it was three numbers the reader had to plot
+   themselves. */
+function narrowingChart(rows) {
+  // Axis, labels and values all live inside the SVG. Put the street names in a
+  // sibling flex row and they line up with the dots only by luck -- the dots
+  // are inset by the plot padding and the labels are not.
+  // The right margin is a gutter for the median label, not slack: anchored to
+  // the plot edge it sat directly on the line it was naming.
+  const W = 380, H = 152;
+  const x0 = 40, x1 = W - 84, y0 = 18, y1 = 92;
+  const y = v => y1 - Math.max(0, Math.min(1, v)) * (y1 - y0);
+  const x = i => rows.length < 2 ? (x0 + x1) / 2 : x0 + (i * (x1 - x0)) / (rows.length - 1);
+  const svg = el("svg", {viewBox: `0 0 ${W} ${H}`, class: "narrow-chart", role: "img",
+    "aria-label": rows.map(r => `${r.street} ${fmtPct(r.avg_strength)}`).join(", ")});
+  // The full 0-100 scale, labeled. Without it a range that holds steady near
+  // the median draws a flat line in the middle of an unlabeled box, which
+  // reads as a broken chart rather than as the finding it is.
+  for (const q of [0, 0.5, 1]) {
+    const median = q === 0.5;
+    el("line", {x1: x0, y1: y(q), x2: x1, y2: y(q),
+                stroke: median ? "var(--axis)" : "var(--grid)", "stroke-width": 1,
+                "stroke-dasharray": median ? "3 3" : null}, svg);
+    const lab = el("text", {x: x0 - 8, y: y(q) + 3.5, "text-anchor": "end",
+      "font-size": 10, fill: "var(--muted)", class: "fig-t"}, svg);
+    lab.textContent = `${q * 100}`;
   }
-
-  const rows = self.rows || [];
-  if (rows.length) {
-    const box = document.createElement("div");
-    box.className = "panel wide";
-    box.innerHTML = `<h2>your tendencies</h2>
-      <div class="small muted" style="margin:-6px 0 14px">
-        Your rates against the pool you were measured against -- the bar is the
-        estimate, hover a row for what is typical.</div>
-      <div class="scroller"><table><thead><tr><th>stat</th>
-        <th style="width:40%">0% \u2014 100%</th>
-        <th class="num">you</th><th class="num">sample</th></tr></thead>
-        <tbody></tbody></table></div>`;
-    const tbody = $("tbody", box);
-    for (const row of rows) {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `<td class="label"></td><td></td>
-        <td class="num">${fmtPct(row.value)}</td>
-        <td class="num small muted">${Math.round(row.opps)}</td>`;
-      const label = $(".label", tr);
-      label.appendChild(document.createTextNode(row.label));
-      label.appendChild(info(statTip(row.stat, row.label, row)));
-      tr.children[1].appendChild(statRow(row));
-      tbody.appendChild(tr);
-    }
-    dash.appendChild(box);
-  }
+  // 0.5 is the median hand the board allows -- the same split the sizing tell
+  // buckets on -- so it is a real reference, not a threshold someone chose.
+  const medLab = el("text", {x: x1 + 8, y: y(0.5) + 3.5, "text-anchor": "start",
+    "font-size": 9.5, fill: "var(--muted)", "letter-spacing": ".06em"}, svg);
+  medLab.textContent = "MEDIAN HAND";
+  el("polyline", {points: rows.map((r, i) => `${x(i)},${y(r.avg_strength)}`).join(" "),
+    fill: "none", stroke: "var(--hero)", "stroke-width": 2,
+    "stroke-linejoin": "round", "stroke-linecap": "round"}, svg);
+  rows.forEach((r, i) => {
+    el("circle", {cx: x(i), cy: y(r.avg_strength), r: 5.5, fill: "var(--panel)"}, svg);
+    el("circle", {cx: x(i), cy: y(r.avg_strength), r: 3.5, fill: "var(--hero)"}, svg);
+    const name = el("text", {x: x(i), y: H - 26, "text-anchor": "middle", "font-size": 10,
+      "font-weight": 600, "letter-spacing": ".06em", fill: "var(--muted)"}, svg);
+    name.textContent = r.street.toUpperCase();
+    const val = el("text", {x: x(i), y: H - 11, "text-anchor": "middle", "font-size": 11,
+      fill: "var(--ink)", class: "fig-t"}, svg);
+    val.textContent = fmtPct(r.avg_strength);
+    const hit = el("rect", {x: x(i) - 26, y: 0, width: 52, height: H, fill: "transparent"}, svg);
+    bindTip(hit, `<b>${esc(r.street)}</b> — average strength ${fmtPct(r.avg_strength)}<br>
+      <span class="muted">over ${r.hands} hands still live</span>`);
+  });
+  return svg;
 }
 
 const SUIT = {s: "♠", h: "♥", d: "♦", c: "♣"};
@@ -1392,13 +1728,14 @@ async function viewPlay() {
       against players from your database. Each villain acts from their own measured profile —
       loose ones call wide, nits fold, aggressive ones barrel — so it plays like practice
       against the people you actually face. Pick up to five and sit down.</div>
-    <div id="pick-list" class="pick-list"><div class="empty">loading…</div></div>
+    <div id="pick-list" class="pick-list"></div>
     <div class="sit-controls">
       <label class="small muted">stack <input id="sit-stack" type="number" value="200" min="20"></label>
       <label class="small muted">blinds <input id="sit-sb" type="number" value="1" min="1">
         / <input id="sit-bb" type="number" value="2" min="2"></label>
       <button class="act primary" id="sit-go" disabled>Sit down</button>
     </div></div>`;
+  $("#pick-list").appendChild(loadingBlock("Reading your database\u2026"));
   const roster = await get("/api/roster");
   const players = (roster.players || [])
     .filter(p => p.player_id != null && p.player_id !== roster.hero_id && p.hands >= 30)
@@ -1547,7 +1884,7 @@ function renderTable(view, data) {
     <div class="sim-main">
       <div class="spread"><h2 style="margin:0">hand ${st.hand_no} <span
         class="muted" style="font-weight:400">· ${esc(st.street)}</span></h2>
-        <button class="linkbtn" id="leave">leave table</button></div>
+        <button class="linkbtn" id="leave">Leave table</button></div>
       <div class="poker-table" id="ptable">
         <div class="felt-oval"></div>
         <div class="table-center">
@@ -1563,11 +1900,17 @@ function renderTable(view, data) {
       <div class="pnl-big ${pnl >= 0 ? "up" : "down"}">${pnl >= 0 ? "+" : ""}${pnl}</div>
       <div class="small muted">${pnl >= 0 ? "+" : ""}${pnlBb} bb · ${st.hand_no} hands</div>
       <div class="small muted" style="margin-top:3px">blinds ${st.sb}/${st.bb}</div>
-      <label class="desc-toggle"><input type="checkbox" id="desc-on"${
-        state.descOn ? " checked" : ""}> explain decisions</label>
-      <label class="desc-toggle" style="margin-top:8px"><input type="checkbox" id="snd-on"${
-        state.muted ? "" : " checked"}> table sounds</label>
-      <button class="act small" id="end-session" style="margin-top:18px">End &amp; analyze</button>
+      <!-- Three session modes, one control shape. Two of them were checkboxes
+           and the third (check/fold) a filled pill, which made "armed" mean two
+           different things on one screen. They are all cf-toggles now: filled
+           is on, outlined is off, readable from across the table view. -->
+      <div class="side-modes">
+        <button class="act small cf-toggle${state.descOn ? " on" : ""}"
+          id="desc-on" aria-pressed="${state.descOn}">Explain</button>
+        <button class="act small cf-toggle${state.muted ? "" : " on"}"
+          id="snd-on" aria-pressed="${!state.muted}">Sounds</button>
+      </div>
+      <button class="act small" id="end-session">End and analyze</button>
     </div>
   </div></div>`;
   const table = $("#ptable");
@@ -1593,7 +1936,11 @@ function renderTable(view, data) {
     if (ev && ev.seat === i && !s.is_hero) {
       const why = (ev.reason || "").split("—").slice(1).join("—").trim();
       const bubble = document.createElement("div");
-      bubble.className = "think-bubble" + (y > 50 ? " below" : "");  // outward, off the felt
+      // Outward off the felt, and anchored to whichever edge keeps it inside
+      // the table. Centered on the seat, a bubble on a right-hand seat ran off
+      // the table and covered the sidebar's End button while a villain thought.
+      bubble.className = "think-bubble" + (y > 50 ? " below" : "")
+        + (x > 66 ? " from-right" : x < 34 ? " from-left" : "");
       bubble.innerHTML = `<b>${esc(actionText(ev))}</b>${
         state.descOn && why ? `<div class="why">${esc(why)}</div>` : ""}`;
       seat.appendChild(bubble);
@@ -1619,8 +1966,19 @@ function renderTable(view, data) {
     if (state.stepTimer) clearTimeout(state.stepTimer);
     state.game = null; state.lastEvent = null; viewPlay();
   };
-  $("#desc-on").onchange = (e) => { state.descOn = e.target.checked; };
-  $("#snd-on").onchange = (e) => { state.muted = !e.target.checked; if (!state.muted) ensureAudio(); };
+  const armToggle = (el, on) => {
+    el.classList.toggle("on", on);
+    el.setAttribute("aria-pressed", String(on));
+  };
+  $("#desc-on").onclick = (e) => {
+    state.descOn = !state.descOn;
+    armToggle(e.currentTarget, state.descOn);
+  };
+  $("#snd-on").onclick = (e) => {
+    state.muted = !state.muted;
+    armToggle(e.currentTarget, !state.muted);
+    if (!state.muted) ensureAudio();
+  };
   $("#end-session").onclick = () => endSession();
   renderControls($("#controls"), data);
   if (!st.over && !st.your_turn) {           // pace the villains so you can watch
@@ -1680,7 +2038,10 @@ function renderControls(el, data) {
     }
     el.appendChild(actbtn("Deal now", () => simPost("/api/sim/next"), "primary"));
     el.appendChild(cfToggle(st));
-    el.appendChild(actbtn("End & analyze", () => endSession()));
+    // No second "End and analyze" here. It already lives in the sidebar, where
+    // it is reachable on every street rather than only between hands, and one
+    // action in two places is how a control bar stops being a list of what you
+    // can do right now.
     const won = st.seats.filter(s => s.won);
     if (won.length) {
       const note = document.createElement("span"); note.className = "small muted";
@@ -1895,7 +2256,6 @@ async function viewHero() {
     <div id="hero-positions"></div>
   </div>`;
   rangeCols.append(gridCol, posCol);
-  dash.appendChild(rangeCols);
 
   const gradesPanel = document.createElement("div");
   gradesPanel.className = "panel wide";
@@ -1906,15 +2266,16 @@ async function viewHero() {
     <h3>missed value</h3>
     <div id="hero-missed"></div>`;
   dash.appendChild(gradesPanel);
+  dash.appendChild(rangeCols);
 
   const tellsPanel = document.createElement("div");
   tellsPanel.className = "panel wide";
   tellsPanel.innerHTML = `
     <h2 id="hero-tells-head">sizing &amp; timing tells</h2>
-    <h3>sizing</h3>
-    <div id="hero-sizing"></div>
-    <h3>timing</h3>
-    <div id="hero-timing"></div>`;
+    <div class="tellcols">
+      <div><h3>sizing</h3><div id="hero-sizing"></div></div>
+      <div><h3>timing</h3><div id="hero-timing"></div></div>
+    </div>`;
   dash.appendChild(tellsPanel);
 
   const narrowingPanel = document.createElement("div");
@@ -1923,6 +2284,24 @@ async function viewHero() {
     <h2 id="hero-narrowing-head">range narrowing</h2>
     <div id="hero-narrowing"></div>`;
   dash.appendChild(narrowingPanel);
+
+  // Self machinery first. profileCard builds the same tiles it builds for a
+  // villain -- key numbers, priced leaks, skill -- and on this tab those are
+  // the *least* interesting thing on the page: they are what any opponent with
+  // your hand histories could work out. Fold grades, your real range, and the
+  // tells only your own export can see go above them, and the villain view of
+  // you is relabelled as what it is and moved to the foot of the page.
+  const villainView = document.createElement("div");
+  villainView.className = "wide villain-view";
+  villainView.innerHTML = `<div class="villain-view-head">
+    <span class="label-t">How you look as a villain</span>
+    <span class="small muted">The same read the tool would give an opponent
+      studying you.</span></div>`;
+  for (const sel of [".p-hud", ".p-do", ".p-skill"]) {
+    const panel = $(sel, dash);
+    if (panel) villainView.appendChild(panel);
+  }
+  dash.appendChild(villainView);
 
   $("#modal").innerHTML = "";          // dismiss the loader
   view.innerHTML = "";
@@ -1949,22 +2328,31 @@ async function viewHero() {
   $("#hero-grid", dash).appendChild(rangeGrid(data.grid));
 
   const positions = $("#hero-positions", dash);
-  positions.className = "hero-pos";
   const ranges = [...(data.ranges || [])].sort(
     (a, b) => POSITION_ORDER.indexOf(a.position) - POSITION_ORDER.indexOf(b.position));
-  for (const r of ranges) {
-    if (!r.hands) continue;
-    const played = (r.raised + r.called) / r.hands;
-    const row = document.createElement("div");
-    row.className = "pos-row";
-    row.innerHTML = `
-      <span class="pos-name">${esc(r.position)}<span class="small muted"> ${r.hands}h</span></span>
-      <span class="pos-bar"></span>
-      <span class="pos-val small muted">${fmtPct(played)} played</span>`;
-    const b = bar(played, 1, "var(--mark-3)", 150);
-    b.setAttribute("preserveAspectRatio", "none");
-    $(".pos-bar", row).appendChild(b);
-    positions.appendChild(row);
+  const ring = positionRing(ranges);
+  if (ring) {
+    positions.appendChild(ring);
+    positions.insertAdjacentHTML("beforeend",
+      `<div class="panel-lead pos-note">Share of hands played from each seat,
+       shaded against your widest.</div>`);
+  } else {
+    // One seat is not a ring. Fall back to the row the rest of the app uses.
+    positions.className = "hero-pos";
+    for (const r of ranges) {
+      if (!r.hands) continue;
+      const played = (r.raised + r.called) / r.hands;
+      const row = document.createElement("div");
+      row.className = "pos-row";
+      row.innerHTML = `
+        <span class="pos-name">${esc(r.position)}<span class="small muted"> ${r.hands}h</span></span>
+        <span class="pos-bar"></span>
+        <span class="pos-val small muted">${fmtPct(played)} played</span>`;
+      const b = bar(played, 1, "var(--mark-3)", 150);
+      b.setAttribute("preserveAspectRatio", "none");
+      $(".pos-bar", row).appendChild(b);
+      positions.appendChild(row);
+    }
   }
 
   if (data.grade_error) {
@@ -1983,18 +2371,21 @@ async function viewHero() {
     });
   }
 
-  renderTellSection($("#hero-sizing", dash), data.sizing);
-  renderTellSection($("#hero-timing", dash), data.timing);
+  // Sizing is a share of the pot, timing is seconds -- same comparison, two
+  // units, so the formatter travels with the call.
+  renderTellSection($("#hero-sizing", dash), data.sizing, {unit: "of pot"});
+  renderTellSection($("#hero-timing", dash), data.timing, {
+    unit: "to act", fmt: v => `${v.toFixed(1)}s`});
 
   const narrowing = $("#hero-narrowing", dash);
   if (!data.narrowing || !data.narrowing.length) {
     narrowing.innerHTML = `<div class="small muted">Not enough hands reaching
       each street yet.</div>`;
   } else {
-    const row = document.createElement("p");
-    row.textContent = data.narrowing
-      .map(s => `${s.street} ${fmtPct(s.avg_strength)} (${s.hands})`).join("   ");
-    narrowing.appendChild(row);
+    const chart = document.createElement("div");
+    chart.className = "narrow-wrap";
+    chart.appendChild(narrowingChart(data.narrowing));
+    narrowing.appendChild(chart);
     const strengths = data.narrowing.map(s => s.avg_strength);
     if (strengths.length >= 2) {
       const monotone = strengths.every((v, i) => i === 0 || v >= strengths[i - 1]);
@@ -2449,29 +2840,6 @@ function groupReason(members, questions) {
   return [...new Set(questions.map(q => q.detail))].join("; ");
 }
 
-/* Longest-processing-time bin packing: tallest panel first, then each next one
-   into whichever column is currently shorter. Unlike CSS columns it cannot
-   strand a panel on its own. */
-function balanceColumns(host) {
-  if (!host) return;
-  const tiles = [...host.children].filter(el => el.classList.contains("panel"));
-  if (tiles.length < 2) return;
-  const measured = tiles.map(el => ({el, h: el.getBoundingClientRect().height}));
-  const wide = getComputedStyle(host).gridTemplateColumns.split(" ").length > 1;
-  const cols = [];
-  for (let i = 0; i < (wide ? 2 : 1); i++) {
-    const c = document.createElement("div");
-    c.className = "col";
-    cols.push({node: c, h: 0});
-  }
-  for (const item of [...measured].sort((a, b) => b.h - a.h)) {
-    const target = cols.reduce((a, b) => (a.h <= b.h ? a : b));
-    target.node.appendChild(item.el);
-    target.h += item.h + 14;
-  }
-  for (const c of cols) host.appendChild(c.node);
-}
-
 function displayKey(name) {
   return String(name || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
@@ -2787,54 +3155,25 @@ async function viewPlayer(id) {
   state.heroId = data.hero_id;
   playerTabs(data.profiles, holder, {narrate: true, heroId: data.hero_id});
 
-  // Accounts pooled into this player, each splittable on its own.
-  //
-  // Merging was previously one-way from the interface: the only way out of a
-  // wrong "same person" was to reset the database. Splitting is per account,
-  // not per player, because that is the grain the mistake happens at -- one
-  // stray account swept into somebody else, not a whole identity gone wrong.
+  // Accounts pooled into this player. A list, not a control surface: the
+  // splitting moved into its own dialog behind the actions at the foot of the
+  // page, so that a wrong merge and a wrong player are undone from the same
+  // place instead of one being a button hidden in a table.
   if (data.aliases && data.aliases.length > 1) {
     const panel = document.createElement("div");
     panel.className = "panel";
-    panel.innerHTML = `<h2>accounts</h2>
-      <div class="small muted" style="margin:-8px 0 12px">
-        ${data.aliases.length} accounts are pooled as this player. Split one out
-        if it is somebody else — the hands stay put, only who they belong to
-        changes, and both profiles are rebuilt from them.</div>
+    panel.innerHTML = `<h2>Accounts</h2>
+      <div class="panel-lead">
+        ${data.aliases.length} accounts are pooled as this player.</div>
       <div id="alias-rows"></div>`;
     view.appendChild(panel);
     const rows = panel.querySelector("#alias-rows");
     for (const a of data.aliases) {
       const row = document.createElement("div");
-      row.className = "leak";
-      row.innerHTML = `<div class="leak-head">
-        <div><b>${esc(a.name || a.account)}</b>
-          <div class="small muted">${esc(a.account)} · ${a.hands} hand(s)</div></div>
-        <div class="row"><button class="act small">split out</button></div>
-      </div>`;
-      const button = row.querySelector("button");
-      button.onclick = async () => {
-        button.disabled = true;
-        button.textContent = "splitting\u2026";
-        try {
-          const r = await post("/api/unlink",
-            {player_id: id, site: a.site, account: a.account});
-          // Straight to whoever this just became: the point of splitting is
-          // to look at them on their own.
-          state.player = r.player_id;
-          await viewPlayer(r.player_id);
-        } catch (err) {
-          button.disabled = false;
-          button.textContent = "split out";
-          let msg = row.querySelector(".split-err");
-          if (!msg) {
-            msg = document.createElement("div");
-            msg.className = "small err split-err";
-            row.appendChild(msg);
-          }
-          msg.textContent = err.message || "could not split";
-        }
-      };
+      row.className = "alias-row";
+      row.innerHTML = `<span><b>${esc(a.name || a.account)}</b>
+          <span class="small muted mono">${esc(a.account)}</span></span>
+        <span class="small muted num">${a.hands} hands</span>`;
       rows.appendChild(row);
     }
   }
@@ -2862,6 +3201,146 @@ async function viewPlayer(id) {
     }
     view.appendChild(panel);
   }
+
+  view.appendChild(playerActions(data));
+}
+
+/* The two things you can do to a player rather than with one. Both are
+   destructive in different degrees, so both are a dialog rather than a button
+   that acts, and both live at the foot of the page rather than beside the read
+   -- nothing here is part of playing a hand. */
+function playerActions(data) {
+  const box = document.createElement("div");
+  box.className = "panel player-actions";
+  box.innerHTML = `<h2>Manage this player</h2>
+    <div class="panel-lead">Neither of these touches a stored hand. Hands
+      belong to a table, not to a person.</div>
+    <div class="row"></div>`;
+  const row = $(".row", box);
+
+  const split = document.createElement("button");
+  split.className = "act";
+  split.textContent = "Split player\u2026";
+  const canSplit = (data.aliases || []).length > 1;
+  split.disabled = !canSplit;
+  if (canSplit) split.onclick = () => splitDialog(data);
+  else bindTip(split, `<span class="hl">nothing to split</span><br>
+    Only one account is pooled as this player, so there is no second identity
+    to separate out.`);
+
+  const del = document.createElement("button");
+  del.className = "act danger";
+  del.textContent = "Delete player\u2026";
+  const isHero = data.hero_id != null && data.player_id === data.hero_id;
+  del.disabled = isHero;
+  if (isHero) bindTip(del, `<span class="hl">this is you</span><br>
+    The Hero tab is built from this identity. Reset the database if you really
+    mean to start over.`);
+  else del.onclick = () => deleteDialog(data);
+
+  row.append(split, del);
+  return box;
+}
+
+/* Splitting is per account, not per player, because that is the grain the
+   mistake happens at -- one stray account swept into somebody else, not a
+   whole identity gone wrong. */
+function splitDialog(data) {
+  const modal = $("#modal");
+  modal.innerHTML = `<div class="veil"><div class="sheet">
+    <div class="spread"><h2 style="margin:0">Split ${esc(data.display_name)}</h2>
+      <button class="act" id="close">Close</button></div>
+    <div class="panel-lead">These ${data.aliases.length} accounts are pooled as
+      one person. Split one out if it is somebody else \u2014 the hands stay
+      put, only who they belong to changes, and both profiles are rebuilt from
+      them.</div>
+    <div id="split-rows"></div></div></div>`;
+  $("#close").onclick = () => { modal.innerHTML = ""; };
+  const rows = $("#split-rows", modal);
+  for (const a of data.aliases) {
+    const row = document.createElement("div");
+    row.className = "alias-row";
+    row.innerHTML = `<span><b>${esc(a.name || a.account)}</b>
+        <span class="small muted mono">${esc(a.account)}</span></span>
+      <span class="small muted num">${a.hands} hands</span>
+      <button class="act small">Split out</button>`;
+    const button = $("button", row);
+    button.onclick = async () => {
+      button.disabled = true;
+      button.textContent = "Splitting\u2026";
+      try {
+        const r = await post("/api/unlink",
+          {player_id: data.player_id, site: a.site, account: a.account});
+        modal.innerHTML = "";
+        // Straight to whoever this just became: the point of splitting is to
+        // look at them on their own.
+        state.player = r.player_id;
+        await viewPlayer(r.player_id);
+      } catch (err) {
+        button.disabled = false;
+        button.textContent = "Split out";
+        let msg = row.querySelector(".split-err");
+        if (!msg) {
+          msg = document.createElement("div");
+          msg.className = "small err split-err";
+          row.appendChild(msg);
+        }
+        msg.textContent = err.message || "could not split";
+      }
+    };
+    rows.appendChild(row);
+  }
+}
+
+/* One click, not a typed phrase. Reset asks you to type the words because it
+   costs every hand you have; this costs one identity and leaves the hands
+   behind, so the dialog says exactly what goes and what stays and takes a
+   press. */
+function deleteDialog(data) {
+  const modal = $("#modal");
+  const hands = (data.aliases || []).reduce((n, a) => n + (a.hands || 0), 0);
+  const accounts = (data.aliases || []).length;
+  modal.innerHTML = `<div class="veil"><div class="sheet">
+    <div class="spread"><h2 style="margin:0">Delete ${esc(data.display_name)}?</h2>
+      <button class="act" id="close">Close</button></div>
+    <div class="how-body">
+      <div class="howblock"><div class="howlabel">Goes</div>
+        <div>This player, the ${accounts} account${accounts === 1 ? "" : "s"}
+          pooled as them, their notes, and everything computed from
+          them \u2014 the read, the leaks, the rating.</div></div>
+      <div class="howblock"><div class="howlabel">Stays</div>
+        <div>Every stored hand, all
+          ${hands.toLocaleString()} of them. A hand belongs to a table, not to a
+          person, and the others who sat in it keep their samples. Their seats
+          simply stop being attributed to anybody.</div></div>
+      <div class="howblock"><div class="howlabel">If they come back</div>
+        <div>Importing hands with that account again makes a new player,
+          starting from nothing.</div></div>
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:16px">
+      <button class="act" id="cancel-del">Cancel</button>
+      <button class="act danger" id="do-del">Delete player</button>
+    </div>
+    <div class="small err" id="del-err" style="margin-top:10px"></div>
+  </div></div>`;
+  const close = () => { modal.innerHTML = ""; };
+  $("#close").onclick = close;
+  $("#cancel-del").onclick = close;
+  $("#do-del").onclick = async () => {
+    const button = $("#do-del", modal);
+    button.disabled = true;
+    button.textContent = "Deleting\u2026";
+    try {
+      await post("/api/player/delete", {player_id: data.player_id});
+      close();
+      state.player = null;
+      await viewPlayers();
+    } catch (err) {
+      button.disabled = false;
+      button.textContent = "Delete player";
+      $("#del-err", modal).textContent = err.message || "could not delete";
+    }
+  };
 }
 
 /* Destructive and irreversible, so it asks for the words rather than a click:
@@ -2981,11 +3460,13 @@ async function showReplay(handId, playerId, headline) {
     <div class="spread"><h2 style="margin:0">Hand replay</h2>
       <button class="act" id="close-replay">Back</button></div>
     ${headline ? `<p class="small muted" style="margin:4px 0 0">${esc(headline)}</p>` : ""}
-    <div id="replay"><div class="empty">loading hand\u2026</div></div>
+    <div id="replay"></div>
   </div></div>`;
   $("#close-replay").onclick = () => { layer.innerHTML = ""; };
   const box = $("#replay", layer);
+  box.appendChild(loadingBlock("Loading the hand\u2026"));
   const r = await get(`/api/hand/${handId}?focus=${playerId}`);
+  box.innerHTML = "";
   const seatLine = document.createElement("div");
   seatLine.className = "small muted seatline";
   for (const st of r.seats) {

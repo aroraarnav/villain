@@ -134,7 +134,7 @@ not a paywall — those are the operations whose results are worth keeping, and 
 guest has nowhere to keep them.
 
 The lock lives in the page, not in `villain/webapp/server.py`, because the same
-module backs `villain ui` on a laptop, which has no accounts and stays fully
+module backs `villain test` on a laptop, which has no accounts and stays fully
 writable.
 
 ## What it costs to run

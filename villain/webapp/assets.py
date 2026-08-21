@@ -13,10 +13,13 @@ from pathlib import Path
 
 ASSETS = Path(__file__).parent / "assets"
 
-#: Extension -> content type for everything the UI serves.
+#: Extension -> content type for everything the UI serves. The fonts are
+#: shipped rather than fetched: this tool reads real hand histories, and a
+#: webfont request would tell a CDN every time somebody opened it.
 TYPES = {".html": "text/html; charset=utf-8",
          ".css": "text/css; charset=utf-8",
-         ".js": "text/javascript; charset=utf-8"}
+         ".js": "text/javascript; charset=utf-8",
+         ".woff2": "font/woff2"}
 
 
 @cache

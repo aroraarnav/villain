@@ -19,7 +19,7 @@ pip install -e . pytest
 pytest                             # should be green before you start
 ```
 
-That installs the `villain` and `villain-ui` commands in editable mode, so your
+That installs the `villain` command in editable mode, so your
 changes are picked up without reinstalling. CI runs the same suite on Python
 3.11, 3.12 and 3.13, so if it passes locally on one of those it will almost
 certainly pass on the rest.

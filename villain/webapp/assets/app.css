@@ -1,69 +1,192 @@
-  :root {
-    color-scheme: light;
-    --bg: #f6f6f5; --panel: #ffffff; --ink: #111111; --muted: #6b6b68;
-    --line: #e3e2df; --edge: #979590; --accent: #111111; --accent-soft: #f1f0ee;
-    --warn: #b4532a; --danger: #b4532a; --red: #b4532a;
-    --hero: #2f6fe0; --hero-soft: #eaf1fd;   /* you; the villain world is warm, you are cool */
-    /* Neutral ordinal ramp, validated light->dark on the panel surface:
-       light end clears 2:1, monotone lightness, visible step gaps. Shade
-       carries confidence, never identity. */
-    --mark-1: #8f8d89;   /* tentative */
-    --mark-2: #575552;   /* likely */
-    --mark-3: #111111;   /* strong */
-    --band: #e8e7e4;     /* credible interval wash */
-    --grid: #e6e5e2; --axis: #8a8a86; --tick: #6f6e69;
-    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* Shipped beside the stylesheet, not fetched from a CDN. Two reasons, and
+     either would be enough on its own: this tool reads real hand histories off
+     a loopback server, so a webfont request would tell Google every time you
+     opened it; and the hosted build runs the whole app inside Pyodide behind a
+     fetch shim that only intercepts /api and /static, which a CSS url() does
+     not go through -- an external face would simply fail there.
+
+     The paths are bare filenames, and that is load-bearing. A relative url()
+     resolves against whatever the stylesheet's own base is, and this stylesheet
+     has two:
+
+       - served locally it is linked from /static/app.css, so a bare name
+         resolves to /static/<name> -- beside the stylesheet, where it is;
+       - on the hosted build the boot page strips the <link> and injects the
+         same CSS into a <style>, whose base is the *document*, so a bare name
+         resolves to <page-dir>/<name>.
+
+     One leading "static/" satisfied the second and broke the first into
+     /static/static/, which 404s and silently falls back to the platform sans.
+     A leading slash breaks the second instead: Pages serves from a repository
+     subpath. Bare is the only form both bases agree on, so web/build.py copies
+     the faces to the root of dist/ rather than into a subdirectory. */
+  @font-face {
+    font-family: "Space Grotesk"; font-style: normal; font-weight: 300 700;
+    font-display: swap; src: url("space-grotesk.woff2") format("woff2");
   }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      color-scheme: dark;
-      --bg: #0d0d0d; --panel: #17181a; --ink: #f2f1ee; --muted: #98968f;
-      --line: #2a2b2d; --edge: #606166; --accent: #f2f1ee; --accent-soft: #202123;
-      --warn: #e5645a; --danger: #e5645a; --red: #e5645a;
-    --hero: #6aa6ff; --hero-soft: #16233a;
-      --hero: #6aa6ff; --hero-soft: #16233a;
-      --mark-1: #787774; --mark-2: #adaba6; --mark-3: #f0efec;
-      --band: #26272a;
-      --grid: #232427; --axis: #75746f; --tick: #9b9a94;
+  @font-face {
+    font-family: "JetBrains Mono"; font-style: normal; font-weight: 100 800;
+    font-display: swap; src: url("jetbrains-mono.woff2") format("woff2");
+  }
+  /* Dark is the identity, so dark is what :root declares and what every value
+     below was tuned against; light is the accommodation, applied as an
+     override. It used to be the other way round, which meant the palette
+     anyone actually looks at was a mechanical inversion of one nobody did.
+     Neither theme is forced: with no explicit choice the OS still decides. */
+  :root {
+    color-scheme: dark;
+    /* Three grounds, not one. Depth is what separates "the tile you came for"
+       from "the tile that is merely also true," and a single --panel on a
+       single --bg cannot say that. */
+    --bg: #0b0c0e;        /* page */
+    --panel: #141619;     /* reference surface */
+    --panel-2: #191c21;   /* raised: the primary tile on a screen */
+    --inset: #101215;     /* recessed: figure cells inside a panel */
+    --ink: #f2f1ee; --muted: #93938e;
+    --line: #24272b;      /* hairline between rows */
+    --edge: #4b5058;      /* border of something you can operate */
+    --accent: #f2f1ee; --accent-soft: #1d2025;
+    --lift: 0 1px 0 rgba(255,255,255,.03), 0 12px 28px rgba(0,0,0,.42);
+    /* Three warm hues, three jobs. Same family, never the same value: --red is
+       the app's one accent (nav, focus, armed controls, the wordmark), --warn
+       is a threshold you should notice but not act on (breakeven ticks, timing
+       flags), --danger is destructive and irreversible (reset). Collapsing
+       these to one hex is how a Reset button and the active tab ended up the
+       same color. */
+    --red: #e5645a;
+    /* A red suit is a fact about the card, never a claim about whose card it
+       is. It has to be its own token: inside .hero-scope --red becomes the
+       blue "you" accent, and hero's own hole cards were dealing blue diamonds
+       and blue hearts because .card.red pointed at it. */
+    --card-red: #e5645a;
+    --warn: #d9a441;
+    --danger: #e5484d;
+    --up: #45b881;       /* realized money only -- P/L, session net bb */
+    --hero: #6aa6ff; --hero-soft: #16233a;   /* you; the villain world is warm, you are cool */
+    /* Neutral ordinal ramp, validated against the panel surface: monotone
+       lightness, visible step gaps, dark end clears 2:1. Shade carries
+       confidence, never identity. */
+    --mark-1: #6f6e6b;   /* tentative */
+    --mark-2: #a8a6a1;   /* likely */
+    --mark-3: #f0efec;   /* strong */
+    --band: #262a30;     /* credible interval wash */
+    --band-line: #383d45;/* its edge, so the interval reads as an interval */
+    --grid: #212429; --axis: #6f7178; --tick: #9b9a94;
+    /* A grotesque with an actual opinion, and a mono for every figure. The
+       platform UI stack behind each is a real fallback, not a formality: the
+       faces are shipped files and a file can fail to arrive. */
+    --font-ui: "Space Grotesk", ui-sans-serif, system-ui, -apple-system,
+               "Segoe UI", Roboto, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    /* One spacing scale. Everything is a step on it -- the 6/9/10/14/18/22 mix
+       it replaces is why intros needed hand-tuned negative margins to sit
+       right under a heading. */
+    --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 40px;
+  }
+  /* Light: same structure, warm neutrals, elevation carried by shadow instead
+     of by a lighter surface (on white there is nothing lighter to go to). */
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      color-scheme: light;
+      --bg: #f4f4f2; --panel: #ffffff; --panel-2: #ffffff; --inset: #f3f2ef;
+      --ink: #111111; --muted: #6b6b68;
+      --line: #e6e5e2; --edge: #979590; --accent: #111111; --accent-soft: #f1f0ee;
+      --lift: 0 1px 2px rgba(17,17,17,.05), 0 10px 24px rgba(17,17,17,.07);
+      --red: #b4532a; --card-red: #b4532a; --warn: #93650f; --danger: #ab2f2f; --up: #2f7d5b;
+      --hero: #2f6fe0; --hero-soft: #eaf1fd;
+      --mark-1: #8f8d89; --mark-2: #575552; --mark-3: #111111;
+      --band: #eceae6; --band-line: #d4d2cd;
+      --grid: #e6e5e2; --axis: #8a8a86; --tick: #6f6e69;
     }
   }
-  :root[data-theme="dark"] {
-    color-scheme: dark;
-    --bg: #0d0d0d; --panel: #17181a; --ink: #f2f1ee; --muted: #98968f;
-    --line: #2a2b2d; --edge: #606166; --accent: #f2f1ee; --accent-soft: #202123;
-    --warn: #e5645a; --danger: #e5645a; --red: #e5645a;
-    --mark-1: #787774; --mark-2: #adaba6; --mark-3: #f0efec;
-    --band: #26272a;
-    --grid: #232427; --axis: #75746f; --tick: #9b9a94;
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #f4f4f2; --panel: #ffffff; --panel-2: #ffffff; --inset: #f3f2ef;
+    --ink: #111111; --muted: #6b6b68;
+    --line: #e6e5e2; --edge: #979590; --accent: #111111; --accent-soft: #f1f0ee;
+    --lift: 0 1px 2px rgba(17,17,17,.05), 0 10px 24px rgba(17,17,17,.07);
+    --red: #b4532a; --card-red: #b4532a; --warn: #93650f; --danger: #ab2f2f; --up: #2f7d5b;
+    --hero: #2f6fe0; --hero-soft: #eaf1fd;
+    --mark-1: #8f8d89; --mark-2: #575552; --mark-3: #111111;
+    --band: #eceae6; --band-line: #d4d2cd;
+    --grid: #e6e5e2; --axis: #8a8a86; --tick: #6f6e69;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
-    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font: 400 15px/1.5 var(--font-ui);
+    -webkit-font-smoothing: antialiased;
+    /* Slashed zero and lining figures everywhere, so a 0 in a frequency is
+       never a capital O and 19 and 10 occupy the same width down a column. */
+    font-feature-settings: "zero" 1, "cv05" 1;
+    font-variant-numeric: lining-nums;
   }
-  .wrap { max-width: 1060px; margin: 0 auto; padding: 24px 20px 90px; }
-  header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  /* Every figure in this app is meant to be compared with the figure above it,
+     so every figure is tabular. Declared once here rather than re-remembered
+     at each of the thirty call sites that used to set it by hand. */
+  .num, td.num, th.num, .fig, [class*="-score"], [class*="-val"],
+  [class*="-amt"], [class*="-nums"], [class*="-dev"] {
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+  /* The figure style: the app's numbers are the product, so they get the
+     narrower, more deliberate face and the tighter fit. */
+  .fig {
+    font-family: var(--mono); letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+  /* The same, for text drawn inside an SVG. It has to be a class and not an
+     attribute: var() is only valid in a CSS declaration, so a presentation
+     attribute of font-family="var(--mono)" is discarded outright and the label
+     quietly renders in the UI face -- which is how a handful of chart figures
+     ended up in a different typeface from every other figure in the app. */
+  text.fig-t {
+    font-family: var(--mono); letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: var(--sp-5) 20px var(--sp-6); }
+  header { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+  /* Display: the one size reserved for the wordmark. A player's own name on
+     their profile uses the same size (.hero) -- never both at once, and never
+     bigger than this. 38px was a marketing size sitting on top of a 15px app. */
+  /* The wordmark is set in the figure face, at its heaviest. The tool is an
+     instrument for reading numbers, and the name saying so in the same
+     typeface the numbers are set in is the cheapest identity it can have --
+     no extra file, nothing to load, and it cannot drift from the rest of the
+     app because it *is* the rest of the app. */
   h1 {
-    font-size: 38px; margin: 0; letter-spacing: -0.05em; font-weight: 800;
-    line-height: 0.95;
+    font-family: var(--mono);
+    font-size: 24px; margin: 0; letter-spacing: -0.05em; font-weight: 800;
+    line-height: 1;
   }
-  h1 a { color: inherit; text-decoration: none; display: inline-flex; align-items: center; }
-  h1 .dot {
-    width: 10px; height: 10px; border-radius: 50%; background: var(--red);
-    display: inline-block; margin-left: 8px; margin-bottom: 18px;
+  h1 a {
+    color: inherit; text-decoration: none;
+    display: inline-flex; align-items: center; gap: 9px;
+  }
+  /* The mark: a spade knocked out of a filled tile, rather than a suit pip set
+     loose beside the word. At 15px inline the pip was a smudge -- a spade has
+     to carry a notch, two shoulders and a stem, and none of that survives
+     below about 18px of drawable area. The tile is also the one place --red is
+     allowed to be brand rather than "this is the live control": it is not a
+     control, and the product otherwise has no color of its own. */
+  h1 .mark {
+    width: 28px; height: 28px; border-radius: 8px; flex: none;
+    background: var(--red); color: var(--bg); padding: 3px;
   }
   .iconbtn {
     border: 1px solid var(--edge); background: transparent; color: var(--muted);
     border-radius: 999px; width: 34px; height: 34px; cursor: pointer;
     display: inline-flex; align-items: center; justify-content: center; padding: 0;
+    transition: color .14s ease, border-color .14s ease;
   }
   .iconbtn:hover { color: var(--ink); border-color: var(--accent); }
   .sub { color: var(--muted); font-size: 12.5px; }
-  nav { display: flex; gap: 4px; margin: 18px 0 0; flex-wrap: wrap;
+  nav { display: flex; gap: var(--sp-1); margin: var(--sp-4) 0 0; flex-wrap: wrap;
         border-bottom: 1px solid var(--line); }
   nav button {
     border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted);
-    font: inherit; font-size: 14px; padding: 8px 14px; cursor: pointer; border-radius: 0;
+    font: inherit; font-size: 13px; letter-spacing: 0.01em;
+    padding: var(--sp-2) var(--sp-3); cursor: pointer; border-radius: 0;
+    transition: color .14s ease, border-color .14s ease;
   }
   nav button:hover { color: var(--ink); }
   nav button.on { color: var(--ink); border-bottom-color: var(--red); font-weight: 600; }
@@ -79,9 +202,15 @@
      scope, so every accented element (bars, links, markers, the active tab)
      turns blue while the monochrome-plus-confidence system stays put
      everywhere else. */
+  /* Only the identity/accent tokens turn blue here -- not --warn or --mark-3.
+     Those two carry "weak" and "threshold," and a weak part of your own game
+     is exactly as weak on this tab as anywhere else; recoloring it blue made
+     weakness unreadable on the one page most about finding it. --danger is
+     left alone too: a destructive button under Hero should not look like
+     "you," it should look like every other destructive button. */
   .hero-scope {
-    --red: var(--hero); --warn: var(--hero); --danger: var(--hero);
-    --accent-soft: var(--hero-soft); --mark-3: var(--hero);
+    --red: var(--hero);
+    --accent-soft: var(--hero-soft);
   }
   .hero-scope .linkbtn { color: var(--hero); }
   .hero-scope .linkbtn:hover { text-decoration-color: var(--hero); }
@@ -94,7 +223,7 @@
      against-you panel and on your own profile. */
   .hero-badge {
     display: inline-flex; align-items: center; gap: 5px; vertical-align: 2px;
-    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.14em;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em;
     font-weight: 700; color: var(--hero); margin-left: 6px;
   }
   .hero-badge::before {
@@ -102,19 +231,33 @@
   }
   .panel {
     background: var(--panel); border: 1px solid var(--line);
-    border-radius: 12px; padding: 18px; margin: 16px 0;
+    border-radius: 12px; padding: var(--sp-4) var(--sp-5); margin: var(--sp-4) 0;
+  }
+  /* The one tile a screen exists for. A raised ground, a lift, and an accent
+     rule across the top: the hierarchy the layout already decided ("read this,
+     then the rest is reference") becomes visible without reading a word. Every
+     other tile stays flat on the page, which is what makes this one read as
+     first rather than merely as topmost. */
+  .panel.primary {
+    background: var(--panel-2); box-shadow: var(--lift);
+    position: relative; overflow: hidden;
+  }
+  .panel.primary::before {
+    content: ""; position: absolute; inset: 0 0 auto; height: 2px;
+    background: linear-gradient(90deg, var(--red),
+                color-mix(in oklab, var(--red) 20%, transparent));
   }
   /* Dashboard: tiles sized by content, flowing into as many columns as fit.
      align-items:start stops a tall tile stretching its neighbors. */
   .dash {
-    display: grid; gap: 14px; align-items: start; margin: 16px 0;
+    display: grid; gap: var(--sp-3); align-items: start; margin: var(--sp-4) 0;
     /* 420px min gives two columns at the 1060px wrap and one on a laptop in a
        split view. A narrower minimum fitted three, which left a dead column
        whenever there were only two tiles to place. */
     grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
   }
-  /* No height:100% -- a short tile stretching to match a tall neighbor is
-     empty space pretending to be content. */
+  /* No height:100% or stretch -- a short tile matching a tall neighbor's
+     height is empty space pretending to be content. */
   .dash > .panel { margin: 0; }
   /* The tiles flow into balanced columns rather than being assigned to a fixed
      left and right. Which panel is tallest changes with the data -- an empty
@@ -123,50 +266,75 @@
   /* Two real columns, packed by height in JS. CSS column-count fills the first
      column before the second, so a tall panel and a short one landed together
      and left the other column 740px empty. */
-  .dash-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+  .dash-cols { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3);
                align-items: start; margin: 0; }
   @media (max-width: 780px) { .dash-cols { grid-template-columns: 1fr; } }
-  .dash-cols { align-items: stretch; }
-  .dash-cols > .col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-  .dash-cols > .col > .panel:last-child { flex: 1 1 auto; }
+  .dash-cols > .col { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
   .dash-cols .panel { margin: 0; }
   /* The interval chart is drawn in a 0-300 viewBox, so it can scale to the
      cell instead of forcing one: at a fixed 300px every stat label in the
-     column wrapped to three lines. */
-  .detail-body td svg { width: 100%; height: auto; display: block; }
-  .detail-body th, .detail-body td { white-space: nowrap; }
-  .detail-body td.label { white-space: normal; }
+     column wrapped to three lines. The full table lives in the sheet now, so
+     the rule follows it there. */
+  .modal-numbers td svg { width: 100%; height: auto; display: block; }
+  .modal-numbers th, .modal-numbers td { white-space: nowrap; }
+  .modal-numbers td.label { white-space: normal; min-width: 156px; }
   /* Anything marked wide spans the row -- the read, the balanced column block,
      the full-width panels. Scoping this to .panel meant the column container
      was placed in a single grid track and then split again inside it. */
   .dash > .wide { grid-column: 1 / -1; }
   @media (max-width: 700px) { .dash { grid-template-columns: 1fr; } }
-  .panel h2 {
+  /* Label style: every panel title, and every modal sheet title -- a sheet is
+     a panel that floats. Without .sheet here, every dialog heading ("Why, and
+     what not to do", "vs GTO -- every stat") fell through to the browser's
+     default h2: a different type system inside the same click. */
+  /* Label: 11px uppercase muted, and the only style a panel title, a table
+     header, a street label or a side label is ever allowed to take. One rule
+     for all of them means a heading can never quietly acquire a fifth size. */
+  .panel h2, .sheet h2, .label-t {
     font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em;
-    color: var(--muted); margin: 0 0 14px; font-weight: 600;
+    color: var(--muted); margin: 0 0 var(--sp-3); font-weight: 600;
   }
+  /* Subsections inside a panel (Hero's "fold grades", "sizing") are Label
+     style too, one notch lighter than the panel's own h2. */
+  .panel h3, .sheet h3 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted); margin: var(--sp-5) 0 var(--sp-2); font-weight: 600;
+  }
+  .panel h3:first-child { margin-top: 0; }
+  /* Muted intro line under a panel title, so copy never has to fight the
+     heading's own margin with a hand-tuned negative one. */
+  .panel-lead { color: var(--muted); font-size: 12.5px; margin: 0 0 var(--sp-3); }
   table { border-collapse: collapse; width: 100%; font-size: 14px; }
-  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); }
+  th, td { text-align: left; padding: var(--sp-2) 10px; border-bottom: 1px solid var(--line); }
   th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
        color: var(--muted); font-weight: 600; cursor: pointer; white-space: nowrap; }
   th.sorted::after { content: " \25B4"; color: var(--accent); }
   th.sorted.desc::after { content: " \25BE"; }
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-  tbody tr.clickable { cursor: pointer; }
+  tbody tr.clickable { cursor: pointer; transition: background .13s ease; }
   tbody tr.clickable:hover { background: var(--accent-soft); }
   .name { font-weight: 600; }
-  /* The archetype pill keeps the accent whatever the confidence; a solid edge
-     means the read has cleared 50%, a dashed one means it has not. Color on
-     its own was carrying that distinction, and dropping the color to fix
-     that lost the accent instead. */
-  .tag.arch { border-color: var(--red); color: var(--ink); }
-  .tag.arch:not(.on) { border-style: dashed; }
+  /* The archetype pill says two things -- which read, and how sure of it --
+     and neither of them is "this is the live control," so neither gets the
+     accent. Eleven rust-bordered pills down a roster is how the accent stopped
+     meaning anything and how the dashed/solid confidence cue became invisible.
+     Solid edge and ink text = the read cleared 50%; dashed and muted = it has
+     not. Shade carries the confidence, exactly as it does everywhere else. */
+  .tag.arch { border-color: var(--edge); border-style: dashed; color: var(--muted); }
+  .tag.arch.on { border-color: var(--mark-2); border-style: solid; color: var(--ink); }
   .tag {
     display: inline-block; padding: 2px 8px; border-radius: 999px;
     font-size: 11px; border: 1px solid var(--line); color: var(--muted);
     white-space: nowrap;
   }
   .tag.on { border-color: var(--red); color: var(--ink); }
+  /* Leak-evidence tier: a second, independent confidence ramp from the
+     archetype pill's dashed/solid -- one is "how sure of the bucket," the
+     other is "how sure of this priced leak." Same neutral mark ramp,
+     different object. */
+  .tag.tier.strong { border-color: var(--mark-3); color: var(--ink); }
+  .tag.tier.likely { border-color: var(--mark-2); color: var(--ink); }
+  .tag.tier.tentative { border-color: var(--mark-1); color: var(--muted); }
   /* Same accent the archetype pill and sort caret already use for "this one
      is notable" -- not a new color for a new meaning. */
   .hero-row-marker { background: var(--hero-soft); }
@@ -225,26 +393,94 @@
     text-underline-offset: 2px; text-decoration-color: var(--axis);
   }
   button.linkbtn:hover { text-decoration-color: var(--accent); }
-  .hero { font-size: 38px; line-height: 1.05; letter-spacing: -0.03em; }
-  .hero-name { min-width: 0; }
-  .hero-sub { font-size: 15px; color: var(--muted); margin-top: 2px; }
-  .hero-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-  .skill-badge {
-    width: 58px; height: 58px; border-radius: 50%; flex: none;
-    border: 2px solid var(--red); color: var(--red);
-    display: inline-flex; flex-direction: column;
-    align-items: center; justify-content: center;
-    cursor: help; line-height: 1;
+  /* A player's own name is Display size -- same ceiling as the wordmark,
+     never past it. */
+  .hero { font-size: 30px; line-height: 1.05; letter-spacing: -0.035em; font-weight: 700; }
+  /* Header band: who they are on the left, the numbers that rank them on the
+     right. This was a 195px card holding a name, one sentence and a link, with
+     700px of nothing beside it -- the horizontal space was always there, the
+     figures just were not in it. */
+  .profile-head {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--sp-4) var(--sp-5); align-items: center;
   }
-  .skill-badge .score { font-size: 20px; font-weight: 800; letter-spacing: -0.03em; }
-  .skill-badge .of { font-size: 11px; font-weight: 600; margin-top: 2px; letter-spacing: .04em;
-                     text-transform: uppercase; opacity: .85; }
-  .read-copy .summary { color: var(--muted); margin: 0 0 10px; }
-  .read-copy .plan { margin: 0; max-width: 72ch; }
-  .read-copy .summary { max-width: 72ch; }
-  .read-meta { font-size: 12.5px; color: var(--muted); margin-top: 10px; line-height: 1.7; }
+  .profile-id { min-width: 0; }
+  .profile-stats { display: flex; align-items: center; gap: var(--sp-5); flex: none; }
+  /* Figure over label, right-aligned, so digits line up with the digits above
+     them rather than with their own captions. */
+  .stat-pair {
+    display: flex; flex-direction: column; align-items: flex-end; gap: 3px;
+    text-align: right;
+  }
+  .stat-pair .v {
+    font-family: var(--mono); font-size: 26px; font-weight: 700; line-height: 1;
+    letter-spacing: -0.04em; font-variant-numeric: tabular-nums;
+  }
+  .stat-pair .k {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--muted); font-weight: 600; display: flex; align-items: center;
+  }
+  /* A ring is symmetrical, so its caption centers under it; a figure is set
+     from its right edge, so its caption aligns there. */
+  .stat-pair.ring { align-items: center; }
+  @media (max-width: 620px) {
+    .profile-head { grid-template-columns: 1fr; }
+    .profile-stats { justify-content: flex-start; }
+  }
+  /* The skill score as a filled arc rather than a ring with a number loose
+     inside it: the score is a 0-100 quantity and an arc is the cheapest honest
+     picture of one. Ink, not the accent -- a static score is not a live
+     control, and on the Hero tab a blue score would say "you" about a number
+     that means "strong." */
+  .skill-ring { position: relative; width: 62px; height: 62px; flex: none; cursor: help; }
+  .skill-ring svg { position: absolute; inset: 0; width: 62px; height: 62px; }
+  .skill-ring .score {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 19px; font-weight: 700; line-height: 1;
+    letter-spacing: -0.04em; font-variant-numeric: tabular-nums;
+  }
+  .read-copy .summary { color: var(--muted); margin: var(--sp-2) 0 0; max-width: 55ch; }
+  .read-meta { font-size: 12.5px; color: var(--muted); margin-top: var(--sp-2);
+               display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+  /* The standard six. Every tracker in poker prints this line, in this order,
+     and it is the first thing a player looks for on an opponent. Six cells
+     with the interval drawn under each beats three rows of a table in a column
+     that was 300px empty -- density was never the problem, the presentation
+     of it was. */
+  .hud {
+    display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 1px;
+    background: var(--line); border: 1px solid var(--line);
+    border-radius: 10px; overflow: hidden;
+  }
+  .hud-cell {
+    background: var(--inset); padding: var(--sp-2) var(--sp-3); min-width: 0; cursor: help;
+    transition: background .13s ease;
+  }
+  .hud-cell:hover { background: var(--accent-soft); }
+  .hud-cell .k {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); font-weight: 600; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .hud-cell .v {
+    font-family: var(--mono); font-size: 21px; font-weight: 700; line-height: 1.2;
+    letter-spacing: -0.03em; font-variant-numeric: tabular-nums;
+  }
+  .hud-cell .v .pc { font-size: 13px; color: var(--muted); font-weight: 600; margin-left: 1px; }
+  .hud-cell.thin .v { color: var(--muted); font-weight: 600; }
+  .hud-cell svg { width: 100%; height: auto; display: block; margin-top: var(--sp-1); }
+  @media (max-width: 820px) { .hud { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  @media (max-width: 460px) { .hud { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .skill-side { margin: 0; min-width: 0; max-width: none; text-align: left; }
-  .skill-side .metric { grid-template-columns: 1fr 90px 28px; gap: 8px; margin: 4px 0; }
+  /* Seven components two-up. Multi-column rather than a two-track grid because
+     the list is sorted weakest-first and a grid would deal it across the
+     columns (1,2 / 3,4) instead of down them (1-4 / 5-7), which throws away
+     the sort. Multicol also balances the split for itself, so a player with
+     six components and one with eight both come out even. */
+  .skill-side.two-up { columns: 2; column-gap: var(--sp-6); }
+  .skill-side.two-up .comp { break-inside: avoid; }
+  @media (max-width: 700px) { .skill-side.two-up { columns: 1; } }
+  .skill-side .metric { grid-template-columns: 1fr 90px 28px; gap: var(--sp-2); margin: var(--sp-1) 0; }
   .skill-side .metric .small { font-size: 12.5px; }
   .drop {
     border: 1.5px dashed var(--edge); border-radius: 12px; padding: 34px 20px;
@@ -258,35 +494,56 @@
   }
   .bulk input { margin-top: 3px; }
   .comp { display: grid; grid-template-columns: minmax(112px, 1.1fr) minmax(64px, 2fr) 32px;
-          align-items: center; gap: 14px; padding: 9px 0; border-top: 1px solid var(--line); }
+          align-items: center; gap: var(--sp-3); padding: var(--sp-2) 0;
+          border-top: 1px solid var(--line); }
   .comp:first-child { border-top: 0; }
   .comp-name { font-size: 14px; }
-  .comp-score { font-variant-numeric: tabular-nums; color: var(--muted); text-align: right; }
-  .comp.weak .comp-score { color: var(--red); font-weight: 600; }
+  .comp-score { font-family: var(--mono); font-size: .95em; letter-spacing: -0.02em;
+                font-variant-numeric: tabular-nums; color: var(--muted); text-align: right; }
+  /* Weak is a threshold you should notice, so it is --warn -- the same token
+     the bar beside it already uses. It used to be --danger's hex under the
+     --red name, which put "this part of their game is thin" in the same color
+     as the Reset button, and left the score and its own bar disagreeing. */
+  .comp.weak .comp-score { color: var(--warn); font-weight: 700; }
+  /* A fixed height, not height:auto. The bar is drawn 999 units wide in a
+     14-unit box, so letting the aspect ratio survive a width:100% squashed an
+     8px bar down to about three -- the skill breakdown was a column of
+     hairlines because of one missing pair of rules, not because the encoding
+     was weak. */
   .comp-bar { min-width: 0; }
-  .comp-bar svg { display: block; width: 100%; height: auto; }
-  .gto-badge { font-variant-numeric: tabular-nums; display: inline-flex; align-items: baseline; gap: 2px; }
-  .gto-badge b { font-size: 20px; letter-spacing: -0.02em; }
-  .gto-badge .of { color: var(--muted); font-size: 12px; }
+  .comp-bar svg { display: block; width: 100%; height: 14px; }
+  .gto-badge { font-variant-numeric: tabular-nums; display: inline-flex; align-items: baseline; gap: 3px; }
+  .gto-badge b { font-family: var(--mono); font-size: 20px; font-weight: 700; letter-spacing: -0.04em; }
+  .gto-badge .of { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
   .gto-row { display: grid; grid-template-columns: minmax(0,1fr) auto 30px; gap: 12px;
              align-items: baseline; padding: 7px 0; border-top: 1px solid var(--line); }
   .gto-row:first-child { border-top: 0; }
   .gto-nums { white-space: nowrap; font-variant-numeric: tabular-nums; }
-  .gto-dev { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
-  .gto-fid { font-size: 9.5px; text-transform: uppercase; letter-spacing: .05em;
+  .gto-dev { text-align: right; color: var(--muted);
+             font-family: var(--mono); font-size: .95em; letter-spacing: -0.02em;
+             font-variant-numeric: tabular-nums; }
+  .gto-fid { font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
              margin-left: 7px; padding: 1px 6px; border-radius: 999px;
              border: 1px solid var(--line); color: var(--muted); vertical-align: 1px; }
   .gto-fid.solver { border-color: var(--edge); color: var(--ink); }
   .card.big { font-size: 17px; min-width: 34px; padding: 6px 8px; }
   .poker-table { position: relative; width: 100%; max-width: 880px; aspect-ratio: 1.7 / 1;
                  margin: 22px auto 12px; }
+  /* A deep, desaturated felt rather than a bright one. On a near-black page
+     with a single warm accent, a saturated casino green was the loudest thing
+     in the product and it was the backdrop -- this reads as a table without
+     competing with the cards and chips sitting on it, which are the only
+     things here that should carry color. */
   .felt-oval { position: absolute; inset: 0; border-radius: 50% / 50%;
-    background: radial-gradient(ellipse at 50% 40%, #2f7d5b 0%, #226349 66%, #17503a 100%);
-    box-shadow: inset 0 0 0 9px #0f3728, inset 0 0 60px rgba(0,0,0,.35), 0 24px 55px rgba(0,0,0,.45); }
+    background: radial-gradient(ellipse at 50% 38%, #1e463a 0%, #17362d 62%, #102821 100%);
+    box-shadow: inset 0 0 0 9px #0a1b16, inset 0 0 70px rgba(0,0,0,.45),
+                0 24px 55px rgba(0,0,0,.5); }
   .table-center { position: absolute; left: 50%; top: 43%; transform: translate(-50%,-50%);
     display: flex; flex-direction: column; align-items: center; gap: 12px; }
-  .pot-pill { background: rgba(0,0,0,.32); color: #fff; padding: 4px 15px; border-radius: 999px;
-    font-variant-numeric: tabular-nums; font-size: 14px; }
+  .pot-pill { background: rgba(0,0,0,.38); color: #fff; padding: 4px 15px; border-radius: 999px;
+    font-size: 14px; }
+  .pot-pill b { font-family: var(--mono); letter-spacing: -0.02em;
+                font-variant-numeric: tabular-nums; }
   .table-center .board { display: flex; gap: 5px; min-height: 44px; align-items: center; }
   .tseat { position: absolute; transform: translate(-50%,-50%); width: 118px; text-align: center; z-index: 2; }
   .tseat-cards { display: flex; gap: 3px; justify-content: center; min-height: 26px; margin-bottom: 4px; }
@@ -297,12 +554,14 @@
   .tseat.me .tseat-body { background: var(--hero-soft); }
   .tseat-name { font-weight: 600; font-size: 13px; display: flex; gap: 5px;
     justify-content: center; align-items: center; }
-  .tseat-stack { font-variant-numeric: tabular-nums; font-size: 13px; color: var(--muted); }
+  .tseat-stack { font-family: var(--mono); font-size: 12px; letter-spacing: -0.02em;
+                 font-variant-numeric: tabular-nums; color: var(--muted); }
   .dealer-btn { position: absolute; transform: translate(-50%,-50%); width: 22px; height: 22px;
     border-radius: 50%; background: #fff; color: #111; font-weight: 700; font-size: 11px; z-index: 3;
     display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 5px rgba(0,0,0,.4); }
   .tbet { position: absolute; transform: translate(-50%,-50%); font-size: 12px; z-index: 2;
-    font-variant-numeric: tabular-nums; color: #fff; background: rgba(0,0,0,.34);
+    font-family: var(--mono); letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums; color: #fff; background: rgba(0,0,0,.4);
     padding: 2px 9px; border-radius: 999px; display: flex; align-items: center; gap: 5px; white-space: nowrap; }
   .chip-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--red);
     box-shadow: 0 0 0 2px rgba(255,255,255,.25); display: inline-block; }
@@ -313,11 +572,18 @@
   .won-amt.down { color: var(--red); }
   .sim-layout { display: grid; grid-template-columns: 1fr 208px; gap: 20px; align-items: start; }
   @media (max-width: 780px) { .sim-layout { grid-template-columns: 1fr; } }
-  .sim-side { border-left: 1px solid var(--line); padding-left: 18px; }
+  .sim-side { border-left: 1px solid var(--line); padding-left: var(--sp-4);
+              display: flex; flex-direction: column; align-items: flex-start;
+              gap: var(--sp-2); }
+  /* P/L, then the modes, then the one way out -- in that order, with the gap
+     doing the grouping instead of six hand-set margins. */
+  .sim-side .side-modes { display: flex; gap: var(--sp-2); flex-wrap: wrap;
+                          margin-top: var(--sp-3); }
+  .sim-side #end-session { margin-top: var(--sp-2); }
   .side-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
-  .pnl-big { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums;
+  .pnl-big { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums;
              letter-spacing: -0.02em; margin: 3px 0; }
-  .pnl-big.up { color: #45b881; }
+  .pnl-big.up { color: var(--up); }
   .pnl-big.down { color: var(--danger); }
   .desc-toggle { display: flex; align-items: center; gap: 7px; margin-top: 18px;
                  font-size: 13px; cursor: pointer; }
@@ -326,17 +592,26 @@
     background: var(--panel); border: 1px solid var(--edge); border-radius: 10px; padding: 7px 10px;
     width: 188px; box-shadow: 0 8px 22px rgba(0,0,0,.45); z-index: 6; font-size: 12px; text-align: left; }
   .think-bubble.below { bottom: auto; top: calc(100% + 8px); }
+  /* Seats near an edge anchor their bubble to that edge instead of centering
+     on the seat. Clipping the table was the other way to stop the overflow,
+     and it cut the seats off with it -- they sit on the table's rim. */
+  .think-bubble.from-right { left: auto; right: 0; transform: none; }
+  .think-bubble.from-left { left: 0; right: auto; transform: none; }
+  .think-bubble.from-right::after { left: auto; right: 22px; }
+  .think-bubble.from-left::after { left: 22px; }
   .think-bubble .why { color: var(--muted); margin-top: 3px; line-height: 1.35; }
   .think-bubble::after { content: ""; position: absolute; top: 100%; left: 50%;
     transform: translateX(-50%); border: 6px solid transparent; border-top-color: var(--panel); }
   .think-bubble.below::after { top: auto; bottom: 100%; border-top-color: transparent; border-bottom-color: var(--panel); }
   .a-headline { border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
   .astats { display: flex; gap: 26px; flex-wrap: wrap; }
-  .astat-v { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .astat-v { font-family: var(--mono); letter-spacing: -0.03em; font-size: 21px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .astat-l { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
   .a-vs-row { display: flex; justify-content: space-between; padding: 8px 0; border-top: 1px solid var(--line); }
   .a-vs-row:first-child { border-top: 0; }
-  .up { color: #45b881; } .down { color: var(--danger); }
+  /* Realized money only. A frequency that moved is not money and does not get
+     this color -- see .sess-delta below. */
+  .up { color: var(--up); } .down { color: var(--danger); }
   .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 4px; min-height: 34px; }
   /* Armed / not armed, as fill rather than a tick: the state has to be
      readable at a glance from across the table view. */
@@ -352,11 +627,13 @@
   .cf-toggle.on::before { background: currentColor; }
   .raise-wrap { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .raise-wrap input[type=range] { accent-color: var(--red); }
-  .raise-amt { font-variant-numeric: tabular-nums; min-width: 58px; }
+  .raise-amt { font-family: var(--mono); font-size: .95em; letter-spacing: -0.02em;
+               font-variant-numeric: tabular-nums; min-width: 58px; }
   .presets { display: flex; gap: 4px; }
   .handlog { margin-top: 14px; max-height: 118px; overflow-y: auto; line-height: 1.6; }
   .pick-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-               gap: 8px; margin-bottom: 18px; }
+               gap: var(--sp-2); margin-bottom: var(--sp-4); }
+  .pick-list > .loading { grid-column: 1 / -1; }
   .pick { text-align: left; border: 1px solid var(--line); border-radius: 10px;
           padding: 10px 12px; background: var(--panel); cursor: pointer;
           display: flex; flex-direction: column; gap: 2px; }
@@ -372,17 +649,41 @@
     font-size: 14px; font-variant-numeric: tabular-nums; min-width: 26px;
     justify-content: center;
   }
-  .card.red { color: var(--red); }
+  .card.red { color: var(--card-red); }
   .card.black { color: var(--ink); }
   .card .r { font-weight: 600; }
   .small-cards .card { font-size: 11px; padding: 1px 4px; min-width: 22px; }
-  .sess-delta {
-    display: grid; grid-template-columns: minmax(0,240px) 56px 62px minmax(0,1fr);
-    gap: 10px;
-    align-items: baseline; padding: 5px 0; border-top: 1px solid var(--line);
-  }
+  /* One record per player at this sitting: who they were tonight on the left,
+     what they made and how well they played on the right. */
+  .sess-row { padding: var(--sp-3) 0; border-bottom: 1px solid var(--line); }
+  .sess-row:last-child { border-bottom: 0; }
+  .sess-row.hero-sitting { background: var(--hero-soft); border-radius: 8px;
+                           padding: var(--sp-3); border-bottom: 0;
+                           margin-bottom: var(--sp-1); }
+  .sess-head { display: grid; grid-template-columns: minmax(0, 1fr) auto;
+               gap: var(--sp-4); align-items: center; }
+  .sess-id { min-width: 0; }
+  .sess-stats { display: flex; align-items: center; gap: var(--sp-5); flex: none; }
+  .sess-stats .stat-pair .v { font-size: 21px; }
+  /* Fixed, not 100%: inside a column flex that sizes to its widest child, a
+     full-width bar and its parent size off each other and the bar ate the row. */
+  .sess-skill { width: 66px; }
+  .sess-skill svg { width: 66px; height: 5px; margin-top: var(--sp-1); }
+  /* Says out loud what the pill beside it measures. Database and Sessions
+     disagreeing about one person is correct -- a sitting can look nothing like
+     the season -- but only when the page says which one it is showing. */
+  .sitting-note { font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
+                  color: var(--muted); font-weight: 600; }
+  .sess-none { margin-top: var(--sp-2); }
+  .sess-deltas:not(:empty) { margin-top: var(--sp-2); }
+  .sess-delta { padding: var(--sp-2) 0; border-top: 1px solid var(--line); }
   .sess-delta:first-child { border-top: 0; }
-  .sess-who { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .sess-delta-head { display: flex; align-items: baseline; gap: var(--sp-2);
+                     margin-bottom: 2px; }
+  .sess-delta .sess-stat { font-size: 14px; cursor: help; }
+  .sess-delta .metric { grid-template-columns: 66px 1fr 46px; gap: var(--sp-2); margin: 2px 0; }
+  .sess-delta .metric svg { width: 100%; height: 11px; }
+  .sess-who { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
   .sess-regime-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 8px; }
   .sess-regime-tab {
     border: 1px solid var(--edge); background: transparent; color: var(--muted);
@@ -391,9 +692,16 @@
   }
   .sess-regime-tab:hover { color: var(--ink); }
   .sess-regime-tab.on { border-color: var(--red); color: var(--ink); font-weight: 600; }
-  td.worth { font-variant-numeric: tabular-nums; }
-  td.worth.big { color: var(--red); font-weight: 600; }
-  .detail-body td.label { min-width: 156px; }
+  /* What this player is worth to you, in money. Magnitude is carried by shade
+     of ink -- the same convention the range grid and the confidence ramp use
+     -- rather than by turning the accent on, which would have made "worth
+     attacking" and "the live control" the same color. */
+  /* .95em, not a hand-picked px: the mono face reads optically larger than the
+     UI sans at the same size, so it is stepped down relative to whatever cell
+     it lands in rather than pinned to a size off the scale. */
+  td.worth { font-family: var(--mono); font-size: .95em; letter-spacing: -0.02em;
+             font-variant-numeric: tabular-nums; color: var(--mark-2); }
+  td.worth.big { color: var(--ink); font-weight: 700; }
   .sheet { box-shadow: 0 24px 60px rgba(0,0,0,.45); }
   .cards-row.hole { margin-left: 16px; padding-left: 16px;
                     border-left: 1px solid var(--edge); }
@@ -423,12 +731,18 @@
   }
   .sess-item:hover { background: var(--accent-soft); }
   .sess-item.on { background: var(--accent-soft); border-left-color: var(--red); }
-  .sess-when { font-size: 14px; }
+  /* A timestamp is one token: breaking "03:43 AM" across two lines reads as
+     two facts. It fit by a hair on the old font stack and stopped fitting on
+     the new one, which is exactly the kind of thing nowrap is for. */
+  .sess-when { font-size: 14px; white-space: nowrap; }
   @media (max-width: 780px) {
     .sess-layout, .sess-layout.collapsed { grid-template-columns: 1fr; }
     .sess-list { position: static; max-height: 240px; }
   }
-  .sess-delta .up { color: var(--red); }
+  /* More or less of a frequency tonight is not money and is not the accent --
+     it is ink (bold, notice it) versus muted (don't), with the arrow already
+     carrying direction. */
+  .sess-delta .up { color: var(--ink); font-weight: 600; }
   .sess-delta .down { color: var(--muted); }
   .linkish { cursor: pointer; text-decoration: underline;
              text-underline-offset: 3px; text-decoration-color: var(--axis); }
@@ -455,7 +769,7 @@
   }
   .q.group .person-head {
     display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
-    font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em;
+    font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
     color: var(--muted); font-weight: 600; margin-bottom: 8px;
   }
   .q.group .person .member {
@@ -464,7 +778,7 @@
     border-top: 1px solid var(--line);
   }
   .q.group .person .member:last-of-type { margin-bottom: 0; }
-  .q.group .person .member b { display: block; font-size: 13.5px; }
+  .q.group .person .member b { display: block; font-size: 14px; }
   .q.group .person .member:hover { border-color: var(--edge); }
   .q.group .person .member.dragging { opacity: .35; cursor: grabbing; }
   /* Picked up by tap: it is waiting for a column, and says so by standing out
@@ -485,10 +799,15 @@
   /* A tab that is still assembling itself. Same spinner as everywhere else,
      inline rather than over a veil: switching tabs is not modal, and a veil
      for something that usually takes a moment would flash. */
-  .panel.loading {
-    display: flex; align-items: center; gap: 12px;
-    color: var(--muted); font-size: 13.5px;
+  /* One busy state for the whole app, panel or not: same spinner, same gap,
+     same muted label. It was a spinner on a tab switch and a line of grey text
+     everywhere else, so whether the tool looked busy or looked broken depended
+     on which corner of it you were in. */
+  .loading {
+    display: flex; align-items: center; gap: var(--sp-3);
+    color: var(--muted); font-size: 14px; padding: var(--sp-2) 0;
   }
+  .panel.loading { padding: var(--sp-4) var(--sp-5); }
   .veil.busy { cursor: progress; }
   .busy-sheet { display: flex; gap: 14px; align-items: center; max-width: 420px; }
   .busy-body { min-width: 15rem; }
@@ -528,21 +847,75 @@
   /* button.act wraps by design (long leak labels); a toolbar button must not. */
   .act.nowrap { white-space: nowrap; }
   .drop:hover, .drop.over { border-color: var(--red); color: var(--ink); }
-  .leak { padding: 14px 0; border-bottom: 1px solid var(--line); }
+  .leak { padding: var(--sp-3) 0; border-bottom: 1px solid var(--line); }
   .leak:last-child { border-bottom: 0; }
-  .leak.hero-sitting { background: var(--hero-soft); border-radius: 8px;
-                       padding-left: 12px; padding-right: 12px; }
-  .leak-head { display: flex; justify-content: space-between; gap: 14px; align-items: baseline; }
+  .leak-head { display: flex; justify-content: space-between; gap: var(--sp-3); align-items: baseline; }
   .leak-head .headline b {
-    font-size: 15px; font-weight: 600; letter-spacing: -0.01em;
+    font-size: 15px; font-weight: 650; letter-spacing: -0.01em;
+  }
+  /* ---- the priced leak row ----
+     A leak is a price with a reason attached, and the list is ranked by that
+     price, so the price is the anchor: first column, figure face, large enough
+     to be the thing the eye lands on. It used to be 12.5px muted grey pushed
+     to the right margin -- the smallest mark in the row was the one the sort
+     was on, which is the hierarchy exactly inverted. */
+  .leak.priced {
+    display: grid; grid-template-columns: 78px minmax(0, 1fr);
+    column-gap: var(--sp-4); align-items: start;
+    padding: var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-3);
+    border-left: 2px solid transparent; border-radius: 0 8px 8px 0;
+    transition: background .13s ease;
+  }
+  .leak.priced:hover { background: var(--accent-soft); }
+  /* Tier rides the rail. The pill still names it for anyone who wants the
+     word, but a rail lets three rows be compared for evidence strength in one
+     downward glance -- which is what TIER_COLOR was defined for and never
+     used on. */
+  .leak.t-strong { border-left-color: var(--mark-3); }
+  .leak.t-likely { border-left-color: var(--mark-2); }
+  .leak.t-tentative { border-left-color: var(--mark-1); }
+  .leak.watch { opacity: 1; border-left-style: dashed; border-left-color: var(--edge); }
+  .leak-price { text-align: right; padding-top: 2px; }
+  .leak-price .v {
+    display: block; font-family: var(--mono); font-size: 23px; font-weight: 700;
+    line-height: 1.05; letter-spacing: -0.045em; font-variant-numeric: tabular-nums;
+  }
+  .leak-price .u {
+    display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--muted); font-weight: 600; margin-top: var(--sp-1);
+  }
+  /* A leak priced under a tenth of a big blind per hundred is real but not
+     worth a heavy figure competing with one worth five. */
+  .leak-price.thin .v { color: var(--muted); font-weight: 600; font-size: 17px; }
+  .leak-body { min-width: 0; }
+  /* Several leaks that add up to more than their sum is a different object
+     from a priced row, so it stops pretending to be one: no price cell, a
+     recessed ground, and it sits at the foot of the list where a summary
+     belongs. */
+  .leak.compound {
+    display: block; background: var(--inset); border-left: 2px solid var(--mark-2);
+    border-bottom: 0; border-radius: 0 8px 8px 0;
+    padding: var(--sp-3); margin-top: var(--sp-2);
   }
   .leak-advice {
-    color: var(--ink); font-size: 14px; max-width: 68ch; margin-top: 6px;
+    color: var(--ink); font-size: 14px; max-width: 68ch; margin-top: var(--sp-1);
     line-height: 1.45;
   }
-  .leak .numbers { margin-top: 2px; }
-  .how { margin-top: 8px; }
-  .how-link { margin-top: 10px; }
+  .leak .numbers { margin-top: var(--sp-1); }
+  .how { margin-top: var(--sp-2); }
+  .how-link { margin-top: var(--sp-2); }
+  /* Inside the evidence line it is part of that sentence, so it drops the
+     block margin the standalone variant needs. */
+  .leak .numbers .how-link { margin-top: 0; }
+  /* The disclosure is there at rest but recedes; hovering the row it belongs
+     to brings it up. On a list of five rows, five underlined links at full
+     strength read as five things to do. */
+  .leak.priced .how-link { opacity: .62; transition: opacity .13s ease; }
+  .leak.priced:hover .how-link, .leak.priced .how-link:focus-visible { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) {
+    .leak.priced, .leak.priced .how-link, .hud-cell, tbody tr.clickable,
+    nav button, .iconbtn { transition: none; }
+  }
   .how-body { color: var(--ink); font-size: 14px; line-height: 1.45; }
   .howblock { margin: 10px 0; max-width: 66ch; }
   .howlabel { font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
@@ -570,11 +943,43 @@
     width: 120px; height: 10px; border-radius: 4px; border: 1px solid var(--line);
     background: linear-gradient(to right, var(--panel), var(--ink));
   }
+  /* A titled section, not a panel: the tiles inside it keep their own edges,
+     and the rule above says where the page changes subject. */
+  .villain-view { border-top: 1px solid var(--line); margin-top: var(--sp-6);
+                  padding-top: var(--sp-4); }
+  .villain-view-head { display: flex; align-items: baseline; gap: var(--sp-3);
+                       flex-wrap: wrap; margin-bottom: var(--sp-1); }
+  .villain-view-head .label-t { margin: 0; }
+  .villain-view > .panel:first-of-type { margin-top: var(--sp-3); }
   .hero-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  /* Graded / flagged / the rate between them. The two counts are stat-pairs so
+     they match every other figure in the app; the bar is the proportion, which
+     is the only thing a percentage in prose was trying to convey. */
+  .graded-head { display: flex; align-items: center; gap: var(--sp-5);
+                 flex-wrap: wrap; margin-bottom: var(--sp-3); }
+  .graded-head .stat-pair { align-items: flex-start; text-align: left; }
+  .graded-head .stat-pair .v { font-size: 23px; }
+  .graded-head .stat-pair .v.warnv { color: var(--warn); }
+  .graded-rate { flex: 1 1 220px; min-width: 180px; }
+  .graded-bar { margin: var(--sp-1) 0; }
+  .graded-bar svg { width: 100%; height: 8px; display: block; }
+  /* One pooled account: who it is, how much of the sample it carries, and (in
+     the split dialog) the way out. */
+  .alias-row {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: var(--sp-3); align-items: center;
+    padding: var(--sp-2) 0; border-top: 1px solid var(--line);
+  }
+  .alias-row:first-child { border-top: 0; }
+  .alias-row .mono { margin-left: var(--sp-2); }
+  /* Housekeeping, not analysis: it sits at the foot of the page and does not
+     borrow the primary surface or the accent. */
+  .player-actions .row { gap: var(--sp-2); }
+  .player-actions .act:disabled { cursor: help; }
   .fold-row {
     display: grid; grid-template-columns: 56px 70px minmax(0,1fr) auto;
     gap: 12px; align-items: baseline; padding: 7px 0; border-top: 1px solid var(--line);
-    font-size: 13.5px; cursor: pointer;
+    font-size: 14px; cursor: pointer;
   }
   .fold-row:first-child { border-top: 0; }
   .fold-row:hover { background: var(--accent-soft); }
@@ -587,7 +992,7 @@
   }
   .tip.on { opacity: 1; }
   .empty { color: var(--muted); padding: 8px 0; }
-  .err { color: var(--warn); }
+  .err { color: var(--danger); }
   /* per-player tabs inside a result */
   .ptabs {
     display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 16px;
@@ -608,9 +1013,10 @@
     border: 1px solid var(--edge); background: var(--accent-soft);
     color: var(--muted); font-size: 11px; font-weight: 700; cursor: help;
     vertical-align: 1px; margin-left: 5px; font-style: normal; flex: none;
-    transition: color .12s ease, border-color .12s ease;
+    opacity: .45;
+    transition: opacity .12s ease, color .12s ease, border-color .12s ease;
   }
-  .info:hover { color: var(--ink); border-color: var(--accent); }
+  .info:hover, .info:focus-visible { opacity: 1; color: var(--ink); border-color: var(--accent); }
   /* On hover of the row/line it belongs to, the mark wakes up a little so it is
      discoverable without shouting on every line at rest. */
   .comp:hover .info, .leak:hover .info, .metric:hover .info,
@@ -649,7 +1055,6 @@
     font-size: 11px; font-weight: 700; cursor: help; vertical-align: 1px;
   }
   .flag:hover { background: var(--red); color: var(--panel); }
-  .leak.watch { opacity: .82; }
   .leak.weakspots .metric { grid-template-columns: 1fr 150px 30px; }
   /* Two bars to a row, the same length, so the shift is the thing you see
      rather than something to be worked out from two percentages. */
@@ -670,6 +1075,32 @@
   .hero-pos .pos-bar { display: flex; min-width: 0; }
   .hero-pos .pos-bar svg { width: 100%; }
   .hero-pos .pos-val { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
+  /* Fills its panel, flush to the same edges as everything else. Capped and
+     centered it floated in the middle of the tile with dead space either side,
+     which is the one thing on the page that did not line up with the grid. */
+  .pos-ring { width: 100%; height: auto; margin: var(--sp-2) 0 0; display: block; }
+  .pos-note { margin: var(--sp-3) 0 0; }
+  /* Hero's sizing and timing tells: one block per street, two bars on a shared
+     scale, the gap between them being the tell. Laid out two-up because three
+     streets down a full-width panel is a column of air. */
+  .tellcols { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+              gap: var(--sp-3) var(--sp-6); align-items: start; }
+  .tellcols > div > h3 { margin-top: 0; }
+  .tellblock { padding: var(--sp-2) 0 var(--sp-3); border-top: 1px solid var(--line); }
+  .tellblock:first-child { border-top: 0; }
+  .tellhead { display: flex; align-items: baseline; gap: var(--sp-2); margin-bottom: var(--sp-1); }
+  .tellblock .metric { grid-template-columns: 78px 1fr 52px; gap: var(--sp-2); margin: 3px 0; }
+  .tellblock .metric svg { width: 100%; height: 12px; }
+  .tellval { text-align: right; font-family: var(--mono); font-size: .95em;
+             letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .tellnote { margin-top: var(--sp-2); }
+  /* A street with a real gap is the one worth reading; the rest are shown so
+     you can see that they are not. */
+  .tellblock:not(.on) .tellnote { display: none; }
+  /* Range narrowing: average strength of what is still live, street by street.
+     The dashed rule is the median hand the board allows. */
+  .narrow-wrap { max-width: 440px; }
+  .narrow-chart { width: 100%; height: auto; display: block; }
   .timing-street { margin-top: 14px; }
   .timing-street .street-label {
     font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
@@ -687,7 +1118,7 @@
   }
   .timing-grid .rowhead { display: flex; align-items: center; }
   .timing-cell { cursor: help; }
-  .timing-cell .tell { font-weight: 600; font-size: 13.5px; }
+  .timing-cell .tell { font-weight: 600; font-size: 14px; }
   .timing-cell .n { font-size: 11px; color: var(--muted); margin-top: 5px; }
   .timing-cell.thin { cursor: help; }
   .timing-cell.thin .tell { color: var(--edge); font-weight: 500; }
@@ -703,6 +1134,13 @@
   }
   .narration ul.suggested li::before {
     content: "\2013"; position: absolute; left: 0; color: var(--red);
+  }
+  /* At rest this is one line, not a card with a hole in it: the button and the
+     sentence that qualifies it, nothing else. Pressing it turns this same
+     element into the panel, so the answer arrives where the click was. */
+  .panel.suggest {
+    display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
+    background: transparent; border-style: dashed;
   }
   .narrate-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
   .rank { font-variant-numeric: tabular-nums; color: var(--muted); width: 22px; }

@@ -6,7 +6,7 @@
     villain scout <file>             profile a file without storing it
     villain link --suggest           find accounts that may be one person
     villain unlink <id> <site> <acct> undo a merge for one alias
-    villain ui                       open the local web interface
+    villain test                     run the web app locally against your database
     villain fit                      re-estimate priors from your own games
     villain rebuild                  recompute every profile from stored hands
     villain validate                 score the classifier on hands it has not seen
@@ -93,7 +93,11 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("import-db", help="merge an archive from another machine")
     p.add_argument("path", type=Path)
 
-    p = sub.add_parser("ui", help="serve the local web interface")
+    # The web app is the product and it is served from the browser; this runs
+    # the same thing on a loopback socket against your own database, which is
+    # how you try a change before it ships. Not a second interface -- the same
+    # one, with its transport swapped.
+    p = sub.add_parser("test", help="run the web app locally against your database")
     p.add_argument("--port", type=int, default=8766)
     p.add_argument("--no-browser", action="store_true")
 
@@ -489,7 +493,7 @@ def _cmd_rebuild(args) -> int:
     return 0
 
 
-def _cmd_ui(args) -> int:
+def _cmd_test(args) -> int:
     from .web import serve
     serve(db=args.db, port=args.port, open_browser=not args.no_browser)
     return 0
