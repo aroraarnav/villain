@@ -277,6 +277,7 @@
       drop: (k) => { try { localStorage.removeItem(k); } catch { /* nothing to clear */ } },
     };
     const ACCOUNT = "villain.account";
+    const RESET = "villain.reset-local";
 
     let persistWrite = async () => {};
     let cancelSave = () => {};                 // drop a save that is only queued
@@ -386,6 +387,17 @@
     } else {
       // Guest: the preloaded sample, kept in this browser only.
       step("Loading the sample database…", 78);
+      // Sign-out navigates here before it can wipe: a leftover account copy
+      // would otherwise become the "demo", because seedDemo keeps any file
+      // that is already on disk.
+      if (flag.get(ACCOUNT) || flag.get(RESET)) {
+        const leftover = flag.get(ACCOUNT);
+        await wipe();
+        await toDisk(false);
+        if (leftover) sync.forget(leftover);
+        flag.drop(ACCOUNT);
+        flag.drop(RESET);
+      }
       await call("seedDemo", { base: location.href });
       // Nothing a guest does reaches the database, so there is nothing to
       // write back. Keeping the demo pristine is the point.
@@ -571,14 +583,22 @@
         who.textContent = user.name || "signed in";
         button.textContent = "Sign out";
         button.onclick = async () => {
-          // The database stays on the server. What goes is this browser's copy,
-          // so the next person at this laptop gets the demo and not your game.
-          await wipe();
-          await toDisk(false);
-          sync.forget(user.sub);
+          // Session first, files second. A reload that raced sign-out used
+          // to restore the session from storage, and a wipe that waited on a
+          // busy worker made the button look dead. The leftover copy is
+          // dropped on the next boot, once this page has already become the
+          // gate.
+          button.disabled = true;
+          cancelSave();
+          flag.set(RESET, "1");
           flag.drop(ACCOUNT);
-          sync.signOut();
-          location.reload();
+          sync.forget(user.sub);
+          try {
+            await sync.signOut();
+          } catch {
+            /* storage is what the next load reads; try to leave anyway */
+          }
+          location.replace(location.pathname + location.search);
         };
         chip.append(status, gauge, who, button);
       } else {

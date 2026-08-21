@@ -160,7 +160,20 @@ window.VillainSync = (() => {
     if (error) throw new Error(error.message);
   }
 
-  const signOut = async () => { if (client) await client.auth.signOut(); };
+  /**
+   * Drop the session in this browser. Local, not global: the next page load
+   * reads storage, and a reload that raced the server round-trip used to put
+   * the session straight back. Revoking other devices is not what Sign out
+   * on this page is for.
+   */
+  async function signOut() {
+    if (!client) return;
+    const { error } = await client.auth.signOut({ scope: "local" });
+    if (error) {
+      const again = await client.auth.signOut();
+      if (again.error) throw new Error(again.error.message);
+    }
+  }
 
   /** `{ absent, version }` -- absent is a first sign-in, not a failure. */
   async function head(uid, file) {
