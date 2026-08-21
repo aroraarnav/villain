@@ -50,3 +50,19 @@ def test_worker_bypasses_the_http_cache_for_the_wheel():
     assert 'cache: "no-store"' in src
     assert 'searchParams.set("v", deployStamp)' in src
     assert "boot: ({ base, stamp })" in src
+
+
+def test_hero_progress_callback_is_a_js_function():
+    """create_proxy lives on the Python pyodide.ffi module, not the JS one.
+
+    The worker used to call pyodide.ffi.create_proxy and die on the first
+    Hero visit with "create_proxy is not a function". A JS function handed
+    to Python is already a JsProxy; Number() is what keeps a PyProxy off
+    the progress message the page divides for the bar.
+    """
+    src = WORKER.read_text()
+    assert "pyodide.ffi.create_proxy" not in src
+    assert "bridge.build_hero(report)" in src
+    assert "done: Number(done)" in src
+    assert "total: Number(total)" in src
+    assert "phase: String(phase)" in src
