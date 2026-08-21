@@ -3382,20 +3382,29 @@ function confirmReset(data) {
 async function showEvidence(playerId, stat, headline) {
   const modal = $("#modal");
   const sc = String(stat).startsWith("vs:") ? " hero-scope" : "";
+  // Same spinner as the rest of the tool. A muted "finding the hands…"
+  // with no motion looked like a hung page on a large sample, which is
+  // exactly when this call is slow.
   modal.innerHTML = `<div class="veil"><div class="sheet${sc}">
-    <h2 style="margin-top:0">${esc(headline)}</h2>
-    <div class="empty">finding the hands\u2026</div></div></div>`;
+    <div class="spread"><h2 style="margin:0">${esc(headline)}</h2>
+      <button class="act" id="close">Close</button></div>
+    <div class="loading"><span class="spinner" aria-hidden="true"></span>
+      <span>Finding the hands\u2026</span></div></div></div>`;
+  $("#close").onclick = () => { modal.innerHTML = ""; };
   let data;
   try {
     data = await get(`/api/evidence?player=${playerId}&stat=${encodeURIComponent(stat)}`);
   } catch (err) {
+    if (!modal.querySelector(".sheet")) return;   // closed while it was working
     modal.innerHTML = `<div class="veil"><div class="sheet${sc}">
+      <div class="spread"><h2 style="margin:0">${esc(headline)}</h2>
+        <button class="act" id="close">Close</button></div>
       <p class="err">${esc(err.message)}</p>
-      <div class="row" style="justify-content:flex-end"><button class="act" id="close">Close</button></div>
       </div></div>`;
     $("#close").onclick = () => { modal.innerHTML = ""; };
     return;
   }
+  if (!modal.querySelector(".sheet")) return;     // closed while it was working
   modal.innerHTML = `<div class="veil"><div class="sheet${sc}">
     <div class="spread"><h2 style="margin:0">${esc(headline)}</h2>
       <button class="act" id="close">Close</button></div>

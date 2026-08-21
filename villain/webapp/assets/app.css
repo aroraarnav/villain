@@ -654,12 +654,13 @@
   .card .r { font-weight: 600; }
   .small-cards .card { font-size: 11px; padding: 1px 4px; min-width: 22px; }
   /* One record per player at this sitting: who they were tonight on the left,
-     what they made and how well they played on the right. */
-  .sess-row { padding: var(--sp-3) 0; border-bottom: 1px solid var(--line); }
+     what they made and how well they played on the right. --edge, not --line:
+     --line is a hairline between rows of one person, and six of those stacked
+     read as one block. These are different people. */
+  .sess-row { padding: var(--sp-4) 0; border-bottom: 1px solid var(--edge); }
   .sess-row:last-child { border-bottom: 0; }
   .sess-row.hero-sitting { background: var(--hero-soft); border-radius: 8px;
-                           padding: var(--sp-3); border-bottom: 0;
-                           margin-bottom: var(--sp-1); }
+                           padding: var(--sp-3); margin: var(--sp-2) 0; }
   .sess-head { display: grid; grid-template-columns: minmax(0, 1fr) auto;
                gap: var(--sp-4); align-items: center; }
   .sess-id { min-width: 0; }
@@ -1187,11 +1188,16 @@
     background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
     max-width: 640px; width: 100%; max-height: 86vh; overflow-y: auto; padding: 22px;
   }
-  /* Keeps Close reachable over a long hand or evidence list instead of
-     scrolling off with the content. */
+  /* Close/Back stays reachable over a long list. Sticky inside a padded
+     overflow box otherwise floats in the padding: content peeks around the
+     bar, and the title collides with whatever is scrolling under it. Pull
+     the bar out to the sheet edges and pin it to the visual top so it reads
+     as chrome, not as a second copy of the heading sliding over the body. */
   .sheet > .spread:first-child {
-    position: sticky; top: 0; z-index: 1; background: var(--panel);
-    padding-bottom: 10px; margin-bottom: 4px;
+    position: sticky; top: -22px; z-index: 2;
+    margin: -22px -22px 12px; padding: 18px 22px 14px;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+    border-radius: 12px 12px 0 0;
   }
   .q { border-top: 1px solid var(--line); padding: 14px 0; }
   .q:first-of-type { border-top: 0; }
