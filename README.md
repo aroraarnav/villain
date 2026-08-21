@@ -5,11 +5,11 @@
 **Reads your poker hand histories and tells you how to beat the people you play against.**
 
 [![tests](https://github.com/aroraarnav/villain/actions/workflows/tests.yml/badge.svg)](https://github.com/aroraarnav/villain/actions/workflows/tests.yml)
-[![demo](https://img.shields.io/badge/demo-aroraarnav.github.io%2Fvillain-e5645a)](https://aroraarnav.github.io/villain/)
+[![demo](https://img.shields.io/badge/demo-villain.aroraarnav.com-e5645a)](https://villain.aroraarnav.com/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-### [→ Open the app](https://aroraarnav.github.io/villain/)
+### [→ Open the app](https://villain.aroraarnav.com/)
 
 </div>
 
@@ -30,7 +30,7 @@ says so.
 
 ## Use it
 
-**[aroraarnav.github.io/villain](https://aroraarnav.github.io/villain/)** is the
+**[villain.aroraarnav.com](https://villain.aroraarnav.com/)** is the
 tool. It is the whole application — the same Python, compiled to WebAssembly and
 running in the tab. Open it and drop a PokerNow export on the Database tab.
 Hands are parsed on your machine; the histories are never uploaded to be read.

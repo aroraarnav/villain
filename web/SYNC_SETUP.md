@@ -37,9 +37,10 @@ Two things to know before you start:
 
 1. **Authentication → Providers → Email.** Enabled, with **Confirm email** on.
 2. **Authentication → URL configuration.**
-   - **Site URL:** `https://aroraarnav.github.io/villain`
+   - **Site URL:** `https://villain.aroraarnav.com`
    - **Redirect URLs,** one per line:
      ```
+     https://villain.aroraarnav.com/
      https://aroraarnav.github.io/villain/
      http://127.0.0.1:8000/
      http://localhost:8000/
