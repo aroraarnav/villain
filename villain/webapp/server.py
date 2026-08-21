@@ -28,7 +28,7 @@ from ..parsers import UnknownFormat
 from ..replay import replay
 from ..stats import VS_HERO
 from .assets import page, static
-from .heroview import _cached_hero_id, hero_begin, hero_payload, hero_status
+from .heroview import _cached_hero_id, forget_hero, hero_begin, hero_payload, hero_status
 from .leaderboard import leaderboard_payload
 from .payloads import MIN_ROSTER_HANDS, profile_payload, roster_payload, tab_availability
 from .sessions import SESSIONS, SIM_GAMES, _reap_sessions, apply_answers, commit_session, parse_upload, question_payload, session_brief, session_payload
@@ -337,6 +337,26 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(400, {"error": "reset not confirmed"})
                 with Store(self.db_path) as store:
                     return self._send(200, store.reset())
+            if route == "/api/player/delete":
+                player_id = int(body.get("player_id", 0))
+                with Store(self.db_path) as store:
+                    # Hero is not a villain you can forget: the whole Hero tab
+                    # is built from that identity, and deleting it would leave
+                    # the tool reading a profile that no longer exists. The UI
+                    # disables the button for the same reason, but the check
+                    # belongs here too -- the button is not the only caller.
+                    if player_id == _cached_hero_id(store):
+                        return self._send(400, {"error":
+                            "That is you. Deleting the hero would empty the Hero tab; "
+                            "reset the database if that is really what you want."})
+                    try:
+                        result = store.delete_player(player_id)
+                    except LookupError as exc:
+                        return self._send(404, {"error": str(exc)})
+                    # Every cached answer about the hero names players by id,
+                    # so all of them have to go: one of those ids is now free.
+                    forget_hero(store)
+                    return self._send(200, result)
             if route == "/api/fit-priors":
                 with Store(self.db_path) as store:
                     fitted = store.fit_priors(min_players=int(body.get("min_players", 8)))
@@ -383,6 +403,11 @@ class Handler(BaseHTTPRequestHandler):
                 if route == "/api/unlink":
                     new_id = store.unlink(int(body["player_id"]),
                                           str(body["site"]), str(body["account"]))
+                    # Splitting an account moves hands to a new identity without
+                    # changing how many there are, and the hero caches key on
+                    # exactly that count -- so if the account that just left was
+                    # hero's, nothing would notice.
+                    forget_hero(store)
                     return self._send(200, {"ok": True, "player_id": new_id})
                 if route == "/api/note":
                     store.add_note(int(body["player_id"]), str(body["body"]))
@@ -551,7 +576,7 @@ def serve(db: Path = DEFAULT_PATH, port: int = 8766, open_browser: bool = True):
 
 def main(argv=None):
     import argparse
-    parser = argparse.ArgumentParser(prog="villain-ui", description=__doc__.split("\n")[0])
+    parser = argparse.ArgumentParser(prog="python -m villain.web", description=__doc__.split("\n")[0])
     parser.add_argument("--db", type=Path, default=DEFAULT_PATH)
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--no-browser", action="store_true")

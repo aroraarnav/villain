@@ -155,6 +155,57 @@ def test_unlink_splits_an_alias_back_out(tmp_path, hands):
         assert s.are_distinct(pid, new_id)
 
 
+def test_delete_player_forgets_the_person_and_keeps_the_hands(tmp_path, hands):
+    """The one thing delete must never do is take a hand with it.
+
+    A hand seats several people; deleting one player's hands would silently
+    shrink everybody else's sample. So the identity goes and the log stays.
+    """
+    with Store(tmp_path / "v.db") as s:
+        s.add_hands(hands)
+        before_hands = s.conn.execute("SELECT COUNT(*) c FROM hands").fetchone()["c"]
+        before_seats = s.conn.execute("SELECT COUNT(*) c FROM hand_seats").fetchone()["c"]
+        victim = max(s.players(), key=lambda r: r["hands"] or 0)
+        pid = int(victim["id"])
+
+        out = s.delete_player(pid)
+        assert out["player_id"] == pid
+        assert out["name"] == victim["display_name"]
+
+        assert pid not in {int(r["id"]) for r in s.players()}
+        for table in ("aliases", "books", "ratios", "meters", "notes"):
+            left = s.conn.execute(
+                f"SELECT COUNT(*) c FROM {table} WHERE player_id = ?", (pid,)).fetchone()["c"]
+            assert left == 0, f"{table} still references the deleted player"
+        pairs = s.conn.execute(
+            "SELECT COUNT(*) c FROM distinct_pairs WHERE a = ? OR b = ?",
+            (pid, pid)).fetchone()["c"]
+        assert pairs == 0
+
+        assert s.conn.execute("SELECT COUNT(*) c FROM hands").fetchone()["c"] == before_hands
+        assert s.conn.execute(
+            "SELECT COUNT(*) c FROM hand_seats").fetchone()["c"] == before_seats
+
+
+def test_deleted_player_does_not_come_back_on_rebuild(tmp_path, hands):
+    """rebuild() resolves seats through aliases and drops what it cannot map,
+    so a forgotten player stays forgotten rather than being re-derived from the
+    hand log the delete deliberately left alone."""
+    with Store(tmp_path / "v.db") as s:
+        s.add_hands(hands)
+        pid = int(max(s.players(), key=lambda r: r["hands"] or 0)["id"])
+        s.delete_player(pid)
+        s.rebuild()
+        assert pid not in {int(r["id"]) for r in s.players()}
+
+
+def test_delete_player_rejects_an_unknown_id(tmp_path, hands):
+    with Store(tmp_path / "v.db") as s:
+        s.add_hands(hands)
+        with pytest.raises(LookupError):
+            s.delete_player(999999)
+
+
 @pytest.mark.parametrize("a,b,expected", [
     ("PlayerG", "PlayerG2", 1.0),
     ("PlayerK", "PlayerK2", 1.0),

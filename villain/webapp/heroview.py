@@ -67,6 +67,23 @@ def _hero_model(store: Store, progress=None, hands=None):
 _HERO_CACHE_VERSION = 7
 
 
+def forget_hero(store: Store) -> None:
+    """Drop every cached answer about who the hero is.
+
+    Both in-memory caches are keyed by hand count, which is precisely what an
+    identity change does *not* alter: splitting the hero's account onto its own
+    player, or deleting a player outright, moves hands between identities
+    without adding or removing a single one. So the caches have to be dropped
+    by hand, or the tool keeps answering with a hero id that no longer means
+    what it did -- and the disk cache keeps serving a whole payload built
+    around it.
+    """
+    key = str(store.path)
+    _HERO_ID_CACHE.pop(key, None)
+    _HERO_MODEL_CACHE.pop(key, None)
+    _hero_disk_cache_path(store).unlink(missing_ok=True)
+
+
 def _hero_disk_cache_path(store: Store) -> Path:
     return store.path.with_name(store.path.name + ".hero-cache.json")
 

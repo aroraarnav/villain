@@ -878,3 +878,75 @@ def test_fit_population_model_passes_progress_down(tmp_path, hands):
 
     assert "loading" in seen, f"the load phase never reported: {sorted(set(seen))}"
     assert "reading" in seen, f"the walk never reported: {sorted(set(seen))}"
+
+
+def _dispatch(db_path, method, path, body=None):
+    """One request through the real routing, with the socket taken out.
+
+    Same bridge the in-browser build uses, so a route tested here is the route
+    the hosted page runs -- not a re-implementation of it.
+    """
+    from villain.webapp import browser
+    browser.set_db(str(db_path))
+    payload = json.dumps(body or {}).encode()
+    # Content-Length included deliberately: do_POST reads the body by it, and
+    # without it every write silently arrives as {}.
+    headers = {"Host": "127.0.0.1", "Origin": "http://127.0.0.1",
+               "Content-Type": "application/json", "Content-Length": str(len(payload))}
+    return browser.dispatch(method, path, headers, payload)
+
+
+def test_delete_player_route_forgets_them_but_keeps_the_hands(tmp_path, hands):
+    db = tmp_path / "v.db"
+    with Store(db) as store:
+        store.add_hands(hands)
+        hero_id = None
+        from villain.webapp.heroview import _cached_hero_id
+        hero_id = _cached_hero_id(store)
+        victim = next(int(r["id"]) for r in store.players()
+                      if int(r["id"]) != hero_id)
+        before = store.conn.execute("SELECT COUNT(*) c FROM hands").fetchone()["c"]
+
+    status, body, _ = _dispatch(db, "POST", "/api/player/delete",
+                                {"player_id": victim})
+    assert status == 200, body
+    assert json.loads(body)["player_id"] == victim
+
+    with Store(db) as store:
+        assert victim not in {int(r["id"]) for r in store.players()}
+        assert store.conn.execute("SELECT COUNT(*) c FROM hands").fetchone()["c"] == before
+
+
+def test_delete_player_route_refuses_the_hero(tmp_path, hands):
+    """Hero is the one identity the tool cannot do without: the whole Hero tab
+    is built from it. The button is disabled for the same reason, but the
+    button is not the only caller, so the refusal lives in the route.
+
+    The fixture is twenty heads-up hands and has no hero of its own, so one is
+    seeded into the same cache the route consults -- the point under test is
+    the guard, not hero detection.
+    """
+    from villain.webapp.heroview import _HERO_ID_CACHE, _hand_count
+
+    db = tmp_path / "v.db"
+    with Store(db) as store:
+        store.add_hands(hands)
+        hero_id = int(store.players()[0]["id"])
+        _HERO_ID_CACHE[str(store.path)] = (_hand_count(store), hero_id)
+    try:
+        status, body, _ = _dispatch(db, "POST", "/api/player/delete",
+                                    {"player_id": hero_id})
+        assert status == 400
+        assert "you" in json.loads(body)["error"].lower()
+        with Store(db) as store:
+            assert hero_id in {int(r["id"]) for r in store.players()}
+    finally:
+        _HERO_ID_CACHE.pop(str(db), None)
+
+
+def test_delete_player_route_404s_on_an_unknown_id(tmp_path, hands):
+    db = tmp_path / "v.db"
+    with Store(db) as store:
+        store.add_hands(hands)
+    status, _, _ = _dispatch(db, "POST", "/api/player/delete", {"player_id": 999999})
+    assert status == 404
