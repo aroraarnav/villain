@@ -260,6 +260,17 @@ def _size(profile, key, default, min_n=5.0):
     return v if (v is not None and means.get(key + "#n", 0.0) >= min_n) else default
 
 
+def _size_chain(profile, keys, default, min_n=5.0):
+    """First size key that has enough sample, else ``default``."""
+    for key in keys:
+        if not key:
+            continue
+        hit = _size(profile, key, None, min_n)
+        if hit is not None:
+            return hit
+    return default
+
+
 def _freq_n(profile, stat, default, min_opps=15.0):
     est = profile.stats.get(stat) if profile is not None else None
     return est.value if (est is not None and est.opps >= min_opps) else default
@@ -332,12 +343,22 @@ def _board_ctx(hand) -> tuple[str, str, str, str]:
     return tex, hilo, mw, pot
 
 
-def _bet_frac(profile, street: str, rng, default: float = 0.6) -> float:
-    """Their c-bet size, with overbets emitted at the measured overbet rate."""
-    frac = _clamp(_size(profile, f"cbet_size:{street}",
-                        _size(profile, f"bet_size:{street}", default)), 0.2, 2.0)
+def _bet_frac(profile, street: str, rng, default: float = 0.6,
+              slices: tuple[str, ...] = ()) -> float:
+    """Their c-bet size here -- pot type and texture first, then the pool.
+
+    A dry 3-bet flop is not a wet single-raised one, and the mean of every
+    c-bet they ever made (including the all-ins) is how KK 2x-es a board they
+    bet a third on. Features already stores the slices; this is the read.
+    """
+    keys = [f"cbet_size:{street}:{s}" for s in slices if s]
+    keys += [f"cbet_size:{street}", f"bet_size:{street}"]
+    frac = _clamp(_size_chain(profile, keys, default), 0.2, 2.0)
+    # An overbet is a different action, not a noisy version of a third-pot
+    # stab. Emitting one at the pooled overbet rate on a board they size
+    # small is how a value hand jams a texture they bet small.
     over_f = _freq_n(profile, f"overbet:{street}", 0.0, 12)
-    if over_f and over_f >= 0.05 and rng.random() < over_f:
+    if over_f >= 0.05 and frac >= 0.75 and rng.random() < over_f:
         frac = _clamp(max(frac, 1.15), 1.05, 2.0)
     return frac
 
@@ -492,17 +513,21 @@ def _spr(hand, seat) -> float:
 
 
 def _raise_or_jam(hand, seat, legal, target: int) -> tuple[str, int]:
-    """A raise, or a shove if the raise would commit the stack.
+    """A raise, or a shove if *this size* would commit the stack.
 
-    SPR already low, or the raise leaving a stub behind: the chips go in. The
-    frequency cut still chose *whether* to raise; this only changes the size
-    so 20bb and 200bb are not the same line.
+    A stub behind a raise is not a plan. An opening bet at SPR 2 still has
+    1.7 pots behind after a third-pot stab -- jamming because SPR is low is
+    how KK 5x-shoves a flop they bet small. ``COMMIT_SPR`` only applies when
+    this is already a raise of a bet, where a small raise at SPR 2 really is
+    a stub.
     """
     s = hand.seats[seat]
     _, to = _raise_to(hand, legal, target)
     add = max(to - s.street_put, 0)
     left = s.stack - add
-    if _spr(hand, seat) <= COMMIT_SPR or left <= LEAVE_BEHIND_POTS * max(hand.pot, 1):
+    if left <= LEAVE_BEHIND_POTS * max(hand.pot, 1):
+        to = legal.max_raise_to
+    elif hand.raises >= 1 and _spr(hand, seat) <= COMMIT_SPR:
         to = legal.max_raise_to
     return ("raise", to)
 
@@ -772,7 +797,11 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
         f = B / pot_before                            # bet as a fraction of the pot
         mdf = 1.0 / (1.0 + f)                          # P / (P + B)
         req_eq = B / (2.0 * B + pot_before)            # pot odds
-        bucket = size_bucket(B / max(hand.pot, 1))
+        # ``hand.pot`` already includes the bet, so B/pot of a jam is 0.9
+        # ("big") not 8x ("over"). Fold-vs-over never fired and a shove got
+        # the continue rate of a pot-sized bet -- A-high called off.
+        bucket = size_bucket(f)
+        steep = f >= 1.0 or B >= s.stack
         if level >= 2:
             # A raise is a value claim. Ranking the jam by playability would
             # get combo draws all-in and leave a set calling -- the opposite
@@ -807,7 +836,7 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
                     _, to = _raise_or_jam(hand, seat, lg, lg.max_raise_to)
                     return ("raise", to,
                             f"jams — {depth}; only the top {1 - value_bar:.0%} of what continues")
-                frac = _bet_frac(profile, street, rng, 0.8)
+                frac = _bet_frac(profile, street, rng, 0.8, (pot, tex, hilo, mw, ipo))
                 _, to = _raise_or_jam(hand, seat, lg, hand.bet + int(round(frac * hand.pot)))
                 return ("raise", to,
                         f"re-raises for value — the top {1 - value_bar:.0%} of the range that continues here")
@@ -902,7 +931,13 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
         call_lo = max(bluff_frac, 1 - continue_frac)
         call_hi = 1 - value_frac
         clears = _over(strength, 1 - continue_frac, rng)
-        if clears and (fold_measured or absolute >= req_eq):
+        # A sampled fold rate is an average across the sizes they faced. Even
+        # after the MDF shift, a station's 15% fold-vs-bet called A-high off a
+        # jam: the frequency cut said "top 40%" and pot odds never got a vote.
+        # Overbets and all-ins always need the price. Playability (not made-
+        # hand percentile) is the proxy so a flush draw still continues.
+        priced = (not steep) or strength >= req_eq
+        if clears and priced and (fold_measured or absolute >= req_eq):
             if call_hi > call_lo:
                 _keep(hand, seat, board_order, [(call_lo, call_hi)], hand.board)
             else:
@@ -912,7 +947,8 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
                     f"calls — they continue ~{continue_frac:.0%} vs this size"
                     + ("" if fold_measured else f", and this clears the {req_eq:.0%} pot odds"))
         return ("fold", 0,
-                f"folds — outside the ~{continue_frac:.0%} they continue vs this size")
+                f"folds — outside the ~{continue_frac:.0%} they continue vs this size"
+                + (" — the price of this bet does not clear" if steep and clears else ""))
 
     # checked to
     if has_init:                                     # only the aggressor c-bets
@@ -935,7 +971,7 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
         polar = _polar_bet(strength, cbet_f, cap)
         if lg.can_raise and polar:
             _keep(hand, seat, board_order, _polar_bands(cbet_f, cap), hand.board)
-            frac = _bet_frac(profile, street, rng, 0.6)
+            frac = _bet_frac(profile, street, rng, 0.6, (pot, tex, hilo, mw, ipo))
             _, to = _raise_or_jam(hand, seat, lg, int(round(frac * hand.pot)))
             how = "value" if polar == "value" else "a bluff"
             return ("raise", to,
@@ -960,7 +996,7 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
     polar = _polar_bet(strength, lead_f, cap)
     if lg.can_raise and lead_f > 0.02 and polar:
         _keep(hand, seat, board_order, _polar_bands(lead_f, cap), hand.board)
-        frac = _bet_frac(profile, street, rng, 0.55)
+        frac = _bet_frac(profile, street, rng, 0.55, (pot, tex, hilo, mw, ipo))
         _, to = _raise_or_jam(hand, seat, lg, int(round(frac * hand.pot)))
         return ("raise", to, bet_why)
     if lg.can_check:

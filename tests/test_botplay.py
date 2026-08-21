@@ -708,3 +708,81 @@ def test_fold_vs_raise_beats_mdf_when_sampled():
     assert folds / n < 0.40, f"fold_vs_raise realized {folds / n:.2f} vs 0.20"
 
 
+def test_a_third_pot_cbet_at_spr_two_is_not_a_shove():
+    """SPR ≤ 2 used to jam every flop bet in a 3-bet pot.
+
+    A third-pot stab at SPR 2 leaves 1.7 pots behind. Overpair on a dry flop
+    is the hand that then shoved a texture they bet small.
+    """
+    from villain.cards import card_id
+    profile = _Prof(**{"cbet:flop": 0.99, "cbet:flop:dry": 0.99, "cbet:flop:3bp": 0.99,
+                       "donk:flop": 0.0, "probe:flop": 0.0})
+    profile.means = {
+        "cbet_size:flop": 0.33, "cbet_size:flop#n": 80.0,
+        "cbet_size:flop:dry": 0.33, "cbet_size:flop:dry#n": 40.0,
+        "cbet_size:flop:3bp": 0.33, "cbet_size:flop:3bp#n": 40.0,
+    }
+    h = Hand(_seats(200, 200), button=0, sb=1, bb=2, rng=np.random.default_rng(1))
+    h.act("raise", 6)
+    h.act("raise", 40)
+    h.act("call")
+    assert h.street == 1 and h.pot_kind == "3bp"
+    h.board = [card_id("2c"), card_id("7d"), card_id("9h")]
+    h.seats[0].hole = (card_id("Ac"), card_id("4d"))
+    h.seats[1].hole = (card_id("Kc"), card_id("Kd"))
+    # BB 3-bet, so they hold the lead OOP. SPR ≈ 2 after the 20bb 3-bet.
+    kind, amt, why = decide(h, 1, profile, np.random.default_rng(0))
+    assert kind == "raise", why
+    assert amt < h.seats[0].stack, why
+    assert amt <= int(0.55 * h.pot) + h.bb, f"bet {amt} into {h.pot}: {why}"
+
+
+def test_ace_high_folds_a_flop_jam():
+    """A jam was bucketed as a 'big' bet (B / pot-including-the-bet ≈ 0.9),
+    so a station's fold-vs-big fired and ace-high called off."""
+    from villain.cards import card_id
+    station = _Prof(**{"fold_vs_bet:flop": 0.15, "fold_vs_bet:flop:big": 0.15,
+                       "raise_vs_bet:flop": 0.02, "check_raise:flop": 0.02,
+                       "donk:flop": 0.0})
+    h = Hand(_seats(200, 200), button=0, sb=1, bb=2, rng=np.random.default_rng(2))
+    h.act("raise", 6)
+    h.act("call")
+    assert h.street == 1
+    h.board = [card_id("2c"), card_id("7d"), card_id("9h")]
+    h.seats[0].hole = (card_id("Kc"), card_id("Kd"))
+    h.seats[1].hole = (card_id("Ac"), card_id("4d"))
+    h.act("check")
+    h.act("raise", h.legal().max_raise_to)
+    kind, _, why = decide(h, 1, station, np.random.default_rng(0))
+    assert kind == "fold", why
+
+
+def test_cbet_size_follows_the_texture_not_the_all_in_mean():
+    """Pooled cbet_size includes jams. Dry boards they bet small must stay small."""
+    from villain.cards import card_id
+    profile = _Prof(**{"cbet:flop": 0.99, "cbet:flop:dry": 0.99, "donk:flop": 0.0,
+                       "overbet:flop": 0.40})
+    profile.means = {
+        "cbet_size:flop": 1.80, "cbet_size:flop#n": 80.0,
+        "cbet_size:flop:dry": 0.33, "cbet_size:flop:dry#n": 40.0,
+    }
+    rng = np.random.default_rng(0)
+    sizes = []
+    for k in range(30):
+        h = Hand(_seats(400, 400), button=0, sb=1, bb=2,
+                 rng=np.random.default_rng(k + 3))
+        h.act("raise", 6)
+        h.act("call")
+        if h.street != 1:
+            continue
+        h.board = [card_id("2c"), card_id("7d"), card_id("9h")]
+        h.seats[0].hole = (card_id("Kc"), card_id("Kd"))
+        h.seats[1].hole = (card_id("Ac"), card_id("4d"))
+        h.act("check")
+        kind, amt, why = decide(h, 0, profile, rng)
+        if kind == "raise":
+            sizes.append(amt / max(h.pot, 1))
+    assert sizes
+    assert max(sizes) < 0.70, sizes
+
+
