@@ -653,9 +653,6 @@
         cursor: pointer; display: inline-flex; align-items: center; white-space: nowrap;
       }
       .acct button:hover { color: var(--ink); border-color: var(--accent); }
-      /* Signed out, this is the one thing on the page we want pressed. */
-      .acct button.cta { color: var(--ink); border-color: var(--red); font-weight: 600; }
-      .acct button.cta:hover { background: var(--red); color: #fff; }
       .acct .who { color: var(--muted); }
       .acct .msg { color: var(--muted); max-width: 20rem; }
       .acct .msg.bad { color: var(--red); }
@@ -738,12 +735,12 @@
         status.classList.toggle("bad", text.startsWith("Not saved"));
       };
 
-      const button = document.createElement("button");
-      button.type = "button";
       if (user) {
         const who = document.createElement("span");
         who.className = "who";
         who.textContent = user.name || "signed in";
+        const button = document.createElement("button");
+        button.type = "button";
         button.textContent = "Sign out";
         button.onclick = async () => {
           // Session first, files second. A reload that raced sign-out used
@@ -765,9 +762,10 @@
         };
         chip.append(status, gauge, who, button);
       } else {
-        button.textContent = "Sign in";
-        button.className = "cta";
-        chip.append(status, gauge, button);
+        const who = document.createElement("span");
+        who.className = "who";
+        who.textContent = "Not signed in";
+        chip.append(status, gauge, who);
         if (signInError) saveNote(signInError);
 
         // Say what an account is for where the reader already is, rather than
@@ -815,15 +813,9 @@
           }
           form.classList.remove("sending");
         };
-        button.onclick = () => {
-          bar.scrollIntoView({ behavior: "smooth", block: "nearest" });
-          form.email.focus();
-        };
-
         // A refused write should point at the way forward, not just fail.
         promptSignIn = () => {
           saveNote("Sign in to add your own hands.");
-          button.classList.add("cta");
           bar.scrollIntoView({ behavior: "smooth", block: "nearest" });
           form.email.focus();
         };
