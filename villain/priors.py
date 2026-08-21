@@ -1,25 +1,8 @@
 """Population priors, and the shrinkage that makes small samples usable.
 
-The central problem of profiling a home game: you have 40 hands on someone and
-they folded to the only three continuation bets they faced. Their raw
-fold-to-cbet is 100%. Betting every flop against them on that basis is how you
-lose money to a player who is actually normal.
-
-The fix is a Beta prior. Each frequency is estimated as
-
-    (hits + m * prior_mean) / (opportunities + m)
-
-where ``m`` is the prior's strength in pseudo-opportunities. With 3
-observations the estimate barely moves off the population mean; with 300 the
-prior is irrelevant. Every number this project reports is shrunk this way and
-carries the credible interval that goes with it, so a read is never quoted
-without its uncertainty.
-
-Where the priors come from: hard-coded population defaults below, replaced by
-*empirically estimated* ones as soon as the database holds enough players. The
-empirical version fits a Beta-Binomial by moments -- the spread between players
-in the database sets how much a new player's sample is trusted, which is
-exactly the question the prior strength answers.
+A frequency is ``(hits + m·mean) / (n + m)``. Three observations barely
+move it; three hundred make the prior irrelevant. Built-in defaults are
+replaced by a Beta-Binomial moments fit once the database has enough players.
 """
 
 from __future__ import annotations

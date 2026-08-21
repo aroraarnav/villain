@@ -1,25 +1,9 @@
-  /* Shipped beside the stylesheet, not fetched from a CDN. Two reasons, and
-     either would be enough on its own: this tool reads real hand histories off
-     a loopback server, so a webfont request would tell Google every time you
-     opened it; and the hosted build runs the whole app inside Pyodide behind a
-     fetch shim that only intercepts /api and /static, which a CSS url() does
-     not go through -- an external face would simply fail there.
-
-     The paths are bare filenames, and that is load-bearing. A relative url()
-     resolves against whatever the stylesheet's own base is, and this stylesheet
-     has two:
-
-       - served locally it is linked from /static/app.css, so a bare name
-         resolves to /static/<name> -- beside the stylesheet, where it is;
-       - on the hosted build the boot page strips the <link> and injects the
-         same CSS into a <style>, whose base is the *document*, so a bare name
-         resolves to <page-dir>/<name>.
-
-     One leading "static/" satisfied the second and broke the first into
-     /static/static/, which 404s and silently falls back to the platform sans.
-     A leading slash breaks the second instead: Pages serves from a repository
-     subpath. Bare is the only form both bases agree on, so web/build.py copies
-     the faces to the root of dist/ rather than into a subdirectory. */
+  /* Faces ship beside the stylesheet: a CDN would phone home, and the hosted
+     build injects this CSS into a <style> so an external url() would 404.
+     Paths are bare filenames -- load-bearing. Locally the sheet is
+     /static/app.css so bare → /static/<name>; hosted, the base is the
+     document so bare → <page-dir>/<name>. A "static/" prefix 404s locally
+     (/static/static/); a leading slash 404s on Pages subpaths. */
   @font-face {
     font-family: "Space Grotesk"; font-style: normal; font-weight: 300 700;
     font-display: swap; src: url("space-grotesk.woff2") format("woff2");
@@ -35,9 +19,7 @@
      Neither theme is forced: with no explicit choice the OS still decides. */
   :root {
     color-scheme: dark;
-    /* Three grounds, not one. Depth is what separates "the tile you came for"
-       from "the tile that is merely also true," and a single --panel on a
-       single --bg cannot say that. */
+    /* Three grounds: page / reference / raised primary. */
     --bg: #0b0c0e;        /* page */
     --panel: #141619;     /* reference surface */
     --panel-2: #191c21;   /* raised: the primary tile on a screen */
@@ -47,17 +29,9 @@
     --edge: #4b5058;      /* border of something you can operate */
     --accent: #f2f1ee; --accent-soft: #1d2025;
     --lift: 0 1px 0 rgba(255,255,255,.03), 0 12px 28px rgba(0,0,0,.42);
-    /* Three warm hues, three jobs. Same family, never the same value: --red is
-       the app's one accent (nav, focus, armed controls, the wordmark), --warn
-       is a threshold you should notice but not act on (breakeven ticks, timing
-       flags), --danger is destructive and irreversible (reset). Collapsing
-       these to one hex is how a Reset button and the active tab ended up the
-       same color. */
+    /* --red accent, --warn threshold, --danger irreversible. Not one hex. */
     --red: #e5645a;
-    /* A red suit is a fact about the card, never a claim about whose card it
-       is. It has to be its own token: inside .hero-scope --red becomes the
-       blue "you" accent, and hero's own hole cards were dealing blue diamonds
-       and blue hearts because .card.red pointed at it. */
+    /* Suit color, not the "you" accent -- .hero-scope rebinds --red. */
     --card-red: #e5645a;
     --warn: #d9a441;
     --danger: #e5484d;

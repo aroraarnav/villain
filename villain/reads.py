@@ -1,31 +1,10 @@
-"""What they actually had: a hand-strength model trained on revealed cards.
+"""Hand-strength model trained on revealed cards.
 
-Frequencies tell you how often somebody bets. They do not tell you what they
-bet *with*, and that is the question that decides whether to call. This module
-learns the mapping from a line -- street, action, sizing, position, board
-texture, time taken -- to the strength of the hand behind it, using the hands
-where cards were revealed as labels. A player's own residual against that model
-is the read: "when this player bets the river they average 20 percentile points
-weaker than the field does" is directly actionable in a way that "they bet the
-river 55% of the time" is not.
-
-**The bias, stated plainly.** Villains' cards are only revealed at showdown,
-and hands that reach showdown are not a random sample of hands played -- they
-skew toward calling lines and away from the bluffs that took the pot down
-uncontested. So a model trained purely on villain showdowns *underestimates*
-how weak the betting ranges are. Two things reduce it and neither eliminates
-it:
-
-* The exporting player's own cards are visible on every hand, including hands
-  they folded, so their rows are an unbiased sample and are marked as such.
-* Rows are labeled with strength *at the street the action was taken*, not at
-  the end, so a flop bet is scored against the flop board rather than against
-  a river that had not arrived yet.
-
-Treat the population model as a baseline and the per-player residual as the
-signal. Both come with sample counts, and neither is worth anything under a few
-hundred rows -- ``fit`` refuses rather than returning a model that looks
-authoritative and is not.
+Maps a line (street, action, sizing, position, texture, time) to the strength
+behind it. Showdown-only labels underestimate how weak betting ranges are;
+the exporter's own cards (visible every hand) reduce that bias, they do not
+remove it. ``fit`` refuses rather than returning an authoritative-looking
+model on a thin sample.
 """
 
 from __future__ import annotations

@@ -1,25 +1,9 @@
 """Skill rating.
 
-Rating a player by their results is rating their luck: a few hundred hands of
-poker is almost all variance, and the biggest winner in a session is usually
-just the person who held the best cards. So results carry the *smallest* weight
-here, and only after being adjusted for all-in equity.
-
-The rating is built instead from what a player's frequencies say about their
-decisions, in two parts:
-
-* **Fundamentals** -- how close their frequencies sit to competent play for
-  that table size, where both directions count as errors. Folding too little is
-  a leak; folding too much is the same leak wearing a different hat.
-* **Exploitability** -- what :mod:`villain.exploits` says is available against
-  them, in big blinds per 100 hands. This is the most direct measure there is:
-  a player nobody can profitably deviate against is, by definition, playing
-  well.
-
-Every component reports its own score and its own weight, so a rating can be
-read as a diagnosis rather than a verdict. A rating also carries confidence,
-and a low-confidence rating should be read as "we do not know yet" rather than
-"average".
+Results are almost all luck in a few hundred hands, so they carry the
+smallest weight (and only after all-in equity). The rest is fundamentals --
+distance from competent play -- and exploitability in bb/100. Low confidence
+means "unknown", not "average".
 """
 
 from __future__ import annotations

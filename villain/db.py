@@ -1,19 +1,8 @@
-"""Persistence: hands in, profiles out, forever.
+"""Persistence: hands in, profiles out.
 
-Two decisions shape this module.
-
-**Hands are the source of truth, statistics are a cache.** Stat definitions
-change -- a c-bet gets redefined, a new leak rule needs a counter nobody was
-recording -- so every hand is stored in canonical form and ``rebuild()``
-recomputes every book from scratch. Without that, a definition change leaves
-old players wrong until they happen to sit down again.
-
-**Identity is separate from account.** The same human is ``PlayerK`` at one
-table and ``PlayerK2`` at the next, and the profile is worthless if it
-restarts each time. So site accounts are *aliases* pointing at an internal
-player, aliases can be merged, and merging is guarded by co-occurrence: two
-accounts dealt into the same hand are provably different people and can never
-be linked, however similar their names look.
+Hands are the source of truth; statistics are a cache ``rebuild()`` can
+recompute. Site accounts are aliases of an internal player. Accounts dealt
+into the same hand are different people and can never be linked.
 """
 
 from __future__ import annotations
@@ -139,27 +128,10 @@ CREATE TABLE IF NOT EXISTS meta (
 
 DEFAULT_PATH = Path.home() / ".villain" / "villain.db"
 
-#: Shared hands that can be waved away as one person on two accounts -- a
-#: reconnect leaving a stale seat, or somebody sitting down again from a phone
-#: for a few hands. Above this, two accounts really were at the table together
-#: and cannot be one person. At or below it the merge is offered, with the
-#: overlap stated, and a merge is never applied without being asked for.
-#:
-#: Fitted to a real pool rather than assumed. Over 1,588 pairs of players who
-#: were ever dealt in together, the shared-hand counts are:
-#:
-#:     1 hand    37 pairs        11-25    143
-#:     2         9               26-100   547
-#:     3-5      34               100+     769
-#:     6-10     49
-#:
-#: 83% of pairs share 26 or more hands, which is a session played together and
-#: nothing else. The thin tail below ten is where brief double-seating lives,
-#: so the line goes there. It was 2, which refused the ordinary case of one
-#: person reconnecting mid-orbit and playing a few hands as both accounts.
-#:
-#: Raising it is also safer than it was: a merge can now be undone from the
-#: player page one account at a time, so a wrong answer is no longer permanent.
+#: Shared hands waved away as one person on two accounts (reconnect, phone).
+#: Above this they really sat together and cannot merge. Fitted: of 1,588
+#: co-seated pairs, 83% share 26+ hands; the thin tail below ten is
+#: double-seating. Was 2, which refused ordinary mid-orbit reconnects.
 SPURIOUS_OVERLAP = 10
 
 #: Feature / display-stat definition stamp. Bump when ``rebuild`` is required
