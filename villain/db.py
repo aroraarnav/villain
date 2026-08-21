@@ -10,6 +10,8 @@ from __future__ import annotations
 import gzip
 import json
 import sqlite3
+import sys
+import threading
 import time
 from collections import defaultdict
 from collections.abc import Iterable
@@ -139,8 +141,9 @@ SPURIOUS_OVERLAP = 10
 #:
 #: The rebuild runs inline inside ``Store()``, and the web layer opens a
 #: ``Store`` per request, so on a real database (71k hands, about a minute)
-#: the next page waits for the whole thing. That is only acceptable because
-#: the wait now reports itself -- see :data:`PROGRESS_HOOK`.
+#: the next page waits for the whole thing. That is only acceptable once: the
+#: stamp has to survive the request that wrote it, or every later open does
+#: the minute again. See :data:`PROGRESS_HOOK` and :func:`consume_cache_dirty`.
 DEFINITIONS_VERSION = "2026-08-21.position-depth-and-pot-type-splits"
 
 #: Set by a host that can show a progress bar. Called as
@@ -153,6 +156,23 @@ DEFINITIONS_VERSION = "2026-08-21.position-depth-and-pot-type-splits"
 #: of them to reach one automatic call is how that migration would stay the
 #: single path with no feedback.
 PROGRESS_HOOK = None
+
+#: True after ``_ensure_definitions`` rebuilt books and the host has not yet
+#: been told the file changed. The hosted page keys its upload off ``wrote``,
+#: which is a property of the *route*, so a GET that migrated looked like a
+#: read -- the stamp stayed in this process, the next visit rebuilt 71k hands.
+_CACHE_DIRTY = False
+
+#: Two request threads can both see a stale stamp and each start a full
+#: rebuild. The second re-reads the version after waiting, and does nothing.
+_ENSURE_LOCK = threading.Lock()
+
+
+def consume_cache_dirty() -> bool:
+    """True if a definitions rebuild wrote the file since the last consume."""
+    global _CACHE_DIRTY
+    dirty, _CACHE_DIRTY = _CACHE_DIRTY, False
+    return dirty
 
 
 def _report(done: int, total: int, phase: str) -> None:
@@ -214,8 +234,13 @@ class Store:
         self.conn = sqlite3.connect(self.path, timeout=30)
         self.conn.row_factory = sqlite3.Row
         # WAL lets the CLI and UI read while the other writes; without it a
-        # concurrent open surfaces as a bare "database is locked" 500.
-        self.conn.execute("PRAGMA journal_mode=WAL")
+        # concurrent open surfaces as a bare "database is locked" 500. Skip it
+        # in the browser: the hosted app copies one file (``villain.db``), and
+        # a WAL left beside it is a second file nobody uploads -- so the
+        # definitions stamp from a GET never reached IndexedDB and the next
+        # visit rebuilt every hand again.
+        if sys.platform != "emscripten":
+            self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA busy_timeout=5000")
         self.conn.executescript(SCHEMA)
         self._pending = set()
@@ -260,26 +285,40 @@ class Store:
 
     def _ensure_definitions(self) -> None:
         """Rebuild cached books when feature definitions moved under them."""
-        row = self.conn.execute(
-            "SELECT value FROM meta WHERE key = 'definitions_version'").fetchone()
-        current = row["value"] if row else None
-        if current == DEFINITIONS_VERSION:
-            return
-        n_hands = self.conn.execute("SELECT COUNT(*) AS c FROM hands").fetchone()["c"]
-        if n_hands:
-            self.rebuild()
-            # The fitted population is a cache too, and it was not covered here.
-            # A definitions bump that adds a feature refreshed the stat books
-            # but left the priors without it, so the new feature silently fell
-            # back to the built-in online default -- measuring a home game
-            # against a field it does not play in. Adding raise_share this way
-            # changed 26 of 68 real labels before anyone ran `villain fit`.
-            # Refitting alone is enough: the prior is applied when a profile is
-            # read, not stored in the books, so no second rebuild is needed.
-            self.fit_priors()
-        self.conn.execute(
-            "INSERT OR REPLACE INTO meta (key, value) VALUES ('definitions_version', ?)",
-            (DEFINITIONS_VERSION,))
+        global _CACHE_DIRTY
+        with _ENSURE_LOCK:
+            row = self.conn.execute(
+                "SELECT value FROM meta WHERE key = 'definitions_version'").fetchone()
+            current = row["value"] if row else None
+            if current == DEFINITIONS_VERSION:
+                return
+            n_hands = self.conn.execute("SELECT COUNT(*) AS c FROM hands").fetchone()["c"]
+            rebuilt = False
+            if n_hands:
+                self.rebuild()
+                rebuilt = True
+            # Stamp before the prior fit, and commit it: a fit that throws must
+            # not leave the version unwritten, or the next Store() rebuilds the
+            # whole database again -- a minute, every request, forever.
+            self.conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES ('definitions_version', ?)",
+                (DEFINITIONS_VERSION,))
+            self.conn.commit()
+            if rebuilt:
+                _CACHE_DIRTY = True
+                # The fitted population is a cache too, and it was not covered
+                # here. A definitions bump that adds a feature refreshed the
+                # stat books but left the priors without it, so the new feature
+                # silently fell back to the built-in online default -- measuring
+                # a home game against a field it does not play in. Adding
+                # raise_share this way changed 26 of 68 real labels before
+                # anyone ran `villain fit`. Refitting alone is enough: the
+                # prior is applied when a profile is read, not stored in the
+                # books, so no second rebuild is needed.
+                try:
+                    self.fit_priors()
+                except Exception:
+                    pass              # books and stamp are current; do not loop
 
     def _repair_distinct_pairs(self) -> None:
         """Restore the ``a < b`` invariant that a past merge could break.

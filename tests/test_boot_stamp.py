@@ -164,6 +164,14 @@ def test_hero_progress_callback_is_a_js_function():
     assert "phase: String(phase)" in src
 
 
+def test_a_guest_flush_keeps_a_definitions_rebuild():
+    """Guests have no account, but IndexedDB still has to receive a stamped
+    database or the next visit rebuilds the sample from scratch."""
+    shell = SHELL.read_text()
+    assert "if (r.wrote)" in shell
+    assert "persistWrite = async () => { await toDisk(false); }" in shell
+
+
 def test_the_third_party_script_is_pinned_and_checked():
     """It handles sign-in, so it is the one script on the page where "whatever
     the CDN resolves this tag to today" is not an acceptable answer.

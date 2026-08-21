@@ -332,9 +332,10 @@
         flag.drop(RESET);
       }
       await call("seedDemo", { base: location.href });
-      // Nothing a guest does reaches the database, so there is nothing to
-      // write back. Keeping the demo pristine is the point.
-      persistWrite = async () => {};
+      // Hands a guest adds never reach an account. A definitions rebuild still
+      // has to land in IndexedDB, or the next visit walks every sample hand
+      // again -- the same hole as a signed-in GET that forgot to set `wrote`.
+      persistWrite = async () => { await toDisk(false); };
     }
 
 

@@ -253,6 +253,36 @@ def test_fit_priors_refuses_a_thin_pool(store):
     assert store.fit_priors(min_players=8) == {}
 
 
+def test_a_definitions_bump_rebuilds_once(tmp_path, hands, monkeypatch):
+    """The stamp is what makes the second open free. Without it, every Store()
+    walks every stored hand -- a minute on a real database, every request."""
+    from villain.db import DEFINITIONS_VERSION, Store
+
+    db = tmp_path / "v.db"
+    with Store(db) as store:
+        store.add_hands(hands)
+        store.conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('definitions_version', 'old')")
+        store.conn.commit()
+
+    calls = {"n": 0}
+    real = Store.rebuild
+
+    def counted(self, *args, **kwargs):
+        calls["n"] += 1
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Store, "rebuild", counted)
+    with Store(db) as store:
+        stamped = store.conn.execute(
+            "SELECT value FROM meta WHERE key = 'definitions_version'").fetchone()["value"]
+    assert stamped == DEFINITIONS_VERSION
+    assert calls["n"] == 1
+    with Store(db):
+        pass
+    assert calls["n"] == 1
+
+
 # -- CLI --------------------------------------------------------------------
 
 def test_cli_import_and_profile(tmp_path, capsys):
