@@ -3,7 +3,7 @@ const fmtPct = v => (100 * v).toFixed(0) + "%";
 const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g,
   c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const SVG = "http://www.w3.org/2000/svg";
-const state = {tab: "players", session: null, player: null, glossary: null, game: null, lastEvent: null, stepTimer: null, descOn: true, revealed: false, checkFold: false, checkFoldHand: null, heroPoll: null,
+const state = {tab: "players", session: null, player: null, roster: null, glossary: null, game: null, lastEvent: null, stepTimer: null, descOn: true, revealed: false, checkFold: false, checkFoldHand: null, heroPoll: null,
                sessionId: null};
 
 /* Hosted demo, signed out: the sample is readable, not writable. Set by the
@@ -994,150 +994,7 @@ function profileCard(p, opts) {
   // Between the header band and What to do: the six are reference you read
   // before the plan, not after it.
   card.insertBefore(hudBox, doBox);
-  if (opts.narrate) addSuggestTrigger(card, p);
   return card;
-}
-
-function buildNarrator(box, profile) {
-  const actions = document.createElement("div");
-  actions.className = "narrate-actions";
-  const button = document.createElement("button");
-  button.className = "act small";
-  button.textContent = "Generate additional exploits";
-  const toggle = document.createElement("button");
-  toggle.className = "act small";
-  toggle.disabled = true;
-  toggle.textContent = "Hide";
-  const out = document.createElement("div");
-  out.className = "narration";
-  actions.append(button, toggle);
-  box.append(actions, out);
-
-  let visible = true;
-  toggle.onclick = () => {
-    visible = !visible;
-    out.classList.toggle("hidden", !visible);
-    toggle.textContent = visible ? "Hide" : "Show";
-  };
-
-  button.onclick = async () => {
-    button.disabled = true;
-    toggle.disabled = true;
-    const original = button.textContent;
-    button.textContent = "writing\u2026";
-    out.classList.remove("hidden");
-    visible = true;
-    toggle.textContent = "Hide";
-    try {
-      const result = window.villainNarrate
-        ? await window.villainNarrate(profile)
-        : await post("/api/narrate", {profile: profile});
-      out.innerHTML = `${renderBullets(result.text)}
-        <div class="small muted" style="margin-top:8px">suggested by
-          ${esc(result.model)} from the numbers on this page \u2014 it is given
-          the computed profile and cannot state a figure the profile did not
-          produce. These are not measured reads: check them against the hands
-          before trusting them.</div>`;
-      button.textContent = "Generate again";
-      toggle.disabled = false;
-    } catch (err) {
-      if (err.needsKey) {
-        out.innerHTML = "";
-        out.appendChild(llmSetupForm(() => button.click()));
-        button.textContent = original;
-        toggle.disabled = true;
-      } else {
-        out.innerHTML = `<div class="small err">${esc(err.message)}</div>`;
-        button.textContent = original;
-        toggle.disabled = true;
-      }
-    }
-    button.disabled = false;
-  };
-}
-
-function llmSetupForm(onSave) {
-  /* Hosted: there is no ~/.villain/env inside the tab. The key stays in
-     this browser. A Gemini key is enough; an OpenAI-compatible URL is the
-     escape hatch for anything else. */
-  const wrap = document.createElement("div");
-  wrap.className = "llm-setup";
-  wrap.innerHTML = `<p class="small">This browser has no local model to call.
-      Paste an API key — a Gemini key is enough. Nothing is uploaded except
-      the numbers already on this page.</p>
-    <label class="small muted">API key</label>
-    <input type="password" name="key" autocomplete="off">
-    <label class="small muted">Endpoint <span class="muted">(optional)</span></label>
-    <input type="url" name="url" placeholder="Gemini by default" autocomplete="off">
-    <label class="small muted">Models <span class="muted">(optional, comma-separated)</span></label>
-    <input type="text" name="models" placeholder="gemini-flash-lite-latest, \u2026" autocomplete="off">
-    <button class="act small" type="button">Save and generate</button>`;
-  const saved = window.villainLlmConfig && window.villainLlmConfig.get();
-  if (saved) {
-    if (saved.key) wrap.querySelector("[name=key]").value = saved.key;
-    if (saved.url) wrap.querySelector("[name=url]").value = saved.url;
-    if (saved.models) wrap.querySelector("[name=models]").value = saved.models;
-  }
-  wrap.querySelector("button").onclick = () => {
-    const key = wrap.querySelector("[name=key]").value.trim();
-    if (!key) {
-      wrap.querySelector("[name=key]").focus();
-      return;
-    }
-    const url = wrap.querySelector("[name=url]").value.trim();
-    const models = wrap.querySelector("[name=models]").value.trim();
-    window.villainLlmConfig.set({
-      key, url: url || undefined, models: models || undefined,
-    });
-    onSave();
-  };
-  return wrap;
-}
-
-/* The trigger and what it produces are the same element.
-
-   Two earlier arrangements were each half right. A panel that existed only to
-   hold a button was a blank card below the fold on every profile. Moving the
-   button to the top of "What to do" fixed that and broke something worse: you
-   pressed a link in the header and the answer appeared several hundred pixels
-   further down, past four panels, with nothing to say it had. So the trigger
-   sits where the output belongs -- at the foot of the profile, which is where
-   an unmeasured suggestion should be -- and the row it lives in grows into the
-   panel rather than spawning one elsewhere. */
-function addSuggestTrigger(card, profile) {
-  const box = document.createElement("div");
-  box.className = "panel wide suggest";
-  const trigger = document.createElement("button");
-  trigger.className = "act small";
-  trigger.textContent = "Suggest additional exploits";
-  const lead = document.createElement("span");
-  lead.className = "small muted";
-  lead.textContent = "Not measured reads — a model reading the numbers on this page.";
-  box.append(trigger, lead);
-  trigger.onclick = () => {
-    box.classList.remove("suggest");
-    box.innerHTML = `<h2>Suggested exploits</h2>
-      <div class="panel-lead">Not measured reads — check them against the hands.</div>`;
-    const narrateBox = document.createElement("div");
-    narrateBox.className = "narrate";
-    box.appendChild(narrateBox);
-    buildNarrator(narrateBox, profile);
-    narrateBox.querySelector(".narrate-actions button").click();
-  };
-  card.appendChild(box);
-}
-
-/* The model returns bullets. Render them as a list rather than a wall of
-   text, and fall back to paragraphs if it ignored the instruction. */
-function renderBullets(text) {
-  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
-  const bullets = lines.filter(l => /^[-*\u2022]\s+/.test(l));
-  if (bullets.length < 2) {
-    return lines.map(l => `<p>${esc(l)}</p>`).join("");
-  }
-  const items = bullets
-    .map(l => `<li>${esc(l.replace(/^[-*\u2022]\s+/, ""))}</li>`).join("");
-  return `<ul class="suggested">${items}</ul>`;
 }
 
 /* ---- a strip of player tabs over one profile at a time ---- */
@@ -1310,6 +1167,7 @@ function wireImport() {
   if (!input || !status) return;
   const go = (files) => importFiles(files, status, async (summary) => {
     state.player = null;
+    state.roster = null;
     await viewPlayers();
     // Hands just arrived: Hero and Simulate may have become possible.
     paintTabs();
@@ -3169,7 +3027,15 @@ function showResult(result) {
 async function viewPlayers() {
   const view = $("#view");
   if (state.player) return viewPlayer(state.player);
-  const data = await get("/api/roster");
+  // Rebuilding the roster from Python is the slow call on this tab. Keep the
+  // last one so "all players" can paint immediately instead of looking dead
+  // while the same list is computed again. Anything that changes who is in
+  // the database drops it.
+  let data = state.roster;
+  if (!data) {
+    data = await get("/api/roster");
+    state.roster = data;
+  }
   state.heroId = data.hero_id;
   $("#meta").textContent = `${data.hands} hands \u00b7 ${data.players.length} players`;
   if (!data.players.length) {
@@ -3248,12 +3114,16 @@ async function viewPlayer(id) {
   const back = document.createElement("p");
   back.innerHTML = `<button class="linkbtn" id="back">\u2190 all players</button>`;
   view.appendChild(back);
-  $("#back").onclick = () => { state.player = null; viewPlayers(); };
+  $("#back").onclick = () => {
+    state.player = null;
+    if (state.roster) { viewPlayers(); return; }
+    renderWithSpinner();
+  };
 
   const holder = document.createElement("div");
   view.appendChild(holder);
   state.heroId = data.hero_id;
-  playerTabs(data.profiles, holder, {narrate: true, heroId: data.hero_id});
+  playerTabs(data.profiles, holder, {heroId: data.hero_id});
 
   // Accounts pooled into this player. A list, not a control surface: the
   // splitting moved into its own dialog behind the actions at the foot of the
@@ -3381,6 +3251,7 @@ function splitDialog(data) {
         modal.innerHTML = "";
         // Straight to whoever this just became: the point of splitting is to
         // look at them on their own.
+        state.roster = null;
         state.player = r.player_id;
         await viewPlayer(r.player_id);
       } catch (err) {
@@ -3401,53 +3272,36 @@ function splitDialog(data) {
 
 /* One click, not a typed phrase. Reset asks you to type the words because it
    costs every hand you have; this costs one identity and leaves the hands
-   behind, so the dialog says exactly what goes and what stays and takes a
-   press. */
+   behind. The veil stays up through the delete *and* the roster rebuild --
+   dismissing first left the profile on screen looking frozen. */
 function deleteDialog(data) {
   const modal = $("#modal");
-  const hands = (data.aliases || []).reduce((n, a) => n + (a.hands || 0), 0);
-  const accounts = (data.aliases || []).length;
-  modal.innerHTML = `<div class="veil"><div class="sheet">
-    <div class="spread"><h2 style="margin:0">Delete ${esc(data.display_name)}?</h2>
-      <button class="act" id="close">Close</button></div>
-    <div class="how-body">
-      <div class="howblock"><div class="howlabel">Goes</div>
-        <div>This player, the ${accounts} account${accounts === 1 ? "" : "s"}
-          pooled as them, their notes, and everything computed from
-          them \u2014 the read, the leaks, the rating.</div></div>
-      <div class="howblock"><div class="howlabel">Stays</div>
-        <div>Every stored hand, all
-          ${hands.toLocaleString()} of them. A hand belongs to a table, not to a
-          person, and the others who sat in it keep their samples. Their seats
-          simply stop being attributed to anybody.</div></div>
-      <div class="howblock"><div class="howlabel">If they come back</div>
-        <div>Importing hands with that account again makes a new player,
-          starting from nothing.</div></div>
-    </div>
-    <div class="row" style="justify-content:flex-end;margin-top:16px">
-      <button class="act" id="cancel-del">Cancel</button>
-      <button class="act danger" id="do-del">Delete player</button>
-    </div>
-    <div class="small err" id="del-err" style="margin-top:10px"></div>
-  </div></div>`;
-  const close = () => { modal.innerHTML = ""; };
-  $("#close").onclick = close;
-  $("#cancel-del").onclick = close;
-  $("#do-del").onclick = async () => {
-    const button = $("#do-del", modal);
-    button.disabled = true;
-    button.textContent = "Deleting\u2026";
-    try {
-      await post("/api/player/delete", {player_id: data.player_id});
-      close();
-      state.player = null;
-      await viewPlayers();
-    } catch (err) {
-      button.disabled = false;
-      button.textContent = "Delete player";
-      $("#del-err", modal).textContent = err.message || "could not delete";
-    }
+  const draw = (err) => {
+    modal.innerHTML = `<div class="veil"><div class="sheet">
+      <h2 style="margin-top:0">Delete ${esc(data.display_name)}?</h2>
+      <p>The profile goes. The hands stay.</p>
+      <div class="row" style="justify-content:flex-end;margin-top:16px">
+        <button class="act" id="cancel-del">Cancel</button>
+        <button class="act danger" id="do-del">Delete</button>
+      </div>
+      ${err ? `<div class="small err" style="margin-top:10px">${esc(err)}</div>` : ""}
+    </div></div>`;
+    $("#cancel-del").onclick = () => { modal.innerHTML = ""; };
+    $("#do-del").onclick = async () => {
+      const setBusy = showBusy("Deleting\u2026");
+      try {
+        await post("/api/player/delete", {player_id: data.player_id});
+        setBusy("Opening the roster\u2026", undefined);
+        state.player = null;
+        state.roster = null;
+        await viewPlayers();
+        modal.innerHTML = "";
+      } catch (e) {
+        draw(e.message || "could not delete");
+      }
+    };
   };
+  draw();
 }
 
 /* Destructive and irreversible, so it asks for the words rather than a click:
@@ -3477,7 +3331,7 @@ function confirmReset(data) {
     try {
       const result = await post("/api/reset", {confirm: "delete everything"});
       modal.innerHTML = "";
-      state.player = null; state.session = null;
+      state.player = null; state.session = null; state.roster = null;
       viewPlayers();
       paintTabs();               // an emptied database closes tabs again
       showResult({reset: result});

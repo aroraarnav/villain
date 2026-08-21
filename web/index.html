@@ -453,7 +453,7 @@
     //
     // Enforced here rather than in the Python: the same server module backs
     // `villain test` on a laptop, which has no accounts and must stay writable.
-    const GUEST_MAY_POST = /^\/api\/(sim\/|narrate)/;
+    const GUEST_MAY_POST = /^\/api\/sim\//;
 
     // Which writes actually change stored hands. /api/upload parses into memory
     // and stores nothing -- and the import sends one per batch of files, so
@@ -510,124 +510,6 @@
         }
       }
       return new Response(r.body, { status: r.status, headers: { "Content-Type": r.content_type } });
-    };
-
-    // The hosted page is Pyodide: urllib there has no ~/.villain/env and
-    // defaults to localhost Ollama, which is how the generate-exploits
-    // button came to ask you to start a local model. The HTTP happens here,
-    // on the page, where a stored key can actually reach Gemini. Python
-    // still builds the fact sheet and rejects invented figures.
-    const LLM_STORE = "villain.llm";
-    const GEMINI_MODELS = "gemini-flash-lite-latest,gemini-3.5-flash-lite,gemini-flash-latest";
-    const readLlm = () => {
-      try { return JSON.parse(localStorage.getItem(LLM_STORE) || "null"); }
-      catch { return null; }
-    };
-    window.villainLlmConfig = {
-      get: readLlm,
-      set: (cfg) => localStorage.setItem(LLM_STORE, JSON.stringify(cfg)),
-    };
-    const isGoogle = (url) => /generativelanguage\.googleapis\.com/.test(url || "");
-    const oneCompletion = async ({ url, model, key, system, facts }) => {
-      // Native Gemini from the browser: the OpenAI-compatible URL is what
-      // the CLI uses, but it does not send CORS headers. generateContent does.
-      if (!url || isGoogle(url)) {
-        const res = await realFetch(
-          "https://generativelanguage.googleapis.com/v1beta/models/"
-            + encodeURIComponent(model) + ":generateContent?key="
-            + encodeURIComponent(key),
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              system_instruction: { parts: [{ text: system }] },
-              contents: [{ role: "user", parts: [{ text: facts }] }],
-              generationConfig: { temperature: 0.3 },
-            }),
-          },
-        );
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          const msg = (data.error && data.error.message) || res.statusText;
-          const err = new Error(model + " returned " + res.status + ": " + msg);
-          err.status = res.status;
-          throw err;
-        }
-        const parts = (((data.candidates || [])[0] || {}).content || {}).parts || [];
-        const text = parts.map((p) => p.text || "").join("").trim();
-        if (!text) throw new Error("empty response");
-        return text;
-      }
-      const headers = { "Content-Type": "application/json" };
-      if (key) headers.Authorization = "Bearer " + key;
-      const res = await realFetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          model, temperature: 0.3,
-          messages: [{ role: "system", content: system },
-                     { role: "user", content: facts }],
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const msg = (data.error && data.error.message) || res.statusText;
-        const err = new Error(model + " returned " + res.status + ": " + msg);
-        err.status = res.status;
-        throw err;
-      }
-      const text = (((data.choices || [])[0] || {}).message || {}).content;
-      if (!text) throw new Error("empty response");
-      return text.trim();
-    };
-    window.villainNarrate = async (profile) => {
-      const cfg = readLlm();
-      if (!cfg || !cfg.key) {
-        const err = new Error("needs-key");
-        err.needsKey = true;
-        throw err;
-      }
-      const prepRes = await fetch("/api/narrate/prepare", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profile }),
-      });
-      const prep = await prepRes.json().catch(() => ({}));
-      if (!prepRes.ok) throw new Error(prep.error || "could not build the fact sheet");
-      const models = (cfg.models || GEMINI_MODELS).split(",").map((s) => s.trim()).filter(Boolean);
-      const url = cfg.url || "";
-      let lastErr;
-      let correction = "";
-      for (const model of models) {
-        for (let attempt = 0; attempt < 3; attempt++) {
-          try {
-            const text = await oneCompletion({
-              url, model, key: cfg.key, system: prep.system,
-              facts: prep.facts + correction,
-            });
-            const checkRes = await fetch("/api/narrate/check", {
-              method: "POST", headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ text, facts: prep.facts, model }),
-            });
-            const check = await checkRes.json().catch(() => ({}));
-            if (checkRes.ok) return { text: check.text, model: check.model };
-            if (check.invented && check.invented.length) {
-              correction = "\n\nIMPORTANT: a previous attempt was rejected for stating "
-                + "these numbers, which are not in the facts above: "
-                + check.invented.join(", ")
-                + ". Use only figures given above, or describe them in words.";
-              lastErr = new Error(check.error || "invented figures");
-              continue;
-            }
-            throw new Error(check.error || "check failed");
-          } catch (err) {
-            lastErr = err;
-            if (err.status === 401 || err.status === 404) throw err;
-            if (err.status === 429 && /quota/i.test(err.message || "")) break;
-            await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
-          }
-        }
-      }
-      throw lastErr || new Error("no response");
     };
 
     step("Opening the interface…", 92);

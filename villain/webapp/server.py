@@ -22,8 +22,6 @@ from ..glossary import payload as glossary_payload
 from ..glossary import stat_help
 from ..identity import auto_answers, session_questions
 from ..model import hand_from_dict
-from ..narrate import SYSTEM, Unavailable, fact_sheet, narrate, unsupported_numbers
-from ..narrate import enabled as narrator_enabled
 from ..parsers import UnknownFormat
 from ..replay import replay
 from ..stats import VS_HERO
@@ -262,7 +260,6 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/meta":
                 with Store(self.db_path) as store:
                     return self._send(200, {
-                        "narrator": narrator_enabled(),
                         "tabs": tab_availability(store),
                     })
             if path == "/api/glossary":
@@ -327,35 +324,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self._sim_next(body)
             if route == "/api/sim/analysis":
                 return self._sim_analysis(body)
-            if route == "/api/narrate":
-                try:
-                    result = narrate(body.get("profile") or {})
-                except Unavailable as exc:
-                    return self._send(503, {"error": str(exc)})
-                return self._send(200, {"text": result.text, "model": result.model})
-            if route == "/api/narrate/prepare":
-                # Fact sheet only. The hosted page cannot call an LLM from
-                # inside Pyodide -- urllib there has no ~/.villain/env and
-                # defaults to localhost -- so JavaScript does the HTTP and
-                # these two routes keep the arithmetic and the number-guard
-                # on the Python side.
-                return self._send(200, {
-                    "facts": fact_sheet(body.get("profile") or {}),
-                    "system": SYSTEM,
-                })
-            if route == "/api/narrate/check":
-                text = (body.get("text") or "").strip()
-                facts = body.get("facts") or ""
-                if not text:
-                    return self._send(400, {"error": "empty response"})
-                invented = unsupported_numbers(text, facts)
-                if invented:
-                    return self._send(422, {
-                        "invented": invented,
-                        "error": "model stated figures that are not in the data "
-                                 f"({', '.join(invented)}); discarded",
-                    })
-                return self._send(200, {"text": text, "model": body.get("model") or ""})
             if route == "/api/reset":
                 if body.get("confirm") != "delete everything":
                     return self._send(400, {"error": "reset not confirmed"})
