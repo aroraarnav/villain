@@ -11,6 +11,7 @@ rather than on the hosted page a week later.
 import importlib.util
 import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
@@ -27,10 +28,17 @@ BUILD = WEB / "build.py"
 #: instead, which is asserted below.
 UNSTAMPED = {"manifest.json"}
 
-#: Local files the browser is asked for by name. Anything matching this that is
-#: not in UNSTAMPED has to carry a stamp.
-ASSET = re.compile(r'["\'(]([a-z0-9][a-z0-9-]*\.(?:json|js|css|woff2|png))'
-                   r'(?![a-z0-9])((?:\?v=)?)', re.I)
+#: File extensions worth checking. Anything the browser fetches by name and
+#: caches.
+ASSET_SUFFIXES = (".json", ".js", ".css", ".woff2", ".png", ".ico", ".svg")
+
+#: Every URL-ish token: a quoted string, or the inside of a CSS ``url()``.
+#: Matching the *whole* reference rather than just the filename is what lets an
+#: absolute URL be checked. The first version keyed on a filename preceded by a
+#: quote, which silently skipped every ``https://<site>/og-image.png`` -- the
+#: form the Open Graph tags use, and exactly as able to 404 on deploy as a
+#: relative one.
+REFERENCE = re.compile(r'["\'(]\s*([^"\'()\s]+)\s*["\')]')
 
 
 def _build():
@@ -40,13 +48,44 @@ def _build():
     return mod
 
 
-def _referenced(text: str) -> list[tuple[str, str]]:
-    return [(m.group(1), m.group(2)) for m in ASSET.finditer(text)]
+def _own_host(text: str) -> str | None:
+    """The site's own hostname, from its canonical link rather than hardcoded."""
+    found = re.search(r'rel="canonical"\s+href="([^"]+)"', text)
+    return urlparse(found.group(1)).hostname if found else None
+
+
+def _referenced(text: str, own_host: str | None = None) -> list[tuple[str, str]]:
+    """``(filename, query)`` for every asset on this page the *we* have to ship.
+
+    Skips anything pointing at another host -- the auth client comes from a CDN
+    and is nobody's file to copy -- and treats an absolute URL back to our own
+    domain exactly like a relative one, because the browser does.
+    """
+    out = []
+    for match in REFERENCE.finditer(text):
+        raw = match.group(1)
+        parsed = urlparse(raw)
+        if parsed.scheme in ("data", "mailto"):
+            continue
+        if parsed.hostname and parsed.hostname != own_host:
+            continue                      # somebody else's CDN, not ours to ship
+        path = parsed.path or ""
+        if path.startswith(("/static/", "/api/")):
+            # Answered by the Python handler inside the page, not fetched from
+            # the static host: `/static/app.css` lives in the wheel. Nothing to
+            # copy, and nothing to cache-bust -- it never reaches the network.
+            continue
+        name = path.rsplit("/", 1)[-1]
+        if not name.lower().endswith(ASSET_SUFFIXES):
+            continue
+        out.append((name, "?v=" if parsed.query.startswith("v=") else ""))
+    return out
 
 
 @pytest.mark.parametrize("source", [BOOT, SHELL], ids=lambda p: p.name)
 def test_every_local_asset_url_is_cache_busted(source):
-    for name, query in _referenced(source.read_text()):
+    text = source.read_text()
+    for name, query in _referenced(text, _own_host(BOOT.read_text())):
         if name in UNSTAMPED:
             continue
         assert query == "?v=", (
@@ -92,8 +131,9 @@ def test_every_file_the_page_asks_for_is_one_the_build_produces():
     build = _build()
     copied = set(build.STAMPED) | set(build.COPIED)
     generated = {"manifest.json", "villain.db"}
+    own = _own_host(BOOT.read_text())
     for source in (BOOT, SHELL):
-        for name, _ in _referenced(source.read_text()):
+        for name, _ in _referenced(source.read_text(), own):
             if name in generated or name.endswith(".woff2"):
                 continue          # the faces are globbed out of the wheel's assets
             assert name in copied, (

@@ -34,7 +34,8 @@ STAMPED = ("index.html", "app-shell.js")
 
 #: Copied through untouched. They carry no placeholder because nothing in them
 #: names another asset -- the page and the shell own every URL between them.
-COPIED = ("config.js", "sync.js", "worker.js", "app-shell.css")
+COPIED = ("config.js", "sync.js", "worker.js", "app-shell.css",
+          "og-image.png", "robots.txt")
 
 
 def stamp_boot_page(text: str, stamp: str) -> str:
