@@ -1,21 +1,8 @@
 """Turning hands into the statistics a profile is built from.
 
-Every counter below names its denominator, because that is where trackers
-disagree. "3-bet 8%" means *of the times this player faced a single raise*, not
-of hands dealt.
-
-Three families of signal are collected:
-
-* **Frequencies** -- the tracker stats, split by street and by the size of the
-  bet faced. Size-split fold frequencies are where the money is: a player who
-  folds 42% to a half-pot bet and 71% to a pot-sized bet is two different
-  opponents depending on what you do.
-* **Sizings and timing** -- how big they bet and how long they took. Timing is
-  free information that no tracker in a home game is hiding, and it separates
-  players whose bet sizes are hand-dependent from those who use one size.
-* **Showdown truth** -- what they actually held. Rare (a villain shows maybe
-  one hand in eight) but it is the only unbiased look at the range behind their
-  frequencies, so it anchors the hand-strength model in :mod:`villain.reads`.
+Every counter names its denominator -- that is where trackers disagree.
+Frequencies (size-split fold rates are where the money is), sizings and
+timing, and showdown truth for the hand-strength model.
 """
 
 from __future__ import annotations

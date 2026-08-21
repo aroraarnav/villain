@@ -112,8 +112,6 @@ function bindTip(el, html) {
     tip.style.top = Math.max(8, top) + "px";
   };
   const hide = () => tip.classList.remove("on");
-  // Keyboard and touch reach it too: anchored to the element's own box, since
-  // there is no cursor to hang it off.
   const anchor = () => {
     const r = el.getBoundingClientRect();
     place(r.left + r.width / 2, r.bottom - 6);
@@ -121,21 +119,23 @@ function bindTip(el, html) {
   el.addEventListener("focus", anchor);
   el.addEventListener("blur", hide);
   el.addEventListener("touchstart", e => { e.preventDefault(); anchor(); }, {passive: false});
-  el.addEventListener("mousemove", e => {
-    tip.innerHTML = html; tip.classList.add("on");
-    const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
-    let x = e.clientX + pad, y = e.clientY + pad;
-    if (x + w > innerWidth - 8) x = e.clientX - w - pad;
-    if (y + h > innerHeight - 8) y = e.clientY - h - pad;
-    tip.style.left = x + "px"; tip.style.top = y + "px";
-  });
-  el.addEventListener("mouseleave", () => tip.classList.remove("on"));
+  el.addEventListener("mousemove", e => place(e.clientX, e.clientY));
+  el.addEventListener("mouseleave", hide);
 }
 function el(tag, attrs, parent) {
   const node = document.createElementNS(SVG, tag);
   for (const k in attrs) node.setAttribute(k, attrs[k]);
   if (parent) parent.appendChild(node);
   return node;
+}
+function openSheet(title, extraClass) {
+  const modal = $("#modal");
+  const sc = extraClass ? " " + extraClass : "";
+  modal.innerHTML = `<div class="veil"><div class="sheet${sc}">
+    <div class="spread"><h2 style="margin:0">${title}</h2>
+      <button class="act" id="close">Close</button></div></div></div>`;
+  $("#close").onclick = () => { modal.innerHTML = ""; };
+  return modal;
 }
 
 /* ---- the one mark this tool needs, over and over ----
@@ -415,12 +415,8 @@ function gtoExplainer() {
 }
 
 function openGtoModal(gto) {
-  const modal = $("#modal");
-  modal.innerHTML = `<div class="veil"><div class="sheet">
-    <div class="spread"><h2 style="margin:0">vs GTO — every stat</h2>
-      <button class="act" id="close">Close</button></div></div></div>`;
+  const modal = openSheet("vs GTO — every stat");
   $(".sheet", modal).appendChild(gtoRows(gto.rows));
-  $("#close").onclick = () => { modal.innerHTML = ""; };
 }
 
 /* A compact rating badge, `you N/100 GTO`, plus a link to the full row list --
@@ -442,21 +438,9 @@ function renderGtoBadge(gto) {
   return wrap;
 }
 
-/* ---- the profile card ----
-   One tile per question the reader is asking, each with its own function.
-   This was a single 554-line renderer feeding the Database, Sessions and Hero
-   tabs at once: every change to any one panel put all three at risk, and the
-   only way to find a section was to count braces. The sections were already
-   here -- each had its own comment block -- they just had no names.
-
-   `hero` means "this is you", which changes the wording rather than the shape. */
+/* Profile: one function per tile. `hero` changes the wording, not the shape. */
 
 function profileHead(p, isHero, hero) {
-  /* Identity on the left, the two figures that rank them on the right. */
-  // Header band: identity on the left, the two figures that rank them on the
-  // right. The old header was a name, one sentence and a link stacked in the
-  // top-left of a 195px card -- the number the whole page is about ("this
-  // player is worth 9.6 bb/100 to you") was a 12.5px caption further down.
   const head = document.createElement("div");
   head.className = "panel wide";
   head.innerHTML = `
@@ -486,26 +470,18 @@ function profileHead(p, isHero, hero) {
     $("#skill-ring", head).prepend(skillGauge(p.skill.score));
   }
   $("#worth-stat .k", head).appendChild(info(termTip("available")));
-  // The archetype essay goes behind a click, same words -- not on the first
-  // screen. A mid-session read that requires scrolling past two paragraphs of
-  // boilerplate before the first leak is one you will not use.
   if (!hero && p.plan) {
     const planLink = document.createElement("button");
     planLink.className = "linkbtn how-link";
     planLink.textContent = "How to play them";
     planLink.onclick = () => {
-      const modal = $("#modal");
-      modal.innerHTML = `<div class="veil"><div class="sheet">
-        <div class="spread"><h2 style="margin:0">How to play ${esc(p.name || p.archetype)}</h2>
-          <button class="act" id="close">Close</button></div>
-        <div class="how-body">${esc(p.plan)}</div></div></div>`;
-      $("#close").onclick = () => { modal.innerHTML = ""; };
+      openSheet(`How to play ${esc(p.name || p.archetype)}`);
+      $(".sheet").insertAdjacentHTML("beforeend",
+        `<div class="how-body">${esc(p.plan)}</div>`);
     };
     $(".read-copy", head).appendChild(planLink);
   }
 
-  // One rating panel rather than two peers: the skill components and the GTO
-  // rating are both 0-100 judgments of how well they play, and splitting them
   const badge = $("#skill-ring", head);
   bindTip(badge, p.skill.measured === false
     ? `<b>unknown</b><br>${termTip("unknown")}`
@@ -560,16 +536,11 @@ function profileHead(p, isHero, hero) {
     meta.appendChild(where);
   }
 
-  // Seven bars spanning 77-100 rank a player without telling you anything.
-  // Each component now carries what it measures, the figure behind it, and
   return head;
 }
 
 
 function skillPanel(p) {
-  /* One rating panel rather than two peers: the skill components and the GTO
-     rating are both 0-100 judgments of how well they play, and splitting them
-     across two tiles made the reader compare a bar chart with a badge. */
   const skillBox = document.createElement("div");
   skillBox.className = "panel wide p-skill";
   skillBox.innerHTML =
@@ -603,8 +574,6 @@ function skillPanel(p) {
     skillSide.appendChild(row);
   }
 
-  // The tile the screen exists for, and the only one wearing the primary
-  // surface. bb/100 available moved up into the header band, where it is a
   return skillBox;
 }
 
@@ -686,11 +655,8 @@ function whatToDoTile(p, hero, leaks) {
       link.className = "linkbtn how-link";
       link.textContent = "Why, and what not to do";
       link.onclick = () => {
-        const modal = $("#modal");
-        modal.innerHTML = `<div class="veil"><div class="sheet">
-          <div class="spread"><h2 style="margin:0">${esc(l.headline)}</h2>
-            <button class="act" id="close">Close</button></div>
-          <div class="how-body"></div></div></div>`;
+        const modal = openSheet(esc(l.headline));
+        $(".sheet", modal).insertAdjacentHTML("beforeend", `<div class="how-body"></div>`);
         const how = $(".how-body", modal);
         for (const [label, text] of whydont) {
           const block = document.createElement("div");
@@ -699,7 +665,6 @@ function whatToDoTile(p, hero, leaks) {
             <div>${esc(text)}</div>`;
           how.appendChild(block);
         }
-        $("#close").onclick = () => { modal.innerHTML = ""; };
       };
       numbers.appendChild(link);
     }
@@ -739,8 +704,6 @@ function whatToDoTile(p, hero, leaks) {
     leakBox.appendChild(block);
   }
 
-  // How they play *you*. Rendered only when there is something in it: most
-  // players against most opponents have no adjustment, and an empty panel
   return doBox;
 }
 
@@ -981,15 +944,11 @@ function keyNumbersTile(p, hero) {
     link.textContent = `See all ${ordered.length} numbers`;
     link.onclick = () => {
       _heroVoice = hero;
-      const modal = $("#modal");
-      modal.innerHTML = `<div class="veil"><div class="sheet">
-        <div class="spread"><h2 style="margin:0">Key numbers</h2>
-          <button class="act" id="close">Close</button></div>
-        <div class="modal-numbers"></div></div></div>`;
+      const modal = openSheet("Key numbers");
+      $(".sheet", modal).insertAdjacentHTML("beforeend", `<div class="modal-numbers"></div>`);
       const full = makeTable();
       fill(full, ordered);
       $(".modal-numbers", modal).appendChild(full);
-      $("#close").onclick = () => { modal.innerHTML = ""; };
     };
     $(".hud-actions", hudBox).appendChild(link);
   }

@@ -1,29 +1,9 @@
 """Turn a villain's measured profile into table decisions.
 
-The idea is simple and faithful: a frequency *is* a strength threshold. A player
-who folds 60% to flop bets folds their weakest 60%; one who opens 22% of hands
-opens their best 22%. So the policy ranks the current hand -- preflop by a
-static ranking, postflop by its percentile against every holding the board
-allows -- and acts on the villain's own measured frequency as the cut line.
-Loose players call wider, tight players fold more, aggressive ones bet and
-raise more, all straight out of their numbers.
-
-Two rankings, because one cannot. Opening is high-card heavy (22 is a button
-open, not an UTG open). Defending a blind is not: even a tight BB calls every
-pocket pair against a steal, and folds KTo before it folds 33. Chen's formula
-treated those as the same hand, so a monotonic top-X% defend folded 33
-three-handed -- a hand nobody who plays this game folds there. Combos are
-weighted (6/4/12), because "defends 45%" is a share of dealt hands, not of
-the 169 names.
-
-Betting is polarized once the frequency exceeds what value can explain. A
-maniac who c-bets 80% does not have the best 80%; they have a value slice and
-the rest is air. Betting only the top taught folding to aggression, which is
-the opposite of the exploit. A nit who bets 30% still only bets the top 30%.
-
-It is a heuristic, not a solver: it reproduces how a villain *tends* to play,
-so you can get reps against people who play like them. A little noise on the
-cut keeps it from folding the exact same hand every time.
+A frequency is a strength threshold: fold 60% means fold the weakest 60%.
+Preflop uses a static ranking (open vs defend are different); postflop uses
+percentile vs the board. Betting polarizes once the frequency exceeds what
+value can explain. Heuristic, not a solver -- plus a little noise on the cut.
 """
 
 from __future__ import annotations

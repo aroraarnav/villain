@@ -1,36 +1,10 @@
 """Whether a player treats you differently from everybody else.
 
-The rest of this package shrinks a player toward a population: what people in
-general do at this table size. That is the right prior for "what is he like".
-It is the wrong one for "what is he like *against me*", because the population
-has never played you. The prior that question wants is the player himself.
-
-So an adjustment is a third level of the same arithmetic. Population, then the
-player, then the player against you:
-
-* the **baseline** is his rate against everyone else -- the pooled counter with
-  the against-you slice *subtracted out*, shrunk toward the population as
-  usual. Subtracting matters. The slice is inside the pooled total, so
-  comparing it against the total compares a number with something that
-  contains it, and the difference shrinks toward nothing exactly when the
-  sample is large enough to be worth reading. :meth:`Store.session_detail`
-  takes a session's baseline from the player's *other* hands for the same
-  reason;
-* the **against-you estimate** is the slice, shrunk toward that baseline;
-* the **read** is what is left: how far the slice moved off his own baseline,
-  and how sure the posterior is about the direction.
-
-Nothing here compares him to the field. Folding 70% to your river bets is not
-interesting because 70% is high; it is interesting because he folds 45% to
-everyone else's.
-
-**Table size is handled the way the rest of the package handles it.** Raw
-counts are never pooled across regimes -- an opponent you mostly play heads-up
-would show an against-you "adjustment" that is nothing but the table size.
-Instead each regime's slice is measured against *that regime's* baseline, and
-the deviation, which is the part that carries, is re-expressed on the primary
-table's scale before it is added in. That is :func:`villain.profile.
-_translate_rate` with the player's own baseline in place of the population.
+The prior for "against me" is the player, not the field: subtract the
+against-you slice out of their pooled counter, shrink the slice toward that
+baseline, and report the deviation. Per table size, then translated onto the
+primary table -- pooling raw counts invents an adjustment that is just HU vs
+6-max.
 """
 
 from __future__ import annotations

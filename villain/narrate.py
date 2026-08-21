@@ -1,36 +1,10 @@
 """Optional plain-English summary from a local language model.
 
-Everything else in this project is deterministic, and that is a feature: the
-same hands always produce the same read, and no number on screen came from
-anywhere but the arithmetic. This module is the one exception, so it is fenced
-in accordingly.
-
-**It is off unless asked for.** No key, no model, no network call, no import of
-anything outside the standard library. With nothing configured the tool behaves
-exactly as it did before.
-
-**It talks to any OpenAI-compatible ``/chat/completions`` endpoint.** A local
-Ollama is the default because it is free, offline, and keeps hand histories on
-the machine that recorded them. A hosted free tier works the same way by
-pointing ``VILLAIN_LLM_URL`` at it -- at the cost of sending opponent profiles
-to somebody else, which is worth knowing before you switch.
-
-**Credentials live outside the repository.** Settings are read from the
-environment, falling back to ``~/.villain/env``, which is deliberately *not* in
-the project directory: a key that never sits under the working tree cannot be
-committed by an absent-minded ``git add -A``. The file is a plain list of
-``NAME=value`` lines and should be readable only by its owner.
-
-**It may not invent numbers.** The model is given a fact sheet built from the
-computed profile and asked to explain it; the output is then checked, and any
-figure that does not appear in the facts causes the whole response to be
-discarded in favor of the static text. A model that rounds 51% to "about half"
-is fine; a model that decides they fold 70% is not, and there is no way to tell
-which happened by reading the prose. So the check is mechanical.
-
-The value this adds over :mod:`villain.playbook` is synthesis: joining several
-findings into one paragraph about this specific player. It is a nicety on top
-of the written playbook, never a replacement for it.
+Off unless configured. Talks to any OpenAI-compatible ``/chat/completions``
+endpoint. Settings from the environment, then ``~/.villain/env`` (outside the
+repo, so a key cannot be committed). Output is checked against the fact sheet
+-- invented figures are discarded. Synthesis on top of the playbook, never a
+replacement for it.
 """
 
 from __future__ import annotations

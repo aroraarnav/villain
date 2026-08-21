@@ -1,51 +1,9 @@
 """What only your own hand history can tell you.
 
-Every read elsewhere in this project is inference: a villain's range is a
-guess built from how often they bet, weighted toward showdown because that is
-the only time their cards are ever known -- one villain shows a hand in maybe
-eight. Hero has no such gap. The exporting player's hole cards are visible on
-essentially every hand, fold or not, showdown or not -- 98.8% of 6,433 hands
-in the live database. Two things become possible that are structurally
-impossible for anyone else at the table:
-
-* **A real preflop range.** Villains' folded hands are never seen, so their
-  range is reconstructed from aggregate frequencies -- VPIP, PFR, 3-bet -- and
-  a prototype's guess at the shape behind them. Hero's is not reconstructed.
-  It is counted, hand by hand, from what was actually held.
-* **Fold quality, not just fold frequency.** The rest of the tool prices a
-  fold *rule* from how often somebody folds against a bet size, because that
-  is all it can measure of a villain -- and it deliberately measures against
-  a fixed reference (see :data:`villain.profile.CORRECT_FOLD`) rather than
-  claiming to know any individual fold was wrong. Hero's individual folds can
-  be graded, because the hand is known: given what you actually had and what
-  it cost to continue, was folding right, on that specific hand?
-* **Missed value, the mirror of fold quality.** A check is the same kind of
-  question asked the other way: was the hand behind it strong enough that
-  betting would have made more money? Just as unanswerable for a villain, for
-  the same reason -- their checks are never revealed either.
-* **Whether hero's own bet sizing is a tell.** Does the size of the bet
-  change with the strength of the hand behind it? Nobody else's hand
-  strength is known widely enough to ask this about a villain, but hero's is
-  known on every single bet, not just the ones that reached showdown.
-* **Whether hero's own timing is a tell.** Same question, asked of think
-  time instead of bet size: does hero take longer with one half of the
-  strength range than the other?
-* **Whether hero's range actually narrows.** A continuing range is supposed
-  to get stronger street by street as the wide ones give up along the way --
-  average hand strength among hands still live, by street, says whether
-  hero's actually does.
-
-All of these use the same building block :func:`villain.reads.strength_by_street`
-already computes for the population model. This module points it at hero
-specifically, including the folds, the checks, and the sizing the population
-model has no way to see.
-
-Everything above needs one fact first: which of the seats is hero's.
-:func:`find_hero` answers it for a database, from the same visibility that
-makes the rest of this module possible. :func:`hero_of` answers it for a list
-of hands, which is what the statistics and the evidence behind them are
-extracted from, before anything has been saved -- and prefers the export's own
-word for it where a site gives one.
+Villains' cards show at showdown; the exporter's hole cards are visible on
+almost every hand. That makes a counted preflop range, graded folds, missed
+value, and sizing/timing tells possible -- none of which a villain profile
+can honestly claim. :func:`find_hero` picks the seat; the rest hangs off it.
 """
 
 from __future__ import annotations

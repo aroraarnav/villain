@@ -1,18 +1,9 @@
 """Recognizing a player you have seen before.
 
-Home games are full of the same humans under slightly different names --
-``PlayerK`` becomes ``PlayerK2`` after a reconnect, and a profile that
-restarts each time is worthless. Two independent signals are combined:
-
-* **Name similarity**, after stripping the noise accounts accumulate: case,
-  punctuation, and trailing digits. ``PlayerG`` and ``PlayerG2`` normalize to the
-  same string. Only a high name match is offered as a possible merge; play
-  style is not used — two tight-passives looking alike is not evidence they
-  are one person.
-
-One hard constraint overrides both: accounts dealt into the same hand are
-different people, whatever their names look like. Those pairs are recorded at
-import time and can never be linked.
+Name similarity after stripping case, punctuation and trailing digits, plus
+a hard constraint: accounts dealt into the same hand are different people.
+Play style is not used -- two tight-passives looking alike is not evidence
+they are one person.
 """
 
 from __future__ import annotations

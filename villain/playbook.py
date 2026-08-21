@@ -1,33 +1,8 @@
 """What each leak means, in words a player can act on.
 
-:mod:`villain.exploits` decides *whether* a tendency is exploitable. This module
-says what to do about it. They are kept apart because they change for different
-reasons: the arithmetic moves when the maths is wrong, the language moves when a
-human reads it and is confused.
-
-Every entry answers four questions, in the order a player needs them:
-
-``behavior``
-    What this person is actually doing at the table, described as behavior
-    rather than as a statistic. "They fold the turn whenever they miss" is
-    usable at the table; "fold_vs_bet:turn 61%" is not.
-``why``
-    The mechanism. Why does this cost them money and hand it to you? Tied to
-    the breakeven arithmetic wherever possible, because that is where the edge
-    actually comes from and a player who understands it can adapt when the
-    number shifts.
-``do``
-    Concrete actions, with streets and sizes. Something executable on the next
-    hand, not a principle to bear in mind.
-``dont``
-    The counter-mistake. This is the field most tools omit and the one that
-    saves the most money: nearly every way of losing money to a correct read
-    is an over-adjustment. Knowing somebody folds too much does not mean
-    betting every chip you have.
-
-The tone is deliberately flat. This gets read between hands by somebody who is
-also playing poker, so no throat-clearing and no hedging that does not carry
-information.
+:mod:`villain.exploits` decides whether a tendency is exploitable. This module
+says what to do. Four fields, in the order a player needs them: ``behavior``,
+``why``, ``do``, ``dont`` (the counter-mistake -- usually an over-adjustment).
 """
 
 from __future__ import annotations
