@@ -54,8 +54,8 @@ class _BridgeHandler(Handler):
         self.result: tuple[int, bytes, str] | None = None
 
     def _send(self, code: int, payload, content_type: str = "application/json"):
-        import json
-        body = payload if isinstance(payload, (bytes, bytearray)) else json.dumps(payload).encode()
+        from .jsonutil import encode
+        body = encode(payload)
         self.result = (code, bytes(body), content_type)
 
 
@@ -107,10 +107,9 @@ def build_hero(progress=None) -> dict:
     counted -- fitting the trees, where the only true thing to report is that
     it is still going.
     """
-    import json
-
     from ..db import Store
     from .heroview import hero_payload
+    from .jsonutil import dumps
 
     def report(done, total, phase):
         if progress is not None:
@@ -123,8 +122,8 @@ def build_hero(progress=None) -> dict:
     with Store(Handler.db_path) as store:
         payload = hero_payload(store, progress=report)
     return {"status": 200 if payload is not None else 404,
-            "body": json.dumps(payload if payload is not None else
-                               {"error": "Could not identify hero automatically -- "
-                                         "no player has cards known on enough of their "
-                                         "own hands."}),
+            "body": dumps(payload if payload is not None else
+                          {"error": "Could not identify hero automatically -- "
+                                    "no player has cards known on enough of their "
+                                    "own hands."}),
             "content_type": "application/json"}

@@ -48,7 +48,7 @@
     background: #e5645a; color: #0b0c0e; padding: .32rem;
   }
   #boot p.sub { color: #93938e; margin: 0 0 1.5rem; }
-  #boot.gate p.sub { margin: 0 0 2.25rem; }
+  #boot.gate p.sub { margin: 0 0 1.75rem; }
   #step { color: #c9c8c3; min-height: 1.4em; }
   #bar { height: 4px; border-radius: 4px; background: #24272b; margin: 1.2rem 0 .4rem; overflow: hidden; }
   #bar > i { display: block; height: 100%; width: 0; background: #e5645a; transition: width .3s ease; }
@@ -60,17 +60,20 @@
   #gate { display: none; }
   #boot.gate #gate { display: block; }
   #boot.gate #step, #boot.gate #bar, #boot.gate #note { display: none; }
-  #gate form { display: flex; gap: .5rem; margin: 0 0 .9rem; }
+  #gate form { display: flex; gap: .5rem; margin: 0; }
   #gate input {
-    flex: 1; font: inherit; font-size: .92rem; padding: .6rem .9rem;
+    flex: 1; min-width: 0; font: inherit; font-size: .92rem; padding: .65rem .95rem;
     border: 1px solid #4b5058; border-radius: 999px;
     background: #141619; color: #f2f1ee;
   }
   #gate input:focus { outline: none; border-color: #e5645a; }
+  #gate input:disabled { opacity: .55; }
   #gate button {
-    font: inherit; font-size: .92rem; padding: .6rem 1.1rem; cursor: pointer;
+    font: inherit; font-size: .92rem; padding: .65rem 1.15rem; cursor: pointer;
     border-radius: 999px; border: 1px solid #e5645a; background: #e5645a; color: #fff;
     white-space: nowrap; font-weight: 600;
+    display: inline-flex; align-items: center; justify-content: center; gap: .45rem;
+    min-width: 10.4rem;
   }
   #gate button:hover:not(:disabled) { background: #c9524a; border-color: #c9524a; }
   #gate button:disabled { opacity: .6; cursor: default; }
@@ -84,29 +87,31 @@
   }
   #gate .ghost {
     background: transparent; color: #c9c8c3; border-color: #4b5058;
-    font-weight: 500; width: 100%;
+    font-weight: 500; width: 100%; min-width: 0;
   }
   #gate .ghost:hover { background: transparent; border-color: #93938e; color: #f2f1ee; }
-  #gate .why { color: #6f6e6b; font-size: .78rem; margin: 1.5rem 0 0; }
-  #gate .said { color: #93938e; font-size: .84rem; min-height: 1.3em; margin: 0 0 .5rem; }
+  #gate .why { color: #6f6e6b; font-size: .78rem; margin: 1.35rem 0 0; }
+  #gate .said { color: #93938e; font-size: .84rem; margin: .7rem 0 0; }
+  #gate .said:empty { display: none; }
   #gate .said.bad { color: #e5484d; }
-  #gate .loading { color: #4b5058; font-size: .72rem; margin-top: .9rem; }
+  #gate .said.ok { color: #c9c8c3; }
+  #gate .loading { color: #e5484d; font-size: .78rem; margin-top: 1.25rem; }
 
-  /* Sending is a network round trip with nothing to show for it until it
-     lands, so the gate holds still rather than inviting a second press.
-     Same spinner as the rest of the tool: 2px ring, red leading edge. */
-  #boot.sending #gate form, #boot.sending #gate .or,
-  #boot.sending #gate .ghost, #boot.sending #gate .why { opacity: .3; pointer-events: none; }
-  #gate .waiting { display: none; align-items: center; justify-content: center; gap: .6rem;
-    color: #93938e; font-size: .88rem; margin: .35rem 0 0; }
-  #boot.sending #gate .waiting { display: flex; }
-  #gate .spinner {
-    width: 18px; height: 18px; flex: none; border-radius: 50%;
-    border: 2px solid #24272b; border-top-color: #e5645a;
+  /* Sending lives in the button, not as a second status under the form. */
+  #gate .spin {
+    display: none; width: 14px; height: 14px; flex: none; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,.28); border-top-color: #fff;
     animation: gatespin .7s linear infinite;
   }
+  #boot.sending #gate .spin { display: block; }
+  #boot.sending #gate button:disabled { opacity: 1; }
+  #boot.sent #signin, #boot.sent .or { display: none; }
   @keyframes gatespin { to { transform: rotate(360deg); } }
-  @media (prefers-reduced-motion: reduce) { #gate .spinner { animation-duration: 2.4s; } }
+  @media (prefers-reduced-motion: reduce) { #gate .spin { animation-duration: 2.4s; } }
+  @media (max-width: 440px) {
+    #gate form { flex-direction: column; }
+    #gate button { width: 100%; }
+  }
 </style>
 </head>
 <body>
@@ -118,16 +123,15 @@
   <p class="sub">Reads poker hand histories and tells you how to beat the people you play against.</p>
 
   <div id="gate">
-    <p class="said" id="said"></p>
     <form id="signin">
       <input type="email" name="email" placeholder="you@email.com" autocomplete="email" required>
-      <button type="submit">Email me a link</button>
+      <button type="submit"><span class="spin" aria-hidden="true"></span><span class="label">Email me a link</span></button>
     </form>
+    <p class="said" id="said" role="status"></p>
     <div class="or">or</div>
     <button type="button" class="ghost" id="demo">View the demo</button>
     <p class="why">Hands are parsed in your browser, never uploaded. The demo is read-only.</p>
-    <p class="waiting"><span class="spinner"></span>Sending your link…</p>
-    <p class="loading" id="loading">Loading the runtime…</p>
+    <p class="loading" id="loading" hidden></p>
   </div>
 
   <div id="step">Starting…</div>
@@ -240,12 +244,21 @@
     const said = document.getElementById("said");
     const form = document.getElementById("signin");
     const loading = document.getElementById("loading");
+    const submit = form.querySelector("button[type='submit']");
+    const label = form.querySelector(".label");
     boot.classList.add("gate");
 
-    runtime.then(() => { loading.textContent = "Ready."; },
-                 () => { loading.textContent = "The runtime failed to load — try a hard refresh."; });
+    runtime.then(() => {},
+                 () => {
+                   loading.hidden = false;
+                   loading.textContent = "The runtime failed to load — try a hard refresh.";
+                 });
 
-    const say = (text, bad) => { said.textContent = text; said.classList.toggle("bad", !!bad); };
+    const say = (text, bad) => {
+      said.textContent = text;
+      said.classList.toggle("bad", !!bad);
+      said.classList.toggle("ok", !bad && !!text);
+    };
     if (signInError) say(signInError, true);
 
     form.onsubmit = async (event) => {
@@ -254,16 +267,21 @@
       if (!email) return;
       say("");
       boot.classList.add("sending");
+      boot.classList.remove("sent");
+      form.email.disabled = true;
+      submit.disabled = true;
+      label.textContent = "Sending";
       try {
         await sync.sendLink(email);
-        // Left in the sending state on purpose: the next thing that should
-        // happen is the visitor leaving for their inbox, not pressing again.
-        say("Check your email.");
         boot.classList.remove("sending");
-        form.querySelector("button").disabled = true;
+        boot.classList.add("sent");
+        say("Check your inbox — we sent a link to " + email + ".");
       } catch (err) {
-        say(err.message, true);
         boot.classList.remove("sending");
+        form.email.disabled = false;
+        submit.disabled = false;
+        label.textContent = "Email me a link";
+        say(err.message, true);
       }
     };
     document.getElementById("demo").onclick = () => {
@@ -669,25 +687,29 @@
       .guestbar button {
         font: inherit; font-size: 12.5px; border: 1px solid var(--red); background: transparent;
         color: var(--ink); border-radius: 999px; padding: 5px 12px; cursor: pointer;
-        white-space: nowrap;
+        white-space: nowrap; display: inline-flex; align-items: center; gap: 8px;
       }
       .guestbar button:hover:not(:disabled) { background: var(--red); color: #fff; }
       .guestbar button:disabled { opacity: .6; cursor: default; }
       .guestbar .formnote { color: var(--muted); font-size: 12.5px; }
+      .guestbar .formnote:empty { display: none; }
       .guestbar .formnote.bad { color: var(--red); }
-      .guestbar .signin.sending input, .guestbar .signin.sending button { opacity: .4; }
-      .guestbar .signin.sending::after {
-        content: ""; width: 15px; height: 15px; flex: none; border-radius: 50%;
+      .guestbar .spin {
+        display: none; width: 12px; height: 12px; flex: none; border-radius: 50%;
         border: 2px solid var(--line); border-top-color: var(--red);
         animation: gatespin .7s linear infinite;
       }
+      .guestbar .signin.sending .spin { display: block; }
+      .guestbar .signin.sending button:disabled { opacity: 1; }
+      .guestbar .signin.sending input { opacity: .55; pointer-events: none; }
       @keyframes gatespin { to { transform: rotate(360deg); } }
       @media (prefers-reduced-motion: reduce) {
-        .guestbar .signin.sending::after { animation-duration: 2.4s; }
+        .guestbar .spin { animation-duration: 2.4s; }
       }
     `;
     document.head.appendChild(style);
 
+    window.villainGuest = !!(authOn && !user);
     const script = document.createElement("script");
     script.textContent = js;
     document.body.appendChild(script);
@@ -753,12 +775,12 @@
         const bar = document.createElement("div");
         bar.className = "guestbar";
         bar.innerHTML = "<span>You are looking at a <b>sample database</b>. "
-          + "Sign in to import your own hand histories and keep them across devices "
-          + "— your hands stay yours, and nobody else's are pooled with them.</span>";
+          + "Sign in to import your own hand histories and keep them across devices.</span>";
         const form = document.createElement("form");
         form.className = "signin";
         form.innerHTML = '<input type="email" name="email" placeholder="you@email" '
-          + 'autocomplete="email" required><button type="submit">Email me a link</button>';
+          + 'autocomplete="email" required><button type="submit">'
+          + '<span class="spin" aria-hidden="true"></span><span class="label">Email me a link</span></button>';
         bar.append(form);
         const nav = document.querySelector("nav");
         if (nav) nav.insertAdjacentElement("afterend", bar);
@@ -775,15 +797,21 @@
           const email = form.email.value.trim();
           if (!email) return;
           const submit = form.querySelector("button");
+          const btnLabel = form.querySelector(".label");
           submit.disabled = true;
+          form.email.disabled = true;
           form.classList.add("sending");
+          btnLabel.textContent = "Sending";
           say("", false);
           try {
             await sync.sendLink(email);
-            say("Check your email.", false);
+            say("Check your inbox.", false);
+            btnLabel.textContent = "Sent";
           } catch (err) {
             say(err.message, true);
             submit.disabled = false;
+            form.email.disabled = false;
+            btnLabel.textContent = "Email me a link";
           }
           form.classList.remove("sending");
         };
@@ -800,17 +828,31 @@
           form.email.focus();
         };
 
-        // Catch "Add hands" before the file picker rather than after it. The
-        // guard behind it would refuse the upload anyway, but only once
-        // somebody had already chosen the files.
-        const stopAdd = (event) => {
-          const add = event.target.closest && event.target.closest("#db-add");
-          if (!add) return;
+        // Catch writes before they open a picker or a confirm dialog. The
+        // fetch guard would refuse them anyway, but only after the guest had
+        // already chosen files or typed "delete everything".
+        const stopWrite = (event) => {
+          const hit = event.target.closest && event.target.closest(
+            "#db-add, #reset, #db-drop, #drop, #save, .player-actions button");
+          if (!hit) return;
           event.preventDefault();
           event.stopImmediatePropagation();
           promptSignIn();
         };
-        document.addEventListener("click", stopAdd, true);
+        document.addEventListener("click", stopWrite, true);
+        document.addEventListener("drop", (event) => {
+          if (!(event.dataTransfer && event.dataTransfer.files
+                && event.dataTransfer.files.length)) return;
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          promptSignIn();
+        }, true);
+        document.addEventListener("dragover", (event) => {
+          if (event.dataTransfer
+              && [...event.dataTransfer.types].includes("Files")) {
+            event.preventDefault();
+          }
+        }, true);
       }
       header.insertBefore(chip, theme);
     }

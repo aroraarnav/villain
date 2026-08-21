@@ -381,6 +381,11 @@
   button.act.primary:hover:not(:disabled) { opacity: .88; }
   button.act.small { font-size: 11px; }
   button.act:disabled { opacity: .45; cursor: default; }
+  .guest-lock { display: inline-flex; cursor: help; }
+  .guest-lock > * { pointer-events: none; }
+  button.linkbtn:disabled { opacity: .45; cursor: help; }
+  .drop.locked { opacity: .45; cursor: help; }
+  .drop.locked:hover, .drop.locked.over { border-color: var(--edge); color: var(--muted); }
   button.act.danger { border-color: var(--danger); color: var(--danger); }
   button.act.danger:hover:not(:disabled) {
     background: var(--danger); color: var(--panel); border-color: var(--danger);

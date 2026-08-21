@@ -315,14 +315,29 @@ class Estimate:
     def confident(self) -> bool:
         return self.weight >= 0.5
 
+    def _beta_prob(self, threshold: float, above: bool, *, prior: bool = False) -> float:
+        """A finite probability. scipy's Beta is undefined at α/β = 0.
+
+        A 0-hit book (or a fitted prior of 0) would otherwise yield NaN, which
+        ``json.dumps`` writes as the token NaN and the browser cannot parse —
+        Database and Simulate both died that way on the demo roster.
+        """
+        from scipy.stats import beta as _beta
+        if prior:
+            a = self.prior * self.strength
+            b = (1.0 - self.prior) * self.strength
+        else:
+            a, b = self.alpha, self.beta
+        a, b = max(float(a), 1e-6), max(float(b), 1e-6)
+        p = float(_beta.sf(threshold, a, b) if above else _beta.cdf(threshold, a, b))
+        return p if math.isfinite(p) else 0.0
+
     def prob_above(self, threshold: float) -> float:
         """Posterior probability the true frequency exceeds ``threshold``."""
-        from scipy.stats import beta as _beta
-        return float(_beta.sf(threshold, self.alpha, self.beta))
+        return self._beta_prob(threshold, True)
 
     def prob_below(self, threshold: float) -> float:
-        from scipy.stats import beta as _beta
-        return float(_beta.cdf(threshold, self.alpha, self.beta))
+        return self._beta_prob(threshold, False)
 
     def prior_prob_above(self, threshold: float) -> float:
         """What we would have believed with no hands on this player at all.
@@ -330,16 +345,10 @@ class Estimate:
         Compared against :meth:`prob_above`, this is how much the *data* moved
         the answer -- the only part of a read that was actually earned.
         """
-        from scipy.stats import beta as _beta
-        a = max(self.prior * self.strength, 1e-6)
-        b = max((1 - self.prior) * self.strength, 1e-6)
-        return float(_beta.sf(threshold, a, b))
+        return self._beta_prob(threshold, True, prior=True)
 
     def prior_prob_below(self, threshold: float) -> float:
-        from scipy.stats import beta as _beta
-        a = max(self.prior * self.strength, 1e-6)
-        b = max((1 - self.prior) * self.strength, 1e-6)
-        return float(_beta.cdf(threshold, a, b))
+        return self._beta_prob(threshold, False, prior=True)
 
     def __format__(self, spec: str) -> str:
         return f"{100 * self.value:.0f}%"
