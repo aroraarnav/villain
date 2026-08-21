@@ -224,8 +224,8 @@ and no figure on screen came from anywhere but the arithmetic. One optional
 extra sends the finished profile to a language model and asks for exploits the
 rule engine missed: the rules only fire on patterns somebody thought to encode,
 while a model reading the same numbers can combine them and reach spots no
-single rule covers. It is the **generate additional exploits** button on a
-player's page, and it returns bullets, not prose.
+single rule covers. It is `villain profile NAME --narrate`, and it returns
+bullets, not prose.
 
 Off unless configured. Settings come from the environment, falling back to
 **`~/.villain/env`** -- a plain `NAME=value` file, deliberately outside the
@@ -259,8 +259,8 @@ VILLAIN_LLM_KEY=your-key-here
 when one is out of quota another usually answers at once -- a second name
 recovers faster than any retry, because a spent quota does not clear inside a
 backoff. Small models are enough for short bullets built from a fact sheet, and
-they carry the roomier quotas, which is what decides whether the button works
-when you press it. Transient failures (429, 5xx, timeouts) retry with backoff
+they carry the roomier quotas, which is what decides whether `--narrate` works
+when you run it. Transient failures (429, 5xx, timeouts) retry with backoff
 and honor `Retry-After`; 401 and 404 raise at once, since retrying those only
 delays the same answer. Use floating aliases like `gemini-flash-lite-latest`:
 pinned Gemini versions retire and start returning 404 to a tool that worked

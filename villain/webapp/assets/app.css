@@ -1129,33 +1129,6 @@
   .timing-cell.thin { cursor: help; }
   .timing-cell.thin .tell { color: var(--edge); font-weight: 500; }
   .timing-cell.on { box-shadow: inset 2px 0 0 var(--red); }
-  .narration { margin-top: 10px; max-width: none; }
-  .narration.hidden { display: none; }
-  .narration blockquote {
-    margin: 0 0 6px; padding: 0 0 0 13px; border-left: 2px solid var(--red);
-  }
-  .narration ul.suggested { margin: 4px 0; padding-left: 0; list-style: none; }
-  .narration ul.suggested li {
-    position: relative; padding: 0 0 0 16px; margin: 0 0 10px; max-width: none;
-  }
-  .narration ul.suggested li::before {
-    content: "\2013"; position: absolute; left: 0; color: var(--red);
-  }
-  /* At rest this is one line, not a card with a hole in it: the button and the
-     sentence that qualifies it, nothing else. Pressing it turns this same
-     element into the panel, so the answer arrives where the click was. */
-  .panel.suggest {
-    display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
-    background: transparent; border-style: dashed;
-  }
-  .narrate-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-  .llm-setup { display: flex; flex-direction: column; gap: 6px; max-width: 28rem; margin-top: 8px; }
-  .llm-setup p { margin: 0 0 6px; }
-  .llm-setup input {
-    font: inherit; background: transparent; border: 1px solid var(--edge);
-    border-radius: 8px; color: var(--ink); padding: 8px 10px;
-  }
-  .llm-setup label { margin-top: 4px; }
   .rank { font-variant-numeric: tabular-nums; color: var(--muted); width: 22px; }
   .ev { display: grid; grid-template-columns: minmax(200px, auto) 1fr auto; gap: 12px;
         align-items: center; padding: 8px 0 8px 8px;
