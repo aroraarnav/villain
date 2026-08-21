@@ -735,12 +735,12 @@
         status.classList.toggle("bad", text.startsWith("Not saved"));
       };
 
-      const button = document.createElement("button");
-      button.type = "button";
       if (user) {
         const who = document.createElement("span");
         who.className = "who";
         who.textContent = user.name || "signed in";
+        const button = document.createElement("button");
+        button.type = "button";
         button.textContent = "Sign out";
         button.onclick = async () => {
           // Session first, files second. A reload that raced sign-out used
@@ -764,7 +764,7 @@
       } else {
         const who = document.createElement("span");
         who.className = "who";
-        who.textContent = "not signed in";
+        who.textContent = "Not signed in";
         chip.append(status, gauge, who);
         if (signInError) saveNote(signInError);
 
