@@ -610,6 +610,11 @@
                font-variant-numeric: tabular-nums; min-width: 58px; }
   .presets { display: flex; gap: 4px; }
   .handlog { margin-top: 14px; max-height: 118px; overflow-y: auto; line-height: 1.6; }
+  .range-review { margin-top: 10px; line-height: 1.55; }
+  .range-review > div { margin-bottom: 4px; }
+  .lessons { margin: 16px 0 4px; display: flex; flex-direction: column; gap: 8px; }
+  .lesson { padding: 8px 12px; border-left: 3px solid var(--accent);
+            background: var(--accent-soft); border-radius: 0 8px 8px 0; }
   .pick-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
                gap: var(--sp-2); margin-bottom: var(--sp-4); }
   .pick-list > .loading { grid-column: 1 / -1; }

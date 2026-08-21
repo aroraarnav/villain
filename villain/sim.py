@@ -80,6 +80,7 @@ class Game:
         self.button = (self.button + 1) % len(self.names)      # button and blinds move
         seats = [Seat(n, self.stacks[i]) for i, n in enumerate(self.names)]
         self.hand = Hand(seats, self.button, self.sb, self.bb, self.rng)
+        self.hand.hero_seat = self.hero_seat
         self.hand_no += 1
         self._starts = list(self.stacks)
         self._hero_vol = self._hero_pfr = False
@@ -173,7 +174,49 @@ class Game:
                  for k, v in self.vs.items()], key=lambda d: d["net"]),
             "worst": results[0] if results else None,
             "best": results[-1] if results else None,
+            "lessons": self._lessons(),
         }
+
+    def _lessons(self) -> list[str]:
+        """Name the reads this session was supposed to teach.
+
+        The analysis used to be P/L and VPIP -- numbers that do not say
+        *what to do next*. These sentences are the profile talking: they
+        fold this many flops, they fold this many 3-bets, so this is the
+        work.
+        """
+        n = max(self.stats["hands"], 1)
+        aggr = (self.stats["post_aggr"] / self.stats["post_acts"]
+                if self.stats["post_acts"] else None)
+        out = []
+        for i, who in enumerate(self.profiles):
+            if i == self.hero_seat or who is None:
+                continue
+            book = who.at(len(self.names)) if isinstance(who, Villain) else who
+            name = self.names[i]
+            fold_f = _stat(book, "fold_vs_bet:flop")
+            if fold_f is not None and fold_f >= 0.55:
+                if aggr is not None and aggr < 0.40:
+                    out.append(f"{name} folds {fold_f:.0%} of flops — you bet "
+                               f"{aggr:.0%} of postflop streets. Bet them.")
+                else:
+                    out.append(f"{name} folds {fold_f:.0%} of flops — keep betting.")
+            elif fold_f is not None and fold_f <= 0.30:
+                out.append(f"{name} continues {1 - fold_f:.0%} of flops — "
+                           "value thinner, stop bluffing.")
+            fold_t = _stat(book, "fold_vs_bet:turn")
+            if fold_t is not None and fold_t >= 0.55:
+                out.append(f"{name} folds {fold_t:.0%} of turns — the second barrel prints.")
+            f3 = _stat(book, "fold_to_three_bet")
+            if f3 is not None and f3 >= 0.65:
+                out.append(f"{name} folds {f3:.0%} to 3-bets — 3-bet them light.")
+            cbet = _stat(book, "cbet:flop")
+            if cbet is not None and cbet >= 0.72:
+                out.append(f"{name} c-bets {cbet:.0%} of flops — most of it is air. Raise and float.")
+        # Session-level, once, so a 2-hand session is not a lecture.
+        if n >= 8 and self.stats["vpip"] / n < 0.15:
+            out.append("You played fewer than 15% of hands. The reps are in the pots you take.")
+        return out[:5]
 
     # -- view ----------------------------------------------------------------
 
@@ -225,4 +268,28 @@ class Game:
             "your_turn": (not h.over) and h.to_act == self.hero_seat,
             "legal": legal,
             "log": h.log[-12:],
+            "ranges": self._range_review() if h.over else None,
         }
+
+    def _range_review(self) -> dict:
+        """What each villain can still hold, for the post-hand panel."""
+        h = self.hand
+        rs = getattr(h, "_ranges", None)
+        if rs is None:
+            return {}
+        out = {}
+        board = h.board or None
+        for i, s in enumerate(h.seats):
+            if i == self.hero_seat:
+                continue
+            classes = rs.top_classes(i, 8, board)
+            if classes:
+                out[s.name] = [{"cls": n, "share": round(p, 3)} for n, p in classes]
+        return out
+
+
+def _stat(profile, key: str, min_opps: float = 20.0) -> float | None:
+    est = getattr(profile, "stats", {}).get(key) if profile is not None else None
+    if est is None or getattr(est, "opps", 0) < min_opps:
+        return None
+    return float(est.value)

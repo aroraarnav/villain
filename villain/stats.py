@@ -26,6 +26,11 @@ from .model import Act, Action, Hand, Street, postflop_rank
 # split by these are the single most exploitable postflop tendency.
 SIZE_BUCKETS = (("small", 0.0, 0.42), ("mid", 0.42, 0.70), ("big", 0.70, 1.01), ("over", 1.01, math.inf))
 
+# Starting-stack buckets in big blinds. 20bb and 100bb are different games;
+# a single pooled rfi describes neither, and the sim's stack knob is a no-op
+# until frequencies (and the push/fold policy) can see which one this is.
+STACK_BUCKETS = (("short", 0.0, 25.0), ("mid", 25.0, 70.0), ("deep", 70.0, math.inf))
+
 #: Counters recorded a second time under this prefix when the player on the
 #: other side of the decision was you. ``vs:fold_vs_bet:river`` is the slice of
 #: ``fold_vs_bet:river`` where the bet was yours.
@@ -44,6 +49,14 @@ def size_bucket(fraction: float) -> str:
         if lo <= fraction < hi:
             return name
     return "over"
+
+
+def stack_bucket(bb: float) -> str:
+    """Which depth this starting stack plays as: short / mid / deep."""
+    for name, lo, hi in STACK_BUCKETS:
+        if lo <= bb < hi:
+            return name
+    return "deep"
 
 
 @dataclass

@@ -110,6 +110,14 @@ STATS: dict[str, dict[str, str]] = {
         "high": "They keep barrelling with too much. Call down lighter.",
         "low": "They give up on the turn. Float the flop and take it next street.",
     },
+    "delayed_cbet": {
+        "what": "Having raised before the flop and then checked the flop, how "
+                "often they bet a later street. Not a second barrel — they "
+                "declined to c-bet and are taking a delayed stab.",
+        "high": "A flop check from the raiser is not a give-up. Do not auto-bet "
+                "when they check to you.",
+        "low": "When they check the flop they are done. Take the pot away.",
+    },
     "fold_vs_bet:flop": {
         "what": "Facing a bet on the flop, how often they fold.",
         "high": "Bet every flop against them — the folds alone show a profit.",
@@ -125,6 +133,11 @@ STATS: dict[str, dict[str, str]] = {
         "what": "Facing a bet on the river, how often they fold.",
         "high": "Bluff every river you get to, and size up.",
         "low": "A calling station on the river. Bet made hands, never bluff.",
+    },
+    "fold_vs_raise": {
+        "what": "Facing a raise (not the first bet of the street), how often they fold.",
+        "high": "They cannot stand a raise. Raise their bets wider.",
+        "low": "They call raises down. Only raise for value.",
     },
     "fold_to_cbet:flop": {
         "what": "Facing a bet from the player who raised before the flop, how "
@@ -165,6 +178,18 @@ STATS: dict[str, dict[str, str]] = {
         "what": "Having checked the flop, how often they raise a bet.",
         "high": "Dangerous to bet into. Check back more of your marginal hands.",
         "low": "Their check is a surrender. Bet every flop they check to you.",
+    },
+    "after_call": {
+        "what": "Having called a bet on the previous street, how often they fold "
+                "the next one. The float-or-give-up number.",
+        "high": "They call one street and dump the next. Barrel.",
+        "low": "A call is sticky. Stop firing the second barrel as a bluff.",
+    },
+    "overbet": {
+        "what": "Of their bets on this street, how often the size is more than "
+                "the pot.",
+        "high": "They overbet, usually polar. Fold bluff-catchers, raise the nuts.",
+        "low": "They almost never overbet. A huge bet from them is the real thing.",
     },
     "donk:flop": {
         "what": "Betting into the previous street's aggressor instead of checking "

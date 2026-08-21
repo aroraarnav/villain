@@ -136,7 +136,7 @@ SPURIOUS_OVERLAP = 10
 
 #: Feature / display-stat definition stamp. Bump when ``rebuild`` is required
 #: for existing databases to grow new counters or fix old ones.
-DEFINITIONS_VERSION = "2026-08-19.after-call-and-board-height"
+DEFINITIONS_VERSION = "2026-08-21.position-depth-and-pot-type-splits"
 
 
 #: Prefix for a seat whose account resolves to no player -- the person was

@@ -56,6 +56,13 @@ def test_size_buckets(fraction, expected):
     assert size_bucket(fraction) == expected
 
 
+@pytest.mark.parametrize("bb,expected", [
+    (12, "short"), (24.9, "short"), (25, "mid"), (69, "mid"), (70, "deep"), (200, "deep")])
+def test_stack_buckets(bb, expected):
+    from villain.stats import stack_bucket
+    assert stack_bucket(bb) == expected
+
+
 def test_vpip_and_pfr_on_a_known_hand():
     """BTN raises, BB folds: BTN has VPIP and PFR, BB has neither."""
     hand = build_hand([
@@ -69,6 +76,8 @@ def test_vpip_and_pfr_on_a_known_hand():
     btn = books["a"]["hu"]
     bb = books["b"]["hu"]
     assert btn.rate("vpip") == 1.0 and btn.rate("pfr") == 1.0
+    assert btn.rate("rfi:BTN") == 1.0
+    assert btn.rate("rfi:BTN:deep") == 1.0
     assert bb.rate("vpip") == 0.0
     assert bb.rate("fold_to_steal") == 1.0
 
@@ -88,10 +97,30 @@ def test_cbet_and_fold_to_cbet_denominators():
     record_hand(hand, books)
     raiser, caller = books["a"]["hu"], books["b"]["hu"]
     assert raiser.rate("cbet:flop") == 1.0
+    assert raiser.rate("cbet:flop:srp") == 1.0
     assert caller.rate("fold_to_cbet:flop") == 1.0
     assert caller.rate("fold_vs_bet:flop") == 1.0
     # A half-pot bet lands in the "mid" bucket, not "small".
     assert caller.rate("fold_vs_bet:flop:mid") == 1.0
+
+
+def test_fold_vs_raise_is_facing_a_raise_not_a_bet():
+    """The original bettor folding to a raise is fold_vs_raise, not fold_vs_bet."""
+    hand = build_hand([
+        act(Street.PREFLOP, 1, Act.POST_SB, 5, 5),
+        act(Street.PREFLOP, 2, Act.POST_BB, 10, 10, pot_before=5),
+        act(Street.PREFLOP, 1, Act.RAISE, 25, 30, pot_before=15, to_call=5),
+        act(Street.PREFLOP, 2, Act.CALL, 20, 30, pot_before=40, to_call=20),
+        act(Street.FLOP, 2, Act.CHECK, pot_before=60),
+        act(Street.FLOP, 1, Act.BET, 30, 30, pot_before=60),
+        act(Street.FLOP, 2, Act.RAISE, 90, 90, pot_before=90, to_call=30),
+        act(Street.FLOP, 1, Act.FOLD, pot_before=180, to_call=60),
+    ], board=["2c", "7d", "9h"])
+    books = {}
+    record_hand(hand, books)
+    raiser = books["a"]["hu"]
+    assert raiser.rate("fold_vs_raise:flop") == 1.0
+    assert books["b"]["hu"].opps("fold_vs_raise:flop") == 0
 
 
 def test_check_raise_requires_a_check_first():
@@ -121,6 +150,9 @@ def test_three_bet_denominator_is_facing_a_raise():
     books = {}
     record_hand(hand, books)
     assert books["b"]["hu"].rate("three_bet") == 1.0
+    assert books["b"]["hu"].rate("three_bet:BB") == 1.0
+    assert books["b"]["hu"].rate("three_bet:BB:vs:BTN") == 1.0
+    assert books["b"]["hu"].rate("three_bet:deep") == 1.0
     assert books["a"]["hu"].rate("fold_to_three_bet") == 1.0
     assert books["a"]["hu"].opps("three_bet") == 0
 

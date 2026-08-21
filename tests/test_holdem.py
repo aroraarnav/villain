@@ -112,3 +112,57 @@ def test_pot_does_not_reset_between_streets():
     h.act("raise", 10)          # flop bet of 10
     h.act("call")               # called -> pot must carry the preflop 20
     assert h.pot == 40
+
+
+def test_initiative_survives_a_checked_street():
+    """A flop check-through used to wipe the lead, so delayed c-bets never fired."""
+    h = Hand(_seats(200, 200), button=0, sb=1, bb=2, rng=np.random.default_rng(5))
+    h.act("raise", 6)
+    h.act("call")
+    assert h.street == 1
+    assert h.initiative == 0                    # preflop raiser carries the lead
+    h.act("check")                              # BB checks
+    h.act("check")                              # BTN checks back
+    assert h.street == 2
+    assert h.initiative == 0                    # still theirs
+    assert 0 in h.declined_initiative
+
+
+def test_a_short_all_in_does_not_reopen_raising():
+    """An all-in shorter than a full raise: players already square may call
+    the extra or fold, not raise. Players who have not yet acted still can.
+    The engine advertised the first half and then left can_raise True.
+    """
+    h = Hand(_seats(200, 14, 200), button=0, sb=1, bb=2, rng=np.random.default_rng(6))
+    # 3-handed: 0 UTG/BTN, 1 SB short, 2 BB.
+    h.act("raise", 10)                          # UTG opens to 10 (full)
+    h.act("raise", 14)                          # SB all-in for 14; +4 < min_raise 8
+    assert h.seats[1].all_in
+    assert h.to_act == 2                        # BB has not acted yet
+    assert h.legal().can_raise                  # ...and so may still raise
+    h.act("call")
+    assert h.to_act == 0                        # UTG already square with the 10
+    assert h.legal().can_call
+    assert not h.legal().can_raise              # incomplete raise does not re-open
+
+
+def test_pot_kind_and_opener_survive_the_flop():
+    h = Hand(_seats(200, 200), button=0, sb=1, bb=2, rng=np.random.default_rng(8))
+    h.act("raise", 6)
+    h.act("call")
+    assert h.street == 1
+    assert h.pot_kind == "srp"
+    assert h.opener == 0
+    assert 1 in h.called_prev
+
+
+def test_a_three_bet_pot_is_tagged_3bp():
+    h = Hand(_seats(200, 200), button=0, sb=1, bb=2, rng=np.random.default_rng(9))
+    h.act("raise", 6)
+    h.act("raise", 18)
+    h.act("call")
+    assert h.street == 1
+    assert h.pot_kind == "3bp"
+    assert h.opener == 0
+
+
