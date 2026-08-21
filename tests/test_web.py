@@ -328,6 +328,23 @@ def test_glossary_payload_is_serialisable():
     assert json.dumps(payload())
 
 
+def test_api_json_does_not_emit_nan():
+    """Python's default dumps writes the token NaN, which Response.json()
+    cannot parse. The demo roster died on that."""
+    from villain.webapp.jsonutil import dumps
+    body = dumps({"top_leak_severity": float("nan"), "leak_count": 1})
+    assert "NaN" not in body
+    assert json.loads(body) == {"top_leak_severity": None, "leak_count": 1}
+
+
+def test_roster_json_is_strict(tmp_path, hands):
+    from villain.webapp.jsonutil import dumps
+    with Store(tmp_path / "v.db") as store:
+        store.add_hands(hands)
+        json.dumps(json.loads(dumps({"players": roster_payload(store)})),
+                   allow_nan=False)
+
+
 def test_reset_empties_the_database(tmp_path, hands):
     db = tmp_path / "v.db"
     with Store(db) as store:

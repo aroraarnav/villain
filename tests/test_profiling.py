@@ -40,6 +40,18 @@ def test_shrinkage_moves_with_evidence():
     assert thin.hi - thin.lo > thick.hi - thick.lo
 
 
+def test_a_zero_alpha_posterior_still_returns_a_probability():
+    """scipy's Beta is undefined at α=0; the NaN it returns became
+    ``"top_leak_severity": NaN`` on the demo roster, which the browser
+    could not parse."""
+    import math
+    est = Estimate(value=0, lo=0, hi=1, opps=10, raw=0.0, prior=0.0,
+                   weight=1, alpha=0.0, beta=10.0)
+    assert math.isfinite(est.prob_above(0.5))
+    assert math.isfinite(est.prob_below(0.5))
+    assert 0.0 <= est.prob_above(0.5) <= 1.0
+
+
 def test_estimate_exposes_its_posterior():
     est = shrink(10, 20, 0.4, 25)
     assert est.prob_above(0.0) == pytest.approx(1.0, abs=1e-6)

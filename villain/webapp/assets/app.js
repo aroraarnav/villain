@@ -6,6 +6,31 @@ const SVG = "http://www.w3.org/2000/svg";
 const state = {tab: "players", session: null, player: null, glossary: null, game: null, lastEvent: null, stepTimer: null, descOn: true, revealed: false, checkFold: false, checkFoldHand: null, heroPoll: null,
                sessionId: null};
 
+/* Hosted demo, signed out: the sample is readable, not writable. Set by the
+   boot page. Absent under `villain test`, which has no accounts and must stay
+   writable. */
+const isGuest = () => !!window.villainGuest;
+const GUEST_WHY = `<span class="hl">demo is read-only</span><br>
+  Sign in to import your own hands and keep them across devices.`;
+
+/** Grey a control out and explain why on hover. Disabled buttons do not
+    receive pointer events, so the tip is bound to a wrapper. */
+function guestLock(el) {
+  if (!el) return null;
+  el.disabled = true;
+  const wrap = document.createElement("span");
+  wrap.className = "guest-lock";
+  if (el.parentNode) el.replaceWith(wrap);
+  wrap.appendChild(el);
+  bindTip(wrap, GUEST_WHY);
+  return wrap;
+}
+function guestLockDrop(el) {
+  if (!el) return;
+  el.classList.add("locked");
+  bindTip(el, GUEST_WHY);
+}
+
 /* An "i" that explains a term on hover. Everything the tool says in shorthand
    gets one, because a number nobody can interpret is worse than no number. */
 function info(html) {
@@ -2476,6 +2501,11 @@ function viewSession() {
     <div id="session-body"></div>`;
 
   const drop = $("#drop"), input = $("#file"), status = $("#upload-status");
+  if (isGuest()) {
+    guestLockDrop(drop);
+    if (state.session) renderSession();
+    return;
+  }
   drop.onclick = () => input.click();
   drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
   drop.ondragleave = () => drop.classList.remove("over");
@@ -2535,7 +2565,10 @@ function renderSession() {
   $("#session-roster").appendChild(rosterTable(data.players, {onClick: null}));
   playerTabs(data.profiles, $("#session-profiles"));
   const save = $("#save");
-  if (save && !data.saved) save.onclick = () => commit(data.token);
+  if (save && !data.saved) {
+    if (isGuest()) guestLock(save);
+    else save.onclick = () => commit(data.token);
+  }
 }
 
 /* ---- identity, settled at upload ---- */
@@ -3150,12 +3183,14 @@ async function viewPlayers() {
       </div>
       <input type="file" id="db-file" multiple accept=".json,.txt" hidden>
       <div id="db-status" class="small muted" style="margin-top:10px"></div></div>`;
-    wireImport();
+    if (isGuest()) guestLockDrop($("#db-drop"));
+    else wireImport();
     return;
   }
   /* One table, sorted however you like. A separate leaderboard tab was the
      same rows in a different order. */
   if (!onScreen("players")) return;
+  const guest = isGuest();
   view.innerHTML = `<div class="panel">
       <div class="spread"><h2>database</h2>
         <div class="row">
@@ -3172,7 +3207,13 @@ async function viewPlayers() {
     <p class="footnote">
       <button class="linkbtn danger-link" id="reset">reset database</button>
       <span class="muted">deletes every hand, player and merge decision</span></p>`;
-  wireImport();
+  if (guest) {
+    guestLock($("#db-add"));
+    guestLock($("#reset"));
+  } else {
+    wireImport();
+    $("#reset").onclick = () => confirmReset(data);
+  }
   $("#db-roster").appendChild(rosterTable(data.players, {
     onClick: p => {
       if (p.player_id === data.hero_id) { switchTab("hero"); return; }
@@ -3180,7 +3221,6 @@ async function viewPlayers() {
     },
     heroId: data.hero_id,
   }));
-  $("#reset").onclick = () => confirmReset(data);
 
   // Priors are fitted on import now, not on request. What is worth showing is
   // which population the reads on this page were measured against -- that is
@@ -3262,7 +3302,8 @@ async function viewPlayer(id) {
     view.appendChild(panel);
   }
 
-  view.appendChild(playerActions(data));
+  const actions = playerActions(data);
+  if (actions) view.appendChild(actions);
 }
 
 /* The two things you can do to a player rather than with one. Both are
@@ -3281,6 +3322,15 @@ function playerActions(data) {
   const split = document.createElement("button");
   split.className = "act";
   split.textContent = "Split player\u2026";
+  const del = document.createElement("button");
+  del.className = "act danger";
+  del.textContent = "Delete player\u2026";
+
+  if (isGuest()) {
+    row.append(guestLock(split), guestLock(del));
+    return box;
+  }
+
   const canSplit = (data.aliases || []).length > 1;
   split.disabled = !canSplit;
   if (canSplit) split.onclick = () => splitDialog(data);
@@ -3288,9 +3338,6 @@ function playerActions(data) {
     Only one account is pooled as this player, so there is no second identity
     to separate out.`);
 
-  const del = document.createElement("button");
-  del.className = "act danger";
-  del.textContent = "Delete player\u2026";
   const isHero = data.hero_id != null && data.player_id === data.hero_id;
   del.disabled = isHero;
   if (isHero) bindTip(del, `<span class="hl">this is you</span><br>

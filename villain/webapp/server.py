@@ -29,6 +29,7 @@ from ..replay import replay
 from ..stats import VS_HERO
 from .assets import page, static
 from .heroview import _cached_hero_id, forget_hero, hero_begin, hero_payload, hero_status
+from .jsonutil import encode as json_encode
 from .leaderboard import leaderboard_payload
 from .payloads import MIN_ROSTER_HANDS, profile_payload, roster_payload, tab_availability
 from .sessions import SESSIONS, SIM_GAMES, _reap_sessions, apply_answers, commit_session, parse_upload, question_payload, session_brief, session_payload
@@ -49,7 +50,7 @@ class Handler(BaseHTTPRequestHandler):
         pass                      # the terminal belongs to the user, not the server
 
     def _send(self, code: int, payload, content_type="application/json"):
-        body = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+        body = json_encode(payload)
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
