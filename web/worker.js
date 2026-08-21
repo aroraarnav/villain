@@ -109,11 +109,14 @@ const handlers = {
    * calls straight back into this function as it walks.
    */
   hero: () => {
-    // create_proxy so the callback is not collected mid-walk, and Number()
-    // so a PyProxy does not arrive on the page as an object the bar cannot
-    // divide.
+    // A JS function passed into Python is already a JsProxy; holding it here
+    // for the length of the call keeps it alive. create_proxy is the Python
+    // API for the other direction, and is not a function on pyodide.ffi --
+    // calling it is how the Hero tab died with "is not a function".
+    // Number() / String() so a PyProxy does not arrive on the page as an
+    // object the bar cannot divide.
     let lastPaint = 0;
-    const report = pyodide.ffi.create_proxy((done, total, phase) => {
+    const report = (done, total, phase) => {
       self.postMessage({
         type: "hero",
         done: Number(done),
@@ -130,15 +133,11 @@ const handlers = {
         const spin = now + 6;
         while (Date.now() < spin) { /* other thread paints */ }
       }
-    });
-    try {
-      const proxy = bridge.build_hero(report);
-      const out = proxy.toJs({ dict_converter: Object.fromEntries });
-      proxy.destroy();
-      return out;
-    } finally {
-      report.destroy();
-    }
+    };
+    const proxy = bridge.build_hero(report);
+    const out = proxy.toJs({ dict_converter: Object.fromEntries });
+    proxy.destroy();
+    return out;
   },
 
   /** One API request, answered exactly as the local server would answer it. */
