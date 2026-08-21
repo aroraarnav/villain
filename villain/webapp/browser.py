@@ -99,9 +99,15 @@ def dispatch_json(method: str, path: str, body: str = "") -> dict:
     # the page used to answer it with a regex of its own -- and a regex that
     # does not know about a route added later says "nothing changed" for it,
     # which is a silent failure to save somebody's import.
+    #
+    # A definitions rebuild is a write that no route asked for, so the path
+    # alone cannot see it. Without this, a GET that migrated reported false,
+    # the stamp never left the worker, and the next visit rebuilt every hand.
+    from .. import db
     return {"status": code, "body": out.decode("utf-8"), "content_type": content_type,
-            "wrote": method == "POST" and code < 400 and writes_to_disk(
-                path.split("?")[0])}
+            "wrote": db.consume_cache_dirty() or (
+                method == "POST" and code < 400 and writes_to_disk(
+                    path.split("?")[0]))}
 
 
 def set_progress(hook=None) -> None:
@@ -135,7 +141,7 @@ def build_hero(progress=None) -> dict:
     counted -- fitting the trees, where the only true thing to report is that
     it is still going.
     """
-    from ..db import Store
+    from ..db import Store, consume_cache_dirty
     from .heroview import hero_payload
     from .jsonutil import dumps
 
@@ -154,4 +160,5 @@ def build_hero(progress=None) -> dict:
                           {"error": "Could not identify hero automatically -- "
                                     "no player has cards known on enough of their "
                                     "own hands."}),
-            "content_type": "application/json"}
+            "content_type": "application/json",
+            "wrote": consume_cache_dirty()}

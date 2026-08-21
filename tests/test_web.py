@@ -705,6 +705,28 @@ def test_the_bridge_reports_whether_a_call_wrote(tmp_path, hands):
     assert missing["wrote"] is False, "a refused write did not write"
 
 
+def test_a_definitions_rebuild_is_reported_as_a_write(tmp_path, hands):
+    """The hosted page only uploads when `wrote` is true. A GET that migrated
+    the cache used to report false, so the stamp never reached IndexedDB and
+    the next visit rebuilt every hand again."""
+    from villain.webapp import browser
+
+    db = tmp_path / "v.db"
+    with Store(db) as store:
+        store.add_hands(hands)
+        store.conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('definitions_version', 'old')")
+        store.conn.commit()
+    browser.set_db(str(db))
+
+    first = browser.dispatch_json("GET", "/api/roster")
+    assert first["status"] == 200, first["body"]
+    assert first["wrote"] is True
+    second = browser.dispatch_json("GET", "/api/roster")
+    assert second["status"] == 200
+    assert second["wrote"] is False
+
+
 # --- the roster cache ---------------------------------------------------------
 
 def test_the_roster_is_rebuilt_when_the_hands_change(tmp_path, hands):

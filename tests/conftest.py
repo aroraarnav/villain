@@ -11,6 +11,19 @@ from villain.stats import StatBook
 FIXTURE = Path(__file__).parent / "data" / "pokernow_sample.json"
 
 
+@pytest.fixture(autouse=True)
+def _reset_db_module_hooks():
+    """A definitions rebuild sets a process-wide dirty flag the hosted page
+    consumes as `wrote`. Left set, a later GET /api/roster test would claim a
+    read had written."""
+    from villain import db
+    db._CACHE_DIRTY = False
+    db.PROGRESS_HOOK = None
+    yield
+    db._CACHE_DIRTY = False
+    db.PROGRESS_HOOK = None
+
+
 @pytest.fixture(scope="session")
 def hands():
     return parse_file(FIXTURE)
