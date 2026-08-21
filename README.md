@@ -1,40 +1,53 @@
+<div align="center">
+
 # Villain
 
+**Reads your poker hand histories and tells you how to beat the people you play against.**
+
 [![tests](https://github.com/aroraarnav/villain/actions/workflows/tests.yml/badge.svg)](https://github.com/aroraarnav/villain/actions/workflows/tests.yml)
+[![demo](https://img.shields.io/badge/demo-aroraarnav.github.io%2Fvillain-e5645a)](https://aroraarnav.github.io/villain/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-**Villain reads your poker hand histories and tells you how to beat the people
-you play against.** Drop in an export from a session and, for every opponent, it
-works out what kind of player they are, the specific mistakes worth attacking
-and what each one is worth, and a skill rating — then remembers them the next
-time they sit down.
+### [→ Open the app](https://aroraarnav.github.io/villain/)
+
+</div>
+
+Drop in an export from a session and, for every opponent, Villain works out what
+kind of player they are, the specific mistakes worth attacking and what each one
+is worth in big blinds per hundred hands, and a skill rating — then remembers
+them the next time they sit down.
 
 It is built for **home games and small samples**. A session is only a couple of
 hundred hands, so the whole design is about telling a real read apart from a
-lucky run of three folds. If you just want to use it, read on; the statistics
-behind every number are in [How it works](#how-it-works).
+lucky run of three folds. Every number on screen came out of the stored hands;
+nothing is estimated to fill a gap, and anything the evidence does not support
+says so.
 
-![Villain's profile view: one screen per player, the read and the plan on top, the numbers below](docs/screenshot.png)
+![A player profile: the read and what they are worth across the top, the standard six numbers with their credible intervals, then the priced leaks ranked by what each is worth](docs/profile.png)
+
+---
 
 ## Use it
 
-**[aroraarnav.github.io/villain](https://aroraarnav.github.io/villain/)** is
-the tool. Open it, drop a PokerNow export on the Database tab. Hands are
-parsed in your browser — the Python is compiled to WebAssembly — so the
-histories never leave the machine as a server-side upload.
+**[aroraarnav.github.io/villain](https://aroraarnav.github.io/villain/)** is the
+tool. It is the whole application — the same Python, compiled to WebAssembly and
+running in the tab. Open it and drop a PokerNow export on the Database tab.
+Hands are parsed on your machine; the histories are never uploaded to be read.
 
-It asks which way in you want. Sign in with an emailed link — it works on
-whichever device you open it — and the database follows you: the same SQLite
-file, gzipped and stored privately under your account, on the next laptop as
-well as this one. A first sign-in starts empty; import your own hands. Or take
-the demo, a sample roster with all ten archetypes already profiled, which you
-can read but not add to.
+It asks which way in you want:
 
-The hosted page does not pool anyone's reads. Your file is yours; row-level
-security means another account cannot open it. That is the whole of
-[discussion #14](https://github.com/aroraarnav/villain/discussions/14) that
-is built: portability of *your* database, not a shared one.
+- **Sign in with an emailed link** and the database follows you — the same
+  SQLite file, gzipped and stored privately under your account, on the next
+  laptop as well as this one. A first sign-in starts empty; import your own
+  hands.
+- **Take the demo** — a sample roster with all ten archetypes already profiled,
+  which you can read but not add to.
+
+Nobody's reads are pooled. Your file is yours, and row-level security means
+another account cannot open it. That is the part of
+[discussion #14](https://github.com/aroraarnav/villain/discussions/14) that is
+built: portability of *your* database, not a shared one.
 
 ## Run it locally
 
@@ -49,15 +62,20 @@ python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -e .
 
-pytest                             # 368 tests
-villain ui                         # then open http://127.0.0.1:8766
+pytest                             # 385 tests
+villain test                       # then open http://127.0.0.1:8766
 ```
 
-`villain scout tests/data/pokernow_sample.json --min-hands 1` is the
-twenty-hand parser fixture if you want CLI output before an export of your
-own.
+`villain test` runs the web app on a loopback socket against your own database.
+It is the same interface the hosted page serves, with the transport swapped —
+useful for working on the tool, and for anyone who would rather not sign in
+anywhere. There is no separate desktop build to keep in step.
 
-To rebuild and serve the hosted page yourself:
+`villain scout tests/data/pokernow_sample.json --min-hands 1` is the twenty-hand
+parser fixture, if you want CLI output before an export of your own.
+
+<details>
+<summary><b>Building and deploying the hosted page yourself</b></summary>
 
 ```bash
 pip install -e . build
@@ -65,61 +83,90 @@ python web/build.py               # assembles web/dist/
 python web/serve.py               # opens http://127.0.0.1:8000
 ```
 
-Deployment is automatic: `.github/workflows/pages.yml` builds `web/dist/` and
-publishes it on every push to `main`. Sign-in needs a Supabase project — free,
-no card — and is described in [web/SYNC_SETUP.md](web/SYNC_SETUP.md).
-Unconfigured, the page is demo-only and still fully usable.
+`web/build.py` is orchestration, not logic: it builds the wheel with the
+ordinary packaging tools, seeds the demo database through the *real* import
+path so the demo cannot diverge from the tool, warms the hero cache, and copies
+in the boot page and typefaces.
+
+Deployment is automatic — `.github/workflows/pages.yml` builds `web/dist/` and
+publishes it on every push to `main`. Sign-in needs a Supabase project (free, no
+card) and is described in [web/SYNC_SETUP.md](web/SYNC_SETUP.md). Unconfigured,
+the page is demo-only and still fully usable.
 
 Signing in changes where the database lives, not what it does: hands are still
 parsed in the browser, and what is stored is the finished SQLite file, gzipped,
-readable only by the account that wrote it. Nobody else's hand histories are
-pooled, uploaded or shared — the database that follows you is your own.
+readable only by the account that wrote it.
 
-The parser suite checks that every hand balances to the cent, which is what
-proves the opcode decoding is right; several tests in `test_profiling.py` are
-regressions named for the modeling mistakes that produced them.
+</details>
+
+---
 
 ## The interface
 
-Four tabs. The hosted page and `villain ui` are the same ones.
+Four tabs. The hosted page and `villain test` serve the same ones.
 
-* **Database** — everyone you have recorded, ranked by skill, with the bb/100
-  you can attack them for alongside. Drop any number of exports on it at once:
-  duplicates are skipped by hand id, and the identity questions are asked once
-  for the whole batch rather than once per file, so you cannot answer "same
-  player" for one file and "different" for the next.
-* **Sessions** — one sitting at a time, derived from the gaps between hands
-  rather than stored. Who played, what they looked like that night, and what
-  they did more or less of than usual. Compared *within* a table size, because
-  "+8pp VPIP" measures which table somebody sat at otherwise. A player with too
-  little history outside the sitting is told so rather than given a trend.
-* **Hero** — you, measured against yourself. Your own cards are visible on
-  every hand while everyone else's show only at a showdown, so your history can
-  grade what theirs cannot: how often your folds were right, the value you left
-  on the table, and how your range, sizing and timing shift from spot to spot.
-  The one tab that reads your own game instead of an opponent's.
-* **Simulate** — sit down and play real hands against players from your own
-  database. Each villain acts from its own measured profile — a station calls
-  you down, a nit folds, a maniac keeps barrelling — so it plays like practice
-  against the exact people you face, and (with *explain decisions* on) tells you
-  *why* each of them did what they did. End the session for a read on how you
-  came out, hand by hand and against each opponent.
+### Database
 
-![The practice simulator: a real hand against villains driven by their measured profiles, each decision explained](docs/simulator.png)
+Everyone you have recorded, ranked by skill, with the bb/100 you can attack them
+for alongside. Drop any number of exports on it at once: duplicates are skipped
+by hand id, and the identity questions are asked once for the whole batch rather
+than once per file — so you cannot answer "same player" for one file and
+"different" for the next.
 
-A profile is one screen of tiles — the read and the plan across the top, then
-what to do, the rating and the numbers — because a mid-session read that
-requires scrolling is one you will not use.
+![The roster: every player ranked by skill, with what each is worth in bb/100 and their biggest leak](docs/roster.png)
 
-Smaller things it does so you do not have to think about them: every shorthand
-carries an **ⓘ** with what the statistic counts and what *high* and *low* each
-mean, since both are usually exploitable and call for opposite play, and a test
-fails if a statistic reaches the screen without one. Six headline numbers show,
-the rest are one click away. Long imports block the window, because the server
-handles one request at a time and clicking through a half-written database is
-how you get a half-written database. **Reset** makes you type `delete
-everything`, and exports are untouched, so statistics can be rebuilt — the
-merge and rename decisions cannot.
+Click a row for the profile. It is one screen, in one order: who they are and
+what they are worth, the six numbers every tracker prints, then **what to do** —
+the priced leaks, ranked by the money in them, with the evidence behind each one
+click away. A mid-session read that requires scrolling is one you will not use.
+
+### Sessions
+
+One sitting at a time, derived from the gaps between hands rather than stored.
+Who played, what they looked like that night, and what they did more or less of
+than usual. Compared *within* a table size, because "+8pp VPIP" otherwise just
+measures which table somebody sat at. A player with too little history outside
+the sitting is told so rather than given a trend.
+
+A sitting read and the pooled read on the same person can disagree — a night can
+look nothing like a season — so the pill says which one you are looking at.
+
+### Hero
+
+You, measured against yourself. Your own cards are visible on every hand while
+everyone else's show only at a showdown, so your history can grade what theirs
+cannot: how often your folds were right, the value you left on the table, and
+how your range, sizing and timing shift from spot to spot.
+
+![The Hero tab: fold grades and missed value, the preflop range grid, and how wide each seat gets played](docs/hero.png)
+
+The opponent machinery — your priced leaks, your key numbers, your skill
+breakdown — is still there, at the foot of the page under *how you look as a
+villain*. It is what any opponent with your hand histories could work out, so it
+sits below the analysis only you can run.
+
+### Simulate
+
+Sit down and play real hands against players from your own database. Each
+villain acts from its own measured profile — a station calls you down, a nit
+folds, a maniac keeps barrelling — so it plays like practice against the exact
+people you face, and with **Explain** armed it tells you *why* each of them did
+what they did. End the session for a read on how you came out, hand by hand and
+against each opponent.
+
+![The practice simulator: a real hand against villains driven by their measured profiles, with each decision explained](docs/simulator.png)
+
+### Things it does so you do not have to think about them
+
+Every shorthand carries an **ⓘ** with what the statistic counts and what *high*
+and *low* each mean — both are usually exploitable and call for opposite play —
+and a test fails if a statistic reaches the screen without one. Every frequency
+is drawn with its credible interval, the field, and the break-even it is
+measured against, so a number is never shown without the uncertainty around it.
+Long imports block the window, because the server handles one request at a time
+and clicking through a half-written database is how you get one. **Reset** makes
+you type `delete everything`; exports are untouched, so statistics can be
+rebuilt — the merge and rename decisions cannot.
 
 ### Saving a session
 
@@ -128,19 +175,23 @@ where a profiler destroys its own data — merge two people and both profiles
 become fiction, split one and half of what you know is gone — so it asks about
 every call it is unsure of rather than guessing.
 
-* **One account id, a new display name.** The PokerNow case, almost always a
+- **One account id, a new display name.** The PokerNow case, almost always a
   rename, so it defaults to *same player*. Answer no and they stay apart, keyed
   `<account>#<name>` so neither loses its existing hands.
-* **Two account ids that look like one person** — `villain`, `villain2` — default
-  to *different people*: the merge is the more expensive mistake on the weaker
-  evidence.
+- **Two account ids that look like one person** — `villain`, `villain2` —
+  default to *different people*: the merge is the more expensive mistake on the
+  weaker evidence.
 
 Accounts dealt into the same hand are never offered as a merge, whatever their
 names look like.
 
+---
+
 ## The command line
 
-Every command takes `--db PATH`; the default is `~/.villain/villain.db`.
+The app is the product; the CLI is the same engine without the browser. Every
+command takes `--db PATH` before the subcommand; the default is
+`~/.villain/villain.db`.
 
 | command | what it does |
 | --- | --- |
@@ -151,10 +202,14 @@ Every command takes `--db PATH`; the default is `~/.villain/villain.db`.
 | `villain profile NAME --by-table` | split by table size instead of pooling (`--regime hu\|3max\|6max\|full`) |
 | `villain link --suggest` | find accounts that may be one person |
 | `villain link KEEP ABSORB` | merge player `ABSORB` into player `KEEP` |
+| `villain unlink ID SITE ACCT` | split one alias back onto its own player |
 | `villain note NAME "tilts after a big pot"` | attach a note to a player |
+| `villain hero` | what only your own hand history can show |
+| `villain table NAMES...` | lineup briefing for who is sitting here |
 | `villain fit` | learn priors, clusters and hand strength from your own database (`--min-players N`, default 8) |
 | `villain rebuild` | recompute every profile from stored hands |
-| `villain ui` | serve the web interface (`--port N`, default 8766; `--no-browser`) |
+| `villain export FILE` / `import-db FILE` | move a database between machines |
+| `villain test` | run the web app locally (`--port N`, default 8766; `--no-browser`) |
 
 **PokerNow** is currently the only supported format: open the game log and use
 the export button, which gives a `poker-now-hands-game-*.json` file that both
@@ -509,7 +564,7 @@ returning something authoritative-looking and wrong.
 | `cluster.py`, `reads.py` | models learned from your own database |
 | `db.py`, `identity.py` | persistence, aliases, merge safety |
 | `analyze.py`, `glossary.py`, `report.py` | the payload the CLI and UI both render |
-| `cli.py`, `web.py` | commands, local web UI |
+| `cli.py`, `webapp/` | commands; the web app, served locally or in the browser |
 
 ## Contributing
 
