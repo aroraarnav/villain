@@ -7,7 +7,7 @@ import pytest
 
 from villain.db import Store, split_key
 from villain.identity import session_questions
-from villain.web import MIN_ROSTER_HANDS, SESSIONS, commit_session, parse_upload, profile_payload, roster_payload, session_payload
+from villain.webapp import MIN_ROSTER_HANDS, SESSIONS, commit_session, parse_upload, profile_payload, roster_payload, session_payload
 
 
 @pytest.fixture
@@ -104,7 +104,7 @@ def test_same_name_overlapping_time_is_not_offered_as_one(session, tmp_path):
     windows are therefore not evidence of two humans; being dealt into a hand
     together is, and that is tested separately below.
     """
-    from villain.web import SESSIONS
+    from villain.webapp import SESSIONS
 
     hands = copy.deepcopy(SESSIONS[session]["hands"])
     target_name = "player1"
@@ -134,7 +134,7 @@ def test_same_name_overlapping_time_is_not_offered_as_one(session, tmp_path):
 
 def test_one_run_replaces_a_question_per_pair(session, tmp_path):
     """Six accounts under one name is one decision, not fifteen."""
-    from villain.web import SESSIONS
+    from villain.webapp import SESSIONS
 
     hands = copy.deepcopy(SESSIONS[session]["hands"])
     target = "player1"
@@ -292,7 +292,7 @@ def test_every_displayed_stat_has_an_explanation():
     """A number nobody can interpret is worse than no number."""
     from villain.exploits import RULES
     from villain.glossary import stat_help
-    from villain.web import DISPLAY_STATS
+    from villain.webapp import DISPLAY_STATS
     missing = [s for s, _, _ in DISPLAY_STATS if not stat_help(s)]
     missing += [r.stat for r in RULES if not stat_help(r.stat)]
     assert not missing, f"no glossary entry for {sorted(set(missing))}"
@@ -370,7 +370,7 @@ def test_database_is_reusable_after_reset(tmp_path, hands):
 def test_merge_answers_pool_the_session_before_it_is_saved(session, tmp_path):
     """The point of asking at upload: the session you read is already pooled."""
     from villain.identity import session_questions
-    from villain.web import SESSIONS, apply_answers, session_payload
+    from villain.webapp import SESSIONS, apply_answers, session_payload
     with Store(tmp_path / "v.db") as store:
         questions = session_questions(store, SESSIONS[session]["hands"])
     alias = [q for q in questions if q.kind == "alias"]
@@ -390,7 +390,7 @@ def test_merge_answers_pool_the_session_before_it_is_saved(session, tmp_path):
 
 def test_the_chosen_name_is_honoured(session, tmp_path):
     from villain.identity import session_questions
-    from villain.web import SESSIONS, apply_answers, session_payload
+    from villain.webapp import SESSIONS, apply_answers, session_payload
     with Store(tmp_path / "v.db") as store:
         questions = session_questions(store, SESSIONS[session]["hands"])
     alias = [q for q in questions if q.kind == "alias"]
@@ -408,7 +408,7 @@ def test_the_chosen_name_is_honoured(session, tmp_path):
 
 def test_declining_leaves_the_session_untouched(session, tmp_path):
     from villain.identity import session_questions
-    from villain.web import SESSIONS, apply_answers, session_payload
+    from villain.webapp import SESSIONS, apply_answers, session_payload
     with Store(tmp_path / "v.db") as store:
         SESSIONS[session]["questions"] = session_questions(store, SESSIONS[session]["hands"])
     before = {r["name"] for r in session_payload(session)["players"]}
@@ -419,7 +419,7 @@ def test_declining_leaves_the_session_untouched(session, tmp_path):
 def test_stored_hands_keep_the_original_account_ids(session, tmp_path):
     """Identity is a layer on top of the hands; the hands stay as recorded."""
     from villain.identity import session_questions
-    from villain.web import SESSIONS, apply_answers, commit_session
+    from villain.webapp import SESSIONS, apply_answers, commit_session
     with Store(tmp_path / "v.db") as store:
         questions = session_questions(store, SESSIONS[session]["hands"])
         SESSIONS[session]["questions"] = questions
@@ -436,7 +436,7 @@ def test_stored_hands_keep_the_original_account_ids(session, tmp_path):
 
 def test_questions_offer_a_name_to_keep(session, tmp_path):
     from villain.identity import session_questions
-    from villain.web import SESSIONS
+    from villain.webapp import SESSIONS
     with Store(tmp_path / "v.db") as store:
         for q in session_questions(store, SESSIONS[session]["hands"]):
             assert q.names, f"{q.id} offers no name choice"
@@ -449,7 +449,7 @@ def test_roster_always_names_the_biggest_leak_it_can(tmp_path, hands):
     The column falls back through what is known -- priced leak, unconfirmed
     read, weakest rated area -- and says which kind of claim it is making.
     """
-    from villain.web import roster_payload
+    from villain.webapp import roster_payload
     with Store(tmp_path / "v.db") as store:
         store.add_hands(hands)
         rows = roster_payload(store)
@@ -465,7 +465,7 @@ def test_roster_always_names_the_biggest_leak_it_can(tmp_path, hands):
 
 
 def test_a_rated_weakness_is_never_presented_as_a_measured_leak(tmp_path, hands):
-    from villain.web import roster_payload
+    from villain.webapp import roster_payload
     with Store(tmp_path / "v.db") as store:
         store.add_hands(hands)
         for row in roster_payload(store):
@@ -481,7 +481,7 @@ def test_a_database_merge_shows_up_in_a_loaded_session(tmp_path, hands):
     """
     import copy
 
-    from villain.web import SESSIONS, database_merges, session_payload
+    from villain.webapp import SESSIONS, database_merges, session_payload
     token = "dbmerge"
     SESSIONS[token] = {"hands": copy.deepcopy(hands), "files": [], "created": 0.0}
     try:
@@ -561,7 +561,7 @@ def test_auto_merges_do_not_swallow_the_questions_that_need_a_human(session, tmp
     never saw.
     """
     from villain.identity import auto_answers, session_questions
-    from villain.web import SESSIONS, apply_answers, session_payload
+    from villain.webapp import SESSIONS, apply_answers, session_payload
 
     with Store(tmp_path / "v.db") as store:
         questions = session_questions(store, SESSIONS[session]["hands"])
@@ -580,6 +580,254 @@ def test_auto_merges_do_not_swallow_the_questions_that_need_a_human(session, tmp
             apply_answers(SESSIONS[session], {human[0].id: {"same": False}})
             payload = session_payload(session, store)
         assert payload["answered"]
+
+
+def test_a_name_plus_suffix_match_is_asked_and_never_auto_merged(session, tmp_path):
+    """Containment scores 0.93 against a 0.92 bar so the pair gets *raised*.
+
+    It used to be raised and immediately auto-answered, which made the shape
+    that makes ``PlayerA``/``PlayerALaptop`` one person silently pool
+    ``PlayerG``/``PlayerG North``, who are two. A wrong merge costs an unlink
+    and a rebuild; a wrong question costs a click.
+    """
+    from villain.identity import matched_only_by_containment
+
+    hands = SESSIONS[session]["hands"]
+    db_path = tmp_path / "v.db"
+    with Store(db_path) as store:
+        store.add_hands(hands)
+        known = store.players()[0]["display_name"]
+
+    # The same person's name with a location stuck on the end -- the exact
+    # shape `_containment_score` exists to notice and refuses to settle.
+    suffixed = known + " North"
+    assert matched_only_by_containment(known, suffixed, 0.92), (
+        "fixture name should match only by containment")
+
+    incoming = copy.deepcopy(hands[:3])
+    for hand in incoming:
+        hand.hand_id += "-suffixed"
+        for seat in hand.seats:
+            seat.player_id = seat.player_id + "-north"
+            seat.name = suffixed
+    with Store(db_path) as store:
+        questions = session_questions(store, incoming)
+
+    against_db = [q for q in questions if q.kind == "alias"
+                  and any("database" in (side.get("where") or "")
+                          for side in (q.left, q.right))]
+    assert against_db, "a suffixed account should be raised against the database"
+    assert all(not q.auto for q in against_db), (
+        "a containment-only match must be asked, not applied")
+
+
+# --- every POST route says whether it writes ---------------------------------
+
+def _routed_post_paths() -> set[str]:
+    """The routes ``do_POST`` actually answers, read out of its own source.
+
+    Reading the source is not elegant, and it is the only thing that fails when
+    somebody adds a route and forgets to say whether it writes. A list of routes
+    maintained beside the handler by hand is the thing under test here, not the
+    thing to test it with.
+    """
+    import inspect
+    import re
+
+    from villain.webapp.server import Handler
+    src = inspect.getsource(Handler.do_POST)
+    routes = set(re.findall(r'route == "(/api/[^"]+)"', src))
+    for suffix in re.findall(
+            r'route\.startswith\("/api/session/"\) and route\.endswith\("(/[^"]+)"\)', src):
+        routes.add(f"/api/session/<token>{suffix}")
+    return routes
+
+
+def test_every_post_route_is_classified_as_writing_or_not():
+    """The hosted app uploads the database after a write and not otherwise.
+
+    It asks the server which is which. A route the server does not classify is
+    reported as "changed nothing", so the import that went through it works on
+    this laptop and is never saved to the account -- found, if ever, on a second
+    device that is missing a session.
+    """
+    from villain.webapp.server import READING_POST_ROUTES, WRITING_POST_ROUTES
+
+    routed = _routed_post_paths()
+    assert routed, "the handler should answer at least one POST route"
+    declared = WRITING_POST_ROUTES | READING_POST_ROUTES
+    assert routed - declared == set(), (
+        "these POST routes do not say whether they change the database: "
+        f"{sorted(routed - declared)}")
+    assert declared - routed == set(), (
+        "these routes are classified but no longer served: "
+        f"{sorted(declared - routed)}")
+    assert not (WRITING_POST_ROUTES & READING_POST_ROUTES)
+
+
+def test_writes_to_disk_resolves_a_real_session_token():
+    from villain.webapp.server import writes_to_disk
+
+    assert writes_to_disk("/api/session/abc123/commit")
+    assert not writes_to_disk("/api/session/abc123/identity")
+    assert not writes_to_disk("/api/session/abc123")
+    assert writes_to_disk("/api/reset")
+    assert not writes_to_disk("/api/upload")
+
+
+def test_the_bridge_reports_whether_a_call_wrote(tmp_path, hands):
+    """What the hosted page keys its upload off. A read that claims to have
+    written costs a needless upload; a write that claims not to loses data."""
+    from villain.webapp import browser
+
+    db = tmp_path / "v.db"
+    with Store(db) as store:
+        store.add_hands(hands)
+        victim = next(int(r["id"]) for r in store.players())
+    browser.set_db(str(db))
+
+    read = browser.dispatch_json("GET", "/api/roster")
+    assert read["wrote"] is False
+
+    parsed = browser.dispatch_json(
+        "POST", "/api/upload",
+        json.dumps({"files": [{"name": "x.json", "text": "{}"}]}))
+    assert parsed["wrote"] is False, "parsing into memory is not a write"
+
+    wrote = browser.dispatch_json(
+        "POST", "/api/player/delete", json.dumps({"player_id": victim}))
+    assert wrote["status"] == 200, wrote["body"]
+    assert wrote["wrote"] is True
+
+    missing = browser.dispatch_json(
+        "POST", "/api/player/delete", json.dumps({"player_id": 999999}))
+    assert missing["status"] == 404
+    assert missing["wrote"] is False, "a refused write did not write"
+
+
+# --- the roster cache ---------------------------------------------------------
+
+def test_the_roster_is_rebuilt_when_the_hands_change(tmp_path, hands):
+    """Serving a stale roster is worse than rebuilding it: the Database tab is
+    the first thing anybody looks at after an import, and it would show the
+    database as it was before."""
+    from villain.webapp.payloads import roster_payload
+
+    db = tmp_path / "v.db"
+    with Store(db) as store:
+        store.add_hands(hands[:10])
+        first = roster_payload(store)
+        assert roster_payload(store) == first, "an unchanged database is a hit"
+
+        store.add_hands(hands[10:])
+        after = roster_payload(store)
+    assert after != first, "adding hands has to invalidate the roster"
+
+
+def test_refitting_priors_invalidates_the_roster(tmp_path, hands):
+    """The hole a row-count key would leave. `fit_priors` rewrites the same
+    number of rows with different values, and every profile is read through
+    them -- so a cache that only counted rows would serve pre-fit reads for as
+    long as the process lived."""
+    from villain.webapp.payloads import _roster_fingerprint
+
+    db = tmp_path / "v.db"
+    with Store(db) as store:
+        store.add_hands(hands)
+        before = _roster_fingerprint(store)
+        store.conn.execute(
+            "INSERT INTO fitted_priors"
+            " (regime, stat, mean, strength, players, fitted_at)"
+            " VALUES ('hu', 'test:stat', 0.5, 1.0, 9, 0)")
+        store.conn.commit()
+        seeded = _roster_fingerprint(store)
+        assert seeded != before
+
+        # Same row count, different value -- what a refit does.
+        store.conn.execute(
+            "UPDATE fitted_priors SET strength = strength + 1"
+            " WHERE stat = 'test:stat'")
+        store.conn.commit()
+        assert _roster_fingerprint(store) != seeded
+
+
+def test_the_roster_hands_out_a_copy(tmp_path, hands):
+    """A caller that sorts or annotates its rows in place must not be editing
+    what the next caller gets."""
+    from villain.webapp.payloads import roster_payload
+
+    db = tmp_path / "v.db"
+    with Store(db) as store:
+        store.add_hands(hands)
+        rows = roster_payload(store)
+        assert rows, "fixture should produce a roster"
+        rows[0]["name"] = "scribbled over"
+        again = roster_payload(store)
+    assert again[0]["name"] != "scribbled over"
+
+
+# --- reads are as local as writes --------------------------------------------
+
+def _dispatch_from(db_path, method, path, origin=None, referer=None, host="127.0.0.1"):
+    from villain.webapp import browser
+
+    headers = {"Host": host, "Content-Length": "0"}
+    if origin:
+        headers["Origin"] = origin
+    if referer:
+        headers["Referer"] = referer
+    browser.set_db(str(db_path))
+    return browser.dispatch(method, path, headers, b"")
+
+
+def test_a_cross_origin_page_cannot_read_the_roster(tmp_path, hands):
+    """The whole threat model is "these people's games never leave the laptop".
+
+    Only writes were checked, so any tab open in the same browser could fetch
+    the roster off localhost and read every player's name -- or point an <img>
+    at it, which sends no Origin but does send a Referer.
+    """
+    db = tmp_path / "v.db"
+    with Store(db) as store:
+        store.add_hands(hands)
+
+    for header in ({"origin": "https://evil.example"},
+                   {"referer": "https://evil.example/page"}):
+        status, body, _ = _dispatch_from(db, "GET", "/api/roster", **header)
+        assert status == 403, f"{header} was allowed to read the roster"
+        assert "cross-origin" in json.loads(body)["error"]
+
+
+def test_a_rebinding_host_cannot_read_the_roster(tmp_path, hands):
+    db = tmp_path / "v.db"
+    with Store(db) as store:
+        store.add_hands(hands)
+    status, _, _ = _dispatch_from(db, "GET", "/api/roster", host="villain.attacker.example")
+    assert status == 403
+
+
+def test_the_ui_itself_still_reads_normally(tmp_path, hands):
+    """The page is served from loopback, so its own reads carry a local Referer
+    -- and the CLI carries neither header, which is not a browser at all."""
+    db = tmp_path / "v.db"
+    with Store(db) as store:
+        store.add_hands(hands)
+
+    for header in ({}, {"origin": "http://127.0.0.1:8766"},
+                   {"referer": "http://localhost:8766/"}):
+        status, _, _ = _dispatch_from(db, "GET", "/api/roster", **header)
+        assert status == 200, f"{header} should have been allowed"
+
+
+def test_the_shell_and_its_assets_stay_loadable(tmp_path):
+    """Not guarded on purpose: they carry nothing about anybody, and guarding
+    them risks breaking the page load for no privacy gain."""
+    db = tmp_path / "v.db"
+    with Store(db):
+        pass
+    for path in ("/", "/static/app.js", "/static/app.css"):
+        status, _, _ = _dispatch_from(db, "GET", path, origin="https://evil.example")
+        assert status == 200, path
 
 
 def test_a_read_that_only_holds_at_one_table_size_survives(tmp_path):
@@ -623,7 +871,7 @@ def test_the_against_you_read_is_detail_only(tmp_path):
     from tests.conftest import FIXTURE
     from villain.analyze import as_dict
     from villain.parsers import parse_file
-    from villain.web import roster_payload
+    from villain.webapp import roster_payload
 
     with Store(tmp_path / "v.db") as store:
         store.add_hands(parse_file(FIXTURE))

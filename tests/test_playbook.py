@@ -225,7 +225,18 @@ def test_narrate_does_not_try_localhost_when_unconfigured(monkeypatch, tmp_path)
 
 
 def test_narrate_reports_why_it_could_not_run(monkeypatch):
+    """A dead endpoint has to come back as "could not reach", not as a hang.
+
+    The backoff between attempts is recorded rather than slept: waiting it out
+    made this one test 18 of the suite's 23 seconds, which is a real tax on the
+    "run pytest before and after any change" rule. Asserting the waits happened
+    keeps what the sleeping was there to prove -- that a retry chain ran and
+    gave up -- without paying for it.
+    """
     from villain import narrate as module
+
+    waited: list[float] = []
+    monkeypatch.setattr(module.time, "sleep", waited.append)
     monkeypatch.setenv("VILLAIN_LLM_URL", "http://127.0.0.1:9/none")
     with pytest.raises(Unavailable, match="could not reach"):
         module.narrate({"name": "x", "regime": "hu", "hands": 1,
@@ -233,6 +244,15 @@ def test_narrate_reports_why_it_could_not_run(monkeypatch):
                         "archetype_confidence": 0.5, "summary": "",
                         "skill": {"score": 50, "tier": "competent"}, "leaks": []},
                        timeout=2)
+    assert waited, "a connection failure is retryable and should have backed off"
+    # One growing ramp per model, not one across the chain: a model that cannot
+    # be reached is retried on its own schedule, and the next model in the chain
+    # starts fresh because it is a different endpoint with a different reason to
+    # be failing.
+    ramp = [module.BACKOFF ** attempt for attempt in range(1, module.ATTEMPTS)]
+    assert len(waited) % len(ramp) == 0
+    assert waited == ramp * (len(waited) // len(ramp))
+    assert max(waited) <= module.MAX_BACKOFF
 
 
 # -- one player, one profile ------------------------------------------------

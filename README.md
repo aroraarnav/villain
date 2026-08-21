@@ -60,9 +60,9 @@ cd villain
 
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -e .
+pip install -e ".[dev]"
 
-pytest                             # 385 tests
+pytest                             # the suite, in a few seconds
 villain test                       # then open http://127.0.0.1:8766
 ```
 

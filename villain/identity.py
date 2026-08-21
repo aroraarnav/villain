@@ -656,7 +656,17 @@ def session_questions(store, hands, min_name_score: float = HIGH_NAME_SCORE) -> 
                  "player_id": player_id, "where": "already in the database"},
                 {"name": entry["name"], "hands": entry["hands"], "site": key[0],
                  "account": key[1], "where": "in the hands you are adding"},
-                auto=True, matched_a=best[1], matched_b=entry["name"])
+                # A name-plus-suffix match is evidence for a question and never
+                # an answer, which is what `_containment_score` returning 0.93
+                # against a 0.92 bar was always meant to buy: enough to raise
+                # the pair, not enough to settle it. Auto-merging it anyway made
+                # the shape that makes `PlayerA`/`PlayerALaptop` one person also
+                # silently pool `PlayerG`/`PlayerG North`, who are two -- and a
+                # wrong merge costs an unlink and a rebuild to undo, where a
+                # wrong question costs a click.
+                auto=not matched_only_by_containment(
+                    best[1], entry["name"], min_name_score),
+                matched_a=best[1], matched_b=entry["name"])
 
     questions.sort(key=lambda q: (q.kind != "rename", -(q.confidence or 1.0)))
     return questions

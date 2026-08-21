@@ -28,7 +28,6 @@ from ..stats import VS_HERO
 from .assets import page, static
 from .heroview import _cached_hero_id, forget_hero, hero_begin, hero_payload, hero_status
 from .jsonutil import encode as json_encode
-from .leaderboard import leaderboard_payload
 from .payloads import MIN_ROSTER_HANDS, profile_payload, roster_payload, tab_availability
 from .sessions import SESSIONS, SIM_GAMES, _reap_sessions, apply_answers, commit_session, parse_upload, question_payload, session_brief, session_payload
 
@@ -39,6 +38,54 @@ LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", ""})
 #: The UI uploads multiple hand-history JSON files in a single JSON payload,
 #: so large batches can exceed the default 64MB limit.
 MAX_BODY_BYTES = 256 * 1024 * 1024
+
+#: Which POST routes leave the stored database different afterwards, and which
+#: only touch memory. Every route ``do_POST`` answers has to appear in one of
+#: them -- ``tests/test_web.py`` reads this handler's source and fails on a
+#: route that is in neither, because "I forgot to classify it" is exactly the
+#: mistake this exists to make impossible.
+#:
+#: The hosted app is why this is data rather than a comment. It runs the same
+#: handler in a Pyodide worker over a database it has to upload after a change,
+#: and it decides whether to upload by asking this list. It used to carry its
+#: own hand-copied copy of it, so a new writing route would have worked
+#: perfectly on a laptop and silently never been saved to the account -- the
+#: user's import surviving until they opened the app on another device.
+#:
+#: ``<token>`` stands for one path segment; see :func:`writes_to_disk`.
+WRITING_POST_ROUTES = frozenset({
+    "/api/reset",
+    "/api/unlink",
+    "/api/player/delete",
+    "/api/session/<token>/commit",
+})
+
+#: The rest: parsing into memory, running the simulator, asking a model for
+#: prose, answering identity questions on a session that has not been saved.
+READING_POST_ROUTES = frozenset({
+    "/api/upload",
+    "/api/sim/new",
+    "/api/sim/act",
+    "/api/sim/step",
+    "/api/sim/next",
+    "/api/sim/analysis",
+    "/api/session/<token>/identity",
+    "/api/session/<token>/plan",
+})
+
+
+def writes_to_disk(path: str) -> bool:
+    """Does a POST to ``path`` change what is stored on disk?
+
+    The hosted shell asks this through :data:`/api/meta` rather than pattern
+    matching on its own, so there is one answer and it is this module's.
+    """
+    if path in WRITING_POST_ROUTES:
+        return True
+    parts = path.split("/")
+    if len(parts) == 5 and parts[:3] == ["", "api", "session"]:
+        return f"/api/session/<token>/{parts[4]}" in WRITING_POST_ROUTES
+    return False
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -58,6 +105,15 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         route = urlparse(self.path)
         path = route.path
+        # Reads carry the data this tool exists to keep local: the roster names
+        # every player in a real home game, and hand replay returns their cards.
+        # Only POST was checked, so any page open in the same browser could
+        # `fetch("http://127.0.0.1:8766/api/roster")` -- or point an <img> at it
+        # -- and read all of it. The shell and its assets are deliberately not
+        # guarded: they hold nothing about anybody, and leaving the page itself
+        # loadable keeps this from being able to break opening the app.
+        if path.startswith("/api/") and not self._same_origin():
+            return self._send(403, {"error": "cross-origin request refused"})
         try:
             if path in ("/", "/index.html"):
                 return self._send(200, page(), "text/html; charset=utf-8")
@@ -103,7 +159,6 @@ class Handler(BaseHTTPRequestHandler):
                         # import, not an empty database. Say which.
                         "books_missing": store.books_missing(),
                         "fit_priors": {
-                            "suggested": n_players >= 8 and n_fitted == 0,
                             "players": n_players,
                             "has_fitted": n_fitted > 0,
                         },
@@ -141,9 +196,6 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(404, {"error": "session expired -- upload again"})
                 with Store(self.db_path) as store:
                     return self._send(200, session_payload(token, store))
-            if path == "/api/leaderboard":
-                with Store(self.db_path) as store:
-                    return self._send(200, leaderboard_payload(store))
             if path == "/api/hero":
                 with Store(self.db_path) as store:
                     # "Is this going to take a while?" -- asked before the real
@@ -261,6 +313,11 @@ class Handler(BaseHTTPRequestHandler):
                 with Store(self.db_path) as store:
                     return self._send(200, {
                         "tabs": tab_availability(store),
+                        # The hosted shell decides whether a POST it just made
+                        # has to be uploaded to the account. It asks here so
+                        # that the answer comes from the module that owns the
+                        # routes, not from a regex kept in step by hand.
+                        "writing_routes": sorted(WRITING_POST_ROUTES),
                     })
             if path == "/api/glossary":
                 return self._send(200, glossary_payload())
@@ -349,10 +406,6 @@ class Handler(BaseHTTPRequestHandler):
                     # so all of them have to go: one of those ids is now free.
                     forget_hero(store)
                     return self._send(200, result)
-            if route == "/api/fit-priors":
-                with Store(self.db_path) as store:
-                    fitted = store.fit_priors(min_players=int(body.get("min_players", 8)))
-                    return self._send(200, {"fitted": fitted})
             if route.startswith("/api/session/") and route.endswith("/identity"):
                 token = route.split("/")[3]
                 if token not in SESSIONS:
@@ -389,9 +442,6 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, commit_session(
                         store, token, body.get("answers") or {}))
             with Store(self.db_path) as store:
-                if route == "/api/link":
-                    store.link(int(body["keep"]), int(body["absorb"]))
-                    return self._send(200, {"ok": True})
                 if route == "/api/unlink":
                     new_id = store.unlink(int(body["player_id"]),
                                           str(body["site"]), str(body["account"]))
@@ -401,9 +451,6 @@ class Handler(BaseHTTPRequestHandler):
                     # hero's, nothing would notice.
                     forget_hero(store)
                     return self._send(200, {"ok": True, "player_id": new_id})
-                if route == "/api/note":
-                    store.add_note(int(body["player_id"]), str(body["body"]))
-                    return self._send(200, {"ok": True})
             return self._send(404, {"error": "not found"})
         except ValueError as exc:
             return self._send(409, {"error": str(exc)})
@@ -568,7 +615,7 @@ def serve(db: Path = DEFAULT_PATH, port: int = 8766, open_browser: bool = True):
 
 def main(argv=None):
     import argparse
-    parser = argparse.ArgumentParser(prog="python -m villain.web", description=__doc__.split("\n")[0])
+    parser = argparse.ArgumentParser(prog="villain test", description=__doc__.split("\n")[0])
     parser.add_argument("--db", type=Path, default=DEFAULT_PATH)
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--no-browser", action="store_true")

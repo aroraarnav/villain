@@ -37,10 +37,6 @@ def enrich(profile: Profile) -> Profile:
     return profile
 
 
-def enrich_all(profiles: list[Profile]) -> list[Profile]:
-    return [enrich(p) for p in profiles]
-
-
 def is_public(stat: str) -> bool:
     return not stat.startswith(INTERNAL_PREFIXES)
 

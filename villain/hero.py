@@ -51,6 +51,7 @@ word for it where a site gives one.
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .model import STREET_LABELS, Act, Street
@@ -341,6 +342,37 @@ def fit_population_model(store, progress=None, hands=None) -> StrengthModel:
     return fit_strength(rows)
 
 
+def _hero_spots(hands: list, hero_id: int, progress=None):
+    """Yield ``(hand, seat, strengths)`` for every hand hero's cards are known in.
+
+    Every measurement in this module below this line starts the same way, and
+    for the same reason: hero analysis is only possible at all because hero's
+    hole cards are in the history, so each one first has to find hero's seat,
+    refuse the hands where the cards are missing, and price the holding on
+    every street. Written out five times, that preamble drifted -- the board
+    check, the two-card check and the ``str(hero_id)`` comparison are load
+    bearing together, and a fix applied to folds but missed on checks is the
+    class of bug that silently changes a denominator rather than raising.
+
+    ``progress(done, total)`` is reported here rather than by each caller for
+    the same reason: :func:`~villain.reads.strength_by_street` is the expensive
+    call and it happens in this loop, so this is the only place that knows how
+    far along the work actually is.
+    """
+    total = len(hands)
+    for at, hand in enumerate(hands):
+        if progress is not None and at % 200 == 0:
+            progress(at, total)
+        if not hand.board:
+            continue
+        seat = next((s for s in hand.seats if s.player_id == str(hero_id)), None)
+        if seat is None or len(seat.hole_cards) != 2:
+            continue
+        yield hand, seat, strength_by_street(hand, {seat.seat: seat})
+    if progress is not None:
+        progress(total, total)
+
+
 @dataclass
 class FoldGrade:
     hand_id: str
@@ -449,13 +481,7 @@ def fold_grades(hands: list, hero_id: int, model: StrengthModel) -> FoldReport:
     with :func:`preflop_range`, not here.
     """
     grades: list[FoldGrade] = []
-    for hand in hands:
-        if not hand.board:
-            continue
-        seat = next((s for s in hand.seats if s.player_id == str(hero_id)), None)
-        if seat is None or len(seat.hole_cards) != 2:
-            continue
-        strengths = strength_by_street(hand, {seat.seat: seat})
+    for hand, seat, strengths in _hero_spots(hands, hero_id):
         view = HandView(hand)
         current_street = Street.PREFLOP
         last_aggro: Decision | None = None
@@ -629,13 +655,7 @@ def missed_value(hands: list, hero_id: int, model: StrengthModel) -> MissedValue
     reason it is everywhere else in this module.
     """
     grades: list[MissedValue] = []
-    for hand in hands:
-        if not hand.board:
-            continue
-        seat = next((s for s in hand.seats if s.player_id == str(hero_id)), None)
-        if seat is None or len(seat.hole_cards) != 2:
-            continue
-        strengths = strength_by_street(hand, {seat.seat: seat})
+    for hand, seat, strengths in _hero_spots(hands, hero_id):
         for decision in HandView(hand).decisions():
             if (decision.seat != seat.seat or decision.street is Street.PREFLOP
                     or decision.action.act is not Act.CHECK):
@@ -654,48 +674,107 @@ def missed_value(hands: list, hero_id: int, model: StrengthModel) -> MissedValue
 
 
 # ---------------------------------------------------------------------------
-# sizing tell: does the size of the bet change with the hand behind it
+# tells: does something visible about hero's bet change with the hand behind it
 # ---------------------------------------------------------------------------
+# Two of these, asked the same way of the same decisions -- bet size, and think
+# time. They were written as two parallel class pairs, which meant `gap` and
+# `tells` existed twice character-for-character and the web layer needed a
+# getattr shim to read `avg_size` off one and `avg_think_s` off the other. What
+# actually differs between them is a bar, a verb and a number format, so that is
+# what :class:`TellKind` holds and everything else is shared.
 
-#: Below this many bets on one side of the split, a size gap is sample noise,
-#: not a tell -- the same shape of guard exploits.py uses (MIN_OPPS) before
-#: pricing a leak, applied to a comparison instead of a single frequency.
-MIN_SIZING_HANDS = 8
+#: Below this many bets on one side of the split, a gap is sample noise, not a
+#: tell -- the same shape of guard exploits.py uses (MIN_OPPS) before pricing a
+#: leak, applied to a comparison instead of a single frequency.
+MIN_TELL_HANDS = 8
 
-#: A gap smaller than this, in pot fractions, is not worth calling a tell --
-#: a chosen bar, like several of exploits.py's, not a derived one. 15 points
-#: of pot is roughly the difference between a half-pot and a two-thirds-pot
-#: bet, which is the kind of gap an attentive opponent actually notices.
+#: A size gap smaller than this, in pot fractions, is not worth calling a tell
+#: -- a chosen bar, like several of exploits.py's, not a derived one. 15 points
+#: of pot is roughly the difference between a half-pot and a two-thirds-pot bet,
+#: which is the kind of gap an attentive opponent actually notices.
 SIZING_TELL_GAP = 0.15
 
+#: A chosen bar, not a derived one: two seconds is long enough to not be click
+#: noise and short enough that a real habit produces it.
+TIMING_TELL_GAP = 2.0
+
+#: Same cap villain.reads applies before feeding think time to the population
+#: model -- one disconnect or one multi-tabled hand should not own the average.
+THINK_CAP_S = 60.0
+
+#: Hero's hand strength runs 0-1 over what the board allows, so the median is
+#: the split -- a fixed reference, not a value fit from this player's data.
+STRONG_HALF = 0.5
+
 
 @dataclass
-class SizeBucket:
+class Bucket:
     label: str
     hands: int = 0
-    total_fraction: float = 0.0
+    total: float = 0.0
 
     @property
-    def avg_size(self) -> float | None:
-        return self.total_fraction / self.hands if self.hands else None
+    def avg(self) -> float | None:
+        return self.total / self.hands if self.hands else None
+
+
+@dataclass(frozen=True)
+class TellKind:
+    """The whole difference between the sizing tell and the timing tell.
+
+    ``phrase`` renders the two averages into the middle of the sentence and
+    ``warning`` the clause after it, because those are the only parts that
+    cannot be shared: a size reads as a percentage of pot and a think time as
+    seconds, and only timing has a direction worth naming (tanking with bluffs
+    is a different tell from taking longer with value).
+    """
+    gap_bar: float
+    verb: str
+    phrase: Callable[[float, float], str]
+    warning: Callable[[float], str]
+    min_hands: int = MIN_TELL_HANDS
+
+
+SIZING = TellKind(
+    gap_bar=SIZING_TELL_GAP, verb="you bet",
+    phrase=lambda strong, weak: (f"{strong:.0%} pot with your strongest hands "
+                                 f"and {weak:.0%} pot with your weakest"),
+    warning=lambda gap: ("a gap big enough that an observant opponent could "
+                         "read your size."),
+)
+
+TIMING = TellKind(
+    gap_bar=TIMING_TELL_GAP, verb="you took",
+    phrase=lambda strong, weak: (f"{strong:.1f}s to bet your strongest hands "
+                                 f"and {weak:.1f}s with your weakest"),
+    warning=lambda gap: ("a gap big enough to suggest you "
+                         + ("tank with your bluffs" if gap < 0
+                            else "take longer with your strong hands") + "."),
+)
 
 
 @dataclass
-class SizingTell:
+class Tell:
     #: street -> (bucket for hands >= median strength, bucket for < median)
-    by_street: dict[int, tuple[SizeBucket, SizeBucket]]
+    by_street: dict[int, tuple[Bucket, Bucket]]
+    kind: TellKind
 
     def gap(self, street: int) -> float | None:
-        """Strong-hand average size minus weak-hand average size, or None
-        when either side is too thin to compare."""
+        """Strong-hand average minus weak-hand average, or None when either
+        side is too thin to compare.
+
+        Sign is meaningful and differs by kind: a positive size gap means hero
+        bets bigger with the better half, a negative timing gap means hero
+        thinks longer with the worse half -- the classic tank-as-bluff tell.
+        """
         pair = self.by_street.get(street)
         if not pair:
             return None
         strong, weak = pair
-        if (strong.hands < MIN_SIZING_HANDS or weak.hands < MIN_SIZING_HANDS
-                or strong.avg_size is None or weak.avg_size is None):
+        if (strong.hands < self.kind.min_hands or weak.hands < self.kind.min_hands
+                or strong.avg is None or weak.avg is None):
             return None
-        return strong.avg_size - weak.avg_size
+        return strong.avg - weak.avg
 
     def tells(self) -> list[tuple[int, float]]:
         """(street, gap) for every street with enough data and a real gap,
@@ -703,7 +782,7 @@ class SizingTell:
         found = []
         for street in self.by_street:
             gap = self.gap(street)
-            if gap is not None and abs(gap) >= SIZING_TELL_GAP:
+            if gap is not None and abs(gap) >= self.kind.gap_bar:
                 found.append((street, gap))
         return sorted(found, key=lambda sg: -abs(sg[1]))
 
@@ -719,193 +798,75 @@ class SizingTell:
         if not pair:
             return None
         strong, weak = pair
-        if strong.avg_size is None or weak.avg_size is None:
+        if strong.avg is None or weak.avg is None:
             return None
-        verb = (f"On the {STREET_LABELS.get(street, street)}, you bet" if lead
-               else "You bet")
-        sentence = (f"{verb} {strong.avg_size:.0%} pot with your "
-                   f"strongest hands and {weak.avg_size:.0%} pot with your weakest")
+        opener = (f"On the {STREET_LABELS.get(street, street)}, {self.kind.verb}"
+                  if lead else self.kind.verb.capitalize())
+        sentence = f"{opener} {self.kind.phrase(strong.avg, weak.avg)}"
         gap = self.gap(street)
-        if gap is not None and abs(gap) >= SIZING_TELL_GAP:
-            sentence += " -- a gap big enough that an observant opponent could read your size."
+        if gap is not None and abs(gap) >= self.kind.gap_bar:
+            sentence += " -- " + self.kind.warning(gap)
         else:
             sentence += "."
         return sentence
 
 
-def sizing_tell(hands: list, hero_id: int, progress=None) -> SizingTell:
-    """Does hero bet bigger with better hands? The mirror of fold grading,
-    asked of hero's aggression instead of hero's folds -- and, like the fold
-    grades, a question that is only answerable at all because hero's hand
-    strength is known on every action, not just the ones that reached
-    showdown.
+def _aggression_tell(hands: list, hero_id: int, kind: TellKind,
+                     measure, progress=None) -> Tell:
+    """Split hero's own bets and raises by the strength behind them.
 
-    Split at 0.5 -- the median of every hand the board allows, not a value
-    fit from data -- into "top half" and "bottom half," and compare average
-    bet-or-raise size between them. A real gap is a sizing tell: an observant
-    opponent could read hand strength off bet size alone, without ever
-    seeing a card.
+    Scoped to bets and raises for both kinds: they are read together as "does
+    hero's aggression carry a tell," which is a narrower and more answerable
+    question than grading every action type. It is only answerable at all
+    because hero's hand strength is known on every action, not just the ones
+    that reached showdown -- no villain's is.
+    """
+    by_street: dict[int, tuple[Bucket, Bucket]] = {
+        int(s): (Bucket("top half"), Bucket("bottom half"))
+        for s in (Street.FLOP, Street.TURN, Street.RIVER)
+    }
+    for hand, seat, strengths in _hero_spots(hands, hero_id, progress):
+        for decision in HandView(hand).decisions():
+            if (decision.seat != seat.seat or decision.street is Street.PREFLOP
+                    or decision.action.act not in (Act.BET, Act.RAISE)):
+                continue
+            strength = strengths.get((seat.seat, decision.street))
+            if strength is None:
+                continue
+            strong, weak = by_street[int(decision.street)]
+            bucket = strong if strength >= STRONG_HALF else weak
+            bucket.hands += 1
+            bucket.total += measure(decision)
+    return Tell(by_street=by_street, kind=kind)
+
+
+def sizing_tell(hands: list, hero_id: int, progress=None) -> Tell:
+    """Does hero bet bigger with better hands? The mirror of fold grading,
+    asked of hero's aggression instead of hero's folds. A real gap means an
+    observant opponent could read hand strength off bet size alone, without
+    ever seeing a card.
 
     ``hands`` is hero's own hands, e.g. ``store.player_hands(hero_id)``.
     Preflop is excluded for the same reason it is in :func:`fold_grades`:
     :func:`villain.reads.strength_by_street` needs a board.
 
-    ``progress(done, total)`` is the same callback :func:`build_dataset`
-    takes: this walk calls ``strength_by_street`` per hand, and on a cold
-    cache that is a long silence after the histories have already been
-    read.
+    ``progress(done, total)`` is the same callback :func:`build_dataset` takes:
+    this walk calls ``strength_by_street`` per hand, and on a cold cache that
+    is a long silence after the histories have already been read.
     """
-    by_street: dict[int, tuple[SizeBucket, SizeBucket]] = {
-        int(s): (SizeBucket("top half"), SizeBucket("bottom half"))
-        for s in (Street.FLOP, Street.TURN, Street.RIVER)
-    }
-    total = len(hands)
-    for at, hand in enumerate(hands):
-        if progress is not None and at % 200 == 0:
-            progress(at, total)
-        if not hand.board:
-            continue
-        seat = next((s for s in hand.seats if s.player_id == str(hero_id)), None)
-        if seat is None or len(seat.hole_cards) != 2:
-            continue
-        strengths = strength_by_street(hand, {seat.seat: seat})
-        for decision in HandView(hand).decisions():
-            if (decision.seat != seat.seat or decision.street is Street.PREFLOP
-                    or decision.action.act not in (Act.BET, Act.RAISE)):
-                continue
-            strength = strengths.get((seat.seat, decision.street))
-            if strength is None:
-                continue
-            strong, weak = by_street[int(decision.street)]
-            bucket = strong if strength >= 0.5 else weak
-            bucket.hands += 1
-            bucket.total_fraction += decision.bet_fraction
-    if progress is not None:
-        progress(total, total)
-    return SizingTell(by_street=by_street)
+    return _aggression_tell(hands, hero_id, SIZING,
+                            lambda d: d.bet_fraction, progress)
 
 
-# ---------------------------------------------------------------------------
-# timing tell: does think time change with the hand behind it
-# ---------------------------------------------------------------------------
-# The same split as sizing_tell, same reason it only works for hero, applied
-# to Action.think_ms instead of bet_fraction: a snap bet and a tanked one are
-# different information if they correlate with hand strength, and nobody's
-# strength is known well enough to ask a villain this either.
-
-#: Same shape of guard as MIN_SIZING_HANDS, its own name because it gates a
-#: different comparison.
-MIN_TIMING_HANDS = 8
-
-#: A chosen bar, not a derived one: two seconds is long enough to not be
-#: click noise and short enough that a real habit produces it.
-TIMING_TELL_GAP = 2.0
-
-#: Same cap villain.reads applies before feeding think time to the population
-#: model -- one disconnect or one multi-tabled hand should not own the average.
-THINK_CAP_S = 60.0
-
-
-@dataclass
-class TimeBucket:
-    label: str
-    hands: int = 0
-    total_think_s: float = 0.0
-
-    @property
-    def avg_think_s(self) -> float | None:
-        return self.total_think_s / self.hands if self.hands else None
-
-
-@dataclass
-class TimingTell:
-    #: street -> (bucket for hands >= median strength, bucket for < median)
-    by_street: dict[int, tuple[TimeBucket, TimeBucket]]
-
-    def gap(self, street: int) -> float | None:
-        """Strong-hand average think time minus weak-hand average, or None
-        when either side is too thin to compare. Positive means hero thinks
-        longer with the better half; negative means hero thinks longer with
-        the worse half -- the classic tank-as-bluff tell."""
-        pair = self.by_street.get(street)
-        if not pair:
-            return None
-        strong, weak = pair
-        if (strong.hands < MIN_TIMING_HANDS or weak.hands < MIN_TIMING_HANDS
-                or strong.avg_think_s is None or weak.avg_think_s is None):
-            return None
-        return strong.avg_think_s - weak.avg_think_s
-
-    def tells(self) -> list[tuple[int, float]]:
-        """(street, gap) for every street with enough data and a real gap,
-        biggest gap first."""
-        found = []
-        for street in self.by_street:
-            gap = self.gap(street)
-            if gap is not None and abs(gap) >= TIMING_TELL_GAP:
-                found.append((street, gap))
-        return sorted(found, key=lambda sg: -abs(sg[1]))
-
-    def describe(self, street: int, lead: bool = True) -> str | None:
-        """One sentence for a street with enough data to compare, or None.
-        ``lead=False`` -- see SizingTell.describe."""
-        pair = self.by_street.get(street)
-        if not pair:
-            return None
-        strong, weak = pair
-        if strong.avg_think_s is None or weak.avg_think_s is None:
-            return None
-        verb = (f"On the {STREET_LABELS.get(street, street)}, you took" if lead
-               else "You took")
-        sentence = (f"{verb} {strong.avg_think_s:.1f}s to bet your "
-                   f"strongest hands and {weak.avg_think_s:.1f}s with your weakest")
-        gap = self.gap(street)
-        if gap is not None and abs(gap) >= TIMING_TELL_GAP:
-            tell_direction = "tank with your bluffs" if gap < 0 else "take longer with your strong hands"
-            sentence += f" -- a gap big enough to suggest you {tell_direction}."
-        else:
-            sentence += "."
-        return sentence
-
-
-def timing_tell(hands: list, hero_id: int, progress=None) -> TimingTell:
-    """Does hero take longer to act with one half of the hand-strength range
-    than the other? Scoped to bets and raises, matching :func:`sizing_tell`
-    exactly -- the two are read together, "does hero's aggression carry a
-    tell," rather than trying to grade timing on every action type from day
-    one.
-
-    ``hands`` is hero's own hands. Preflop excluded for the same reason it is
-    everywhere else in this module.
+def timing_tell(hands: list, hero_id: int, progress=None) -> Tell:
+    """Does hero take longer to act with one half of the strength range than
+    the other? A snap bet and a tanked one are different information if they
+    correlate with hand strength, and nobody else's strength is known well
+    enough to ask a villain this either.
     """
-    by_street: dict[int, tuple[TimeBucket, TimeBucket]] = {
-        int(s): (TimeBucket("top half"), TimeBucket("bottom half"))
-        for s in (Street.FLOP, Street.TURN, Street.RIVER)
-    }
-    total = len(hands)
-    for at, hand in enumerate(hands):
-        if progress is not None and at % 200 == 0:
-            progress(at, total)
-        if not hand.board:
-            continue
-        seat = next((s for s in hand.seats if s.player_id == str(hero_id)), None)
-        if seat is None or len(seat.hole_cards) != 2:
-            continue
-        strengths = strength_by_street(hand, {seat.seat: seat})
-        for decision in HandView(hand).decisions():
-            if (decision.seat != seat.seat or decision.street is Street.PREFLOP
-                    or decision.action.act not in (Act.BET, Act.RAISE)):
-                continue
-            strength = strengths.get((seat.seat, decision.street))
-            if strength is None:
-                continue
-            strong, weak = by_street[int(decision.street)]
-            bucket = strong if strength >= 0.5 else weak
-            bucket.hands += 1
-            bucket.total_think_s += min((decision.action.think_ms or 0) / 1000.0, THINK_CAP_S)
-    if progress is not None:
-        progress(total, total)
-    return TimingTell(by_street=by_street)
+    return _aggression_tell(
+        hands, hero_id, TIMING,
+        lambda d: min((d.action.think_ms or 0) / 1000.0, THINK_CAP_S), progress)
 
 
 # ---------------------------------------------------------------------------
@@ -934,16 +895,7 @@ def range_narrowing(hands: list, hero_id: int, progress=None) -> list[StreetStre
     double-counting a player who folded before a street was ever dealt.
     """
     totals: dict[int, list[float]] = {int(s): [] for s in (Street.FLOP, Street.TURN, Street.RIVER)}
-    total = len(hands)
-    for at, hand in enumerate(hands):
-        if progress is not None and at % 200 == 0:
-            progress(at, total)
-        if not hand.board:
-            continue
-        seat = next((s for s in hand.seats if s.player_id == str(hero_id)), None)
-        if seat is None or len(seat.hole_cards) != 2:
-            continue
-        strengths = strength_by_street(hand, {seat.seat: seat})
+    for hand, seat, strengths in _hero_spots(hands, hero_id, progress):
         view = HandView(hand)
         for street in (Street.FLOP, Street.TURN, Street.RIVER):
             if seat.seat not in view.saw.get(street, ()):
@@ -951,7 +903,5 @@ def range_narrowing(hands: list, hero_id: int, progress=None) -> list[StreetStre
             strength = strengths.get((seat.seat, street))
             if strength is not None:
                 totals[int(street)].append(strength)
-    if progress is not None:
-        progress(total, total)
     return [StreetStrength(street=s, hands=len(vals), avg_strength=sum(vals) / len(vals))
             for s, vals in totals.items() if vals]

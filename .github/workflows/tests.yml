@@ -22,11 +22,40 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      # The dev extra, not a bare `pip install ruff`: pinning the linter in one
+      # place is the point of having it in pyproject.toml, and CI drifting to a
+      # newer ruff than the one developers run means the checklist in CLAUDE.md
+      # ("ruff check . clean before a PR") stops being true.
       - name: Install ruff
-        run: pip install ruff
+        run: pip install -e ".[dev]"
 
       - name: Lint
         run: ruff check .
+
+  # The UI is ~4,000 lines of vanilla JavaScript that nothing else in this
+  # repository parses. There is no bundler and no test runner for it, so a
+  # syntax error in app.js or the hosted boot script reached GitHub Pages and
+  # was found by a visitor with a blank page. `node --check` is not a linter
+  # and is not pretending to be one -- it is the gate that says the file is
+  # still a program.
+  javascript:
+    name: javascript syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Parse every script we ship
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for f in villain/webapp/assets/*.js web/*.js; do
+            echo "checking $f"
+            node --check "$f"
+          done
 
   pytest:
     name: pytest (py${{ matrix.python-version }})
@@ -47,7 +76,7 @@ jobs:
       - name: Install package and test deps
         run: |
           python -m pip install --upgrade pip
-          pip install -e . pytest
+          pip install -e ".[dev]"
 
       - name: Run tests
         run: pytest -q

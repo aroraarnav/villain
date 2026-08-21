@@ -261,10 +261,6 @@ def merge_books(by_regime: dict[str, StatBook]) -> StatBook:
     return total
 
 
-def feature_vector(profile: Profile) -> list[float | None]:
-    return [profile.get(f) for f in PROFILE_FEATURES]
-
-
 def evidence(profile: Profile) -> list[float]:
     """How much real data backs each feature, 0-1. Clustering weights by this."""
     return [profile.stats[f].weight if f in profile.stats else 0.0 for f in PROFILE_FEATURES]

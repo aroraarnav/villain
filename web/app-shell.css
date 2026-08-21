@@ -1,0 +1,70 @@
+/* Styles for the parts of the page only the hosted app has: the account
+   chip in the header and the guest bar under the nav. They live here and
+   not in app.css because app.css ships inside the wheel, which the local
+   `villain ui` serves too -- and locally there is no account to show.
+
+   Everything here is written in app.css's custom properties, so it has to
+   be injected after app.css is in the document, which is what app-shell.js
+   does. It was a template literal inside that script until it grew past
+   sixty lines of real stylesheet with no highlighting and no way to lint
+   it. */
+
+/* Same geometry and palette as .iconbtn beside it, so the header reads as
+   one row of controls rather than a toolbar with a sign-in bolted on. */
+.acct { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
+.acct button {
+  font: inherit; font-size: 13px; border: 1px solid var(--edge); background: transparent;
+  color: var(--muted); border-radius: 999px; height: 34px; padding: 0 14px;
+  cursor: pointer; display: inline-flex; align-items: center; white-space: nowrap;
+}
+.acct button:hover { color: var(--ink); border-color: var(--accent); }
+.acct .who { color: var(--muted); }
+.acct .msg { color: var(--muted); max-width: 20rem; }
+.acct .msg.bad { color: var(--red); }
+/* How far a save has got. Hidden until there is something to show, so
+   the header is not carrying an empty gauge the rest of the time. */
+.acct .gauge {
+  display: none; width: 84px; height: 4px; border-radius: 999px;
+  background: var(--line); overflow: hidden;
+}
+.acct .gauge.on { display: block; }
+.acct .gauge > i {
+  display: block; height: 100%; width: 0; background: var(--red);
+  transition: width .18s linear;
+}
+
+.guestbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 14px 0 0; padding: 10px 14px; font-size: 13px;
+  border: 1px solid var(--edge); border-left: 3px solid var(--red);
+  border-radius: 8px; color: var(--muted); background: transparent;
+}
+.guestbar b { color: var(--ink); font-weight: 600; }
+.guestbar .signin { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.guestbar input {
+  font: inherit; font-size: 12.5px; border: 1px solid var(--edge); background: transparent;
+  color: var(--ink); border-radius: 999px; padding: 5px 12px; width: 12rem;
+}
+.guestbar input:focus { outline: none; border-color: var(--red); }
+.guestbar button {
+  font: inherit; font-size: 12.5px; border: 1px solid var(--red); background: transparent;
+  color: var(--ink); border-radius: 999px; padding: 5px 12px; cursor: pointer;
+  white-space: nowrap; display: inline-flex; align-items: center; gap: 8px;
+}
+.guestbar button:hover:not(:disabled) { background: var(--red); color: #fff; }
+.guestbar button:disabled { opacity: .6; cursor: default; }
+.guestbar .formnote { color: var(--muted); font-size: 12.5px; }
+.guestbar .formnote:empty { display: none; }
+.guestbar .formnote.bad { color: var(--red); }
+.guestbar .spin {
+  display: none; width: 12px; height: 12px; flex: none; border-radius: 50%;
+  border: 2px solid var(--line); border-top-color: var(--red);
+  animation: gatespin .7s linear infinite;
+}
+.guestbar .signin.sending .spin { display: block; }
+.guestbar .signin.sending button:disabled { opacity: 1; }
+.guestbar .signin.sending input { opacity: .55; pointer-events: none; }
+@keyframes gatespin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .guestbar .spin { animation-duration: 2.4s; }
+}

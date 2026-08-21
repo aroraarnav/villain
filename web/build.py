@@ -25,17 +25,27 @@ DIST = WEB / "dist"
 PLACEHOLDER = "BUILD_STAMP"
 
 
-def stamp_boot_page(html: str, stamp: str) -> str:
-    """Bake a deploy id into every cache-busted URL on the boot page.
+#: Files carrying the placeholder, copied into dist/ with it filled in. The
+#: boot page names its scripts and faces; the shell script holds the deploy id
+#: it compares against the live manifest and stamps the worker and stylesheet
+#: URLs it builds itself. One placeholder across all of them so a deploy cannot
+#: stamp one and miss another.
+STAMPED = ("index.html", "app-shell.js")
 
-    The worker, the scripts, the faces, and a JS constant all share one
-    placeholder so a deploy cannot stamp one and miss another. Missing the
-    placeholder would ship an uncache-busted worker -- the failure this
-    exists to prevent -- so that is an error, not a silent no-op.
+#: Copied through untouched. They carry no placeholder because nothing in them
+#: names another asset -- the page and the shell own every URL between them.
+COPIED = ("config.js", "sync.js", "worker.js", "app-shell.css")
+
+
+def stamp_boot_page(text: str, stamp: str) -> str:
+    """Bake a deploy id into every cache-busted URL in a file that names one.
+
+    Missing the placeholder would ship an uncache-busted worker -- the failure
+    this exists to prevent -- so that is an error, not a silent no-op.
     """
-    if PLACEHOLDER not in html:
-        raise ValueError("boot page is missing BUILD_STAMP")
-    return html.replace(PLACEHOLDER, stamp)
+    if PLACEHOLDER not in text:
+        raise ValueError(f"file is missing {PLACEHOLDER}")
+    return text.replace(PLACEHOLDER, stamp)
 
 
 def run(*args: str) -> None:
@@ -81,11 +91,11 @@ def main() -> int:
     # does not let us set Cache-Control, the wheel filename does not change
     # between deploys, and a cached worker is the previous application.
     stamp = str(int(time.time()))
-    (DIST / "index.html").write_text(
-        stamp_boot_page((WEB / "index.html").read_text(), stamp))
-    shutil.copy(WEB / "config.js", DIST / "config.js")
-    shutil.copy(WEB / "sync.js", DIST / "sync.js")
-    shutil.copy(WEB / "worker.js", DIST / "worker.js")
+    for name in STAMPED:
+        (DIST / name).write_text(stamp_boot_page((WEB / name).read_text(), stamp))
+        print(f"+ stamped {name}")
+    for name in COPIED:
+        shutil.copy(WEB / name, DIST / name)
 
     # 5. The typefaces, at the root of dist/. Every other asset is pulled from
     #    inside the wheel through the fetch shim, but a CSS url() is resolved

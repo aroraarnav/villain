@@ -3,10 +3,17 @@ name: demo
 # Builds the in-browser demo and publishes it to GitHub Pages. The demo is the
 # real tool compiled to WebAssembly (Pyodide), preloaded with the anonymized
 # sample that already ships in the repo.
+#
+# Pull requests build but do not deploy. The build is the only thing that
+# exercises the wheel, the generated dataset, the hero warm and the stamping
+# together, and running it only on `main` meant the hosted app could only break
+# *after* a merge -- with the deploy that would have caught it being the same
+# deploy that shipped it.
 
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -14,10 +21,12 @@ permissions:
   pages: write
   id-token: write
 
-# Never cancel a deploy midway; let one finish before the next starts.
+# Never cancel a deploy midway; let one finish before the next starts. Pull
+# request builds are a separate group so a queued PR check cannot hold up a
+# deploy of main, or be held up by one.
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: pages-${{ github.event_name == 'pull_request' && github.ref || 'deploy' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -31,12 +40,27 @@ jobs:
         run: pip install -e . build
       - name: Build the demo
         run: python web/build.py
+      # The build writes the boot page, the worker and the sync client into
+      # dist/ after stamping them. Parsing what actually got written catches a
+      # stamp that broke a script, which checking the sources alone cannot.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Parse the built scripts
+        run: |
+          set -euo pipefail
+          for f in web/dist/*.js; do
+            echo "checking $f"
+            node --check "$f"
+          done
       - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request'
         with:
           path: web/dist
 
   deploy:
     needs: build
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
