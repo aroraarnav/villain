@@ -71,6 +71,17 @@ def main() -> int:
     shutil.copy(WEB / "config.js", DIST / "config.js")
     shutil.copy(WEB / "sync.js", DIST / "sync.js")
     shutil.copy(WEB / "worker.js", DIST / "worker.js")
+
+    # 5. The typefaces, at the root of dist/. Every other asset is pulled from
+    #    inside the wheel through the fetch shim, but a CSS url() is resolved
+    #    by the browser and never touches that shim, so the faces have to be
+    #    real files on the static host. They go beside index.html because the
+    #    stylesheet names them bare: injected into a <style>, its base is the
+    #    document, so "space-grotesk.woff2" means "next to the page".
+    assets = ROOT / "villain" / "webapp" / "assets"
+    for face in sorted(assets.glob("*.woff2")):
+        shutil.copy(face, DIST / face.name)
+        print(f"+ font {face.name}")
     (DIST / "manifest.json").write_text(json.dumps({
         "wheel": wheel.name,
         "db": db.name,

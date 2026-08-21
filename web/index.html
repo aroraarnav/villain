@@ -5,25 +5,54 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Villain</title>
 <style>
-  :root { color-scheme: light dark; }
+  /* These are app.css's dark tokens by hand. The boot page cannot import the
+     stylesheet -- the stylesheet lives inside the wheel this page exists to
+     download -- so the values are duplicated, and they have to be duplicated
+     *exactly*: a different near-black and a different red here means the site
+     visibly changes theme the moment the runtime finishes, which reads as two
+     products rather than one loading. Change a token in app.css, change it
+     here. */
+  /* The same face app.css uses, from the same file build.py copies into
+     static/. Declared here too because this page paints long before the wheel
+     that carries the stylesheet has finished downloading, and booting in the
+     platform sans only to reflow into the real one is the type equivalent of
+     the palette swap the colors above exist to prevent. */
+  @font-face {
+    font-family: "Space Grotesk"; font-style: normal; font-weight: 300 700;
+    font-display: swap; src: url("space-grotesk.woff2") format("woff2");
+  }
+  /* The wordmark's face, same as app.css sets on h1. */
+  @font-face {
+    font-family: "JetBrains Mono"; font-style: normal; font-weight: 100 800;
+    font-display: swap; src: url("jetbrains-mono.woff2") format("woff2");
+  }
+  :root { color-scheme: dark; }
   html, body { margin: 0; height: 100%; }
   body {
-    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-    background: #0f1115; color: #e6e8ee;
+    font: 15px/1.5 "Space Grotesk", ui-sans-serif, system-ui, -apple-system,
+          "Segoe UI", Roboto, sans-serif;
+    background: #0b0c0e; color: #f2f1ee;
+    -webkit-font-smoothing: antialiased;
     display: grid; place-items: center;
   }
   #boot { max-width: 30rem; padding: 2rem; text-align: center; }
-  #boot h1 { font-size: 3rem; margin: 0 0 .4rem; letter-spacing: -.02em; font-weight: 700; }
-  #boot h1 .dot { display: inline-block; width: .62rem; height: .62rem;
-    margin-left: .5rem; border-radius: 50%; background: #e5484d;
-    vertical-align: .55rem; }
-  #boot p.sub { color: #9aa0ad; margin: 0 0 1.5rem; }
+  #boot h1 {
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 2.4rem; margin: 0 0 .5rem; letter-spacing: -.05em; font-weight: 800;
+    display: inline-flex; align-items: center; gap: .55rem;
+  }
+  /* The same lockup the app header uses, at the same proportions. */
+  #boot h1 .mark {
+    width: 2.9rem; height: 2.9rem; border-radius: .8rem; flex: none;
+    background: #e5645a; color: #0b0c0e; padding: .32rem;
+  }
+  #boot p.sub { color: #93938e; margin: 0 0 1.5rem; }
   #boot.gate p.sub { margin: 0 0 2.25rem; }
-  #step { color: #cbd0da; min-height: 1.4em; }
-  #bar { height: 4px; border-radius: 4px; background: #232838; margin: 1.2rem 0 .4rem; overflow: hidden; }
-  #bar > i { display: block; height: 100%; width: 0; background: #e5484d; transition: width .3s ease; }
-  #note { color: #6b7280; font-size: .82rem; margin-top: 1rem; }
-  #boot.err #step { color: #ff6b6b; white-space: pre-wrap; text-align: left; }
+  #step { color: #c9c8c3; min-height: 1.4em; }
+  #bar { height: 4px; border-radius: 4px; background: #24272b; margin: 1.2rem 0 .4rem; overflow: hidden; }
+  #bar > i { display: block; height: 100%; width: 0; background: #e5645a; transition: width .3s ease; }
+  #note { color: #93938e; font-size: .82rem; margin-top: 1rem; }
+  #boot.err #step { color: #e5484d; white-space: pre-wrap; text-align: left; }
 
   /* The choice shown to anyone not signed in. The runtime downloads behind it,
      so whichever button they press, most of the waiting is already done. */
@@ -33,34 +62,34 @@
   #gate form { display: flex; gap: .5rem; margin: 0 0 .9rem; }
   #gate input {
     flex: 1; font: inherit; font-size: .92rem; padding: .6rem .9rem;
-    border: 1px solid #2a3040; border-radius: 999px;
-    background: #151926; color: #e6e8ee;
+    border: 1px solid #4b5058; border-radius: 999px;
+    background: #141619; color: #f2f1ee;
   }
-  #gate input:focus { outline: none; border-color: #e5484d; }
+  #gate input:focus { outline: none; border-color: #e5645a; }
   #gate button {
     font: inherit; font-size: .92rem; padding: .6rem 1.1rem; cursor: pointer;
-    border-radius: 999px; border: 1px solid #e5484d; background: #e5484d; color: #fff;
+    border-radius: 999px; border: 1px solid #e5645a; background: #e5645a; color: #fff;
     white-space: nowrap; font-weight: 600;
   }
-  #gate button:hover:not(:disabled) { background: #cf3d42; border-color: #cf3d42; }
+  #gate button:hover:not(:disabled) { background: #c9524a; border-color: #c9524a; }
   #gate button:disabled { opacity: .6; cursor: default; }
   #gate .or {
     display: flex; align-items: center; gap: .75rem;
-    color: #4b5563; font-size: .74rem; margin: 1.25rem 0;
+    color: #6f6e6b; font-size: .74rem; margin: 1.25rem 0;
     text-transform: lowercase;
   }
   #gate .or::before, #gate .or::after {
-    content: ""; flex: 1; height: 1px; background: #1e2330;
+    content: ""; flex: 1; height: 1px; background: #24272b;
   }
   #gate .ghost {
-    background: transparent; color: #cbd0da; border-color: #2a3040;
+    background: transparent; color: #c9c8c3; border-color: #4b5058;
     font-weight: 500; width: 100%;
   }
-  #gate .ghost:hover { background: transparent; border-color: #6b7280; color: #e6e8ee; }
-  #gate .why { color: #565f6d; font-size: .78rem; margin: 1.5rem 0 0; }
-  #gate .said { color: #9aa0ad; font-size: .84rem; min-height: 1.3em; margin: 0 0 .5rem; }
-  #gate .said.bad { color: #ff6b6b; }
-  #gate .loading { color: #3a4150; font-size: .72rem; margin-top: .9rem; }
+  #gate .ghost:hover { background: transparent; border-color: #93938e; color: #f2f1ee; }
+  #gate .why { color: #6f6e6b; font-size: .78rem; margin: 1.5rem 0 0; }
+  #gate .said { color: #93938e; font-size: .84rem; min-height: 1.3em; margin: 0 0 .5rem; }
+  #gate .said.bad { color: #e5484d; }
+  #gate .loading { color: #4b5058; font-size: .72rem; margin-top: .9rem; }
 
   /* Sending is a network round trip with nothing to show for it until it
      lands, so the gate holds still rather than inviting a second press.
@@ -68,11 +97,11 @@
   #boot.sending #gate form, #boot.sending #gate .or,
   #boot.sending #gate .ghost, #boot.sending #gate .why { opacity: .3; pointer-events: none; }
   #gate .waiting { display: none; align-items: center; justify-content: center; gap: .6rem;
-    color: #9aa0ad; font-size: .88rem; margin: .35rem 0 0; }
+    color: #93938e; font-size: .88rem; margin: .35rem 0 0; }
   #boot.sending #gate .waiting { display: flex; }
   #gate .spinner {
     width: 18px; height: 18px; flex: none; border-radius: 50%;
-    border: 2px solid #232838; border-top-color: #e5484d;
+    border: 2px solid #24272b; border-top-color: #e5645a;
     animation: gatespin .7s linear infinite;
   }
   @keyframes gatespin { to { transform: rotate(360deg); } }
@@ -81,7 +110,10 @@
 </head>
 <body>
 <div id="boot">
-  <h1>Villain<span class="dot"></span></h1>
+  <h1><svg class="mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path
+      d="M12 2.6c-2 2.6-4.4 4.4-6 6.1-1.5 1.6-2.2 3-2.2 4.6 0 2.5 1.9 4.3 4.4 4.3
+      1.2 0 2.2-.4 2.9-1.2-.2 2.3-1.2 3.7-3 4.5v.5h7.8v-.5c-1.8-.8-2.8-2.2-3-4.5.7.8
+      1.7 1.2 2.9 1.2 2.5 0 4.4-1.8 4.4-4.3 0-1.6-.7-3-2.2-4.6-1.6-1.7-4-3.5-6-6.1z"/></svg>Villain</h1>
   <p class="sub">Reads poker hand histories and tells you how to beat the people you play against.</p>
 
   <div id="gate">
@@ -119,7 +151,7 @@
     boot.classList.add("err");
     step("Could not start.\n\n" + (err && err.message ? err.message : err) +
          "\n\nA hard refresh usually clears a half-loaded runtime.");
-    barEl.style.background = "#ff6b6b";
+    barEl.style.background = "#e5484d";
     console.error(err);
   };
 
@@ -367,7 +399,7 @@
     // results are worth keeping and a guest has nowhere to keep them.
     //
     // Enforced here rather than in the Python: the same server module backs
-    // `villain ui` on a laptop, which has no accounts and must stay writable.
+    // `villain test` on a laptop, which has no accounts and must stay writable.
     const GUEST_MAY_POST = /^\/api\/(sim\/|narrate$)/;
 
     // Which writes actually change stored hands. /api/upload parses into memory
@@ -375,7 +407,7 @@
     // treating it as a change re-uploaded the whole database several times per
     // import, for no difference. The simulator writes nothing either.
     const CHANGES_THE_DB =
-      /^\/api\/(reset|link|unlink|note|fit-priors|session\/[^/]+\/commit)$/;
+      /^\/api\/(reset|link|unlink|note|fit-priors|player\/delete|session\/[^/]+\/commit)$/;
     let promptSignIn = () => {};                 // replaced once the header exists
 
     // Python runs on this thread. Nothing repaints while it does, so a spinner

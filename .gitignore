@@ -16,6 +16,7 @@ HANDOFF.md
 DESIGN_AUDIT_PROMPT.md
 ENGINEERING_AUDIT_PROMPT.md
 DATA_SCIENCE_AUDIT_PROMPT.md
+AUDIT_FINDINGS.md
 
 # Built browser demo (assembled by web/build.py, deployed by CI).
 web/dist/
