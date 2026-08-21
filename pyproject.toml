@@ -16,9 +16,11 @@ dev = [
     "ruff>=0.6",
 ]
 
+# One command. The product is the web app -- hosted, or served locally by
+# `villain test` -- so a second console script whose whole job was "start the
+# server" was a second front door onto something that already has one.
 [project.scripts]
 villain = "villain.cli:main"
-villain-ui = "villain.web:main"
 
 [build-system]
 requires = ["setuptools>=68"]

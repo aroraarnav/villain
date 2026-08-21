@@ -2,7 +2,8 @@
 
 The UI outgrew one module -- 4,600 lines, three quarters of it a single string
 of HTML, CSS and JavaScript. It is a package now. This module stays so that
-``from villain.web import ...`` and the ``villain-ui`` entry point keep working.
+``from villain.web import ...`` and ``python -m villain.web`` keep working;
+the supported way in is ``villain test``.
 """
 
 from __future__ import annotations
