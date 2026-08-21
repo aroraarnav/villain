@@ -19,9 +19,10 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from pathlib import Path
 
-from .archetypes import ARCHETYPE_BY_NAME, ARCHETYPES, _log_beta_binomial, match, target_frequency
-from .profile import PROFILE_FEATURES, build_profile
+from villain.archetypes import ARCHETYPE_BY_NAME, ARCHETYPES, _log_beta_binomial, match, target_frequency
+from villain.profile import PROFILE_FEATURES, build_profile
 
 #: A half needs this many hands before it is worth scoring at all.
 MIN_HALF_HANDS = 50
@@ -63,7 +64,7 @@ def _halves(store, player_id: int):
     be far cheaper and completely useless: both halves would carry identical
     rates and agree with each other by construction.
     """
-    from .features import record_hands
+    from villain.features import record_hands
     hands = store.player_hands(player_id)
     if len(hands) < 2 * MIN_HALF_HANDS:
         return None
@@ -181,3 +182,36 @@ def score(store, min_hands: int = 2 * MIN_HALF_HANDS) -> Score | None:
                  calibration_error=abs(mean_conf - acc),
                  mean_confidence=mean_conf, agreement=sum(agree) / n,
                  predictive_loss=(pred_loss / pred_opps) if pred_opps else None)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Score the classifier on hands it has not seen.
+
+    A research instrument, not part of the product: it answers "is the
+    labelling any good", which is a question about the tool rather than about
+    a player. It lives outside the package so it does not ride into the
+    browser inside the wheel.
+    """
+    import argparse
+
+    from villain.db import DEFAULT_PATH, Store
+
+    parser = argparse.ArgumentParser(prog="tools/validate.py", description=__doc__)
+    parser.add_argument("--db", type=Path, default=DEFAULT_PATH)
+    args = parser.parse_args(argv)
+
+    with Store(args.db) as store:
+        result = score(store)
+    if result is None:
+        print("Not enough hands on any player to split. Import more first.")
+        return 1
+    print(result)
+    print("\n  Stated confidence should track accuracy; the gap between them is\n"
+          "  the calibration error. Halves agreeing is reproducibility, not\n"
+          "  correctness -- a player can be labeled the same way twice and be\n"
+          "  wrong both times.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import time
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -54,6 +55,34 @@ def run(*args: str) -> None:
     subprocess.run(args, check=True, cwd=ROOT)
 
 
+#: Non-Python files the package loads by path at runtime. A missing
+#: ``package-data`` line leaves them out of the wheel and nothing local
+#: notices -- the source tree still has them, so the suite passes and
+#: ``villain test`` works. It breaks in the browser, which installs the wheel
+#: and has nowhere to show the traceback. Checked here rather than trusted.
+WHEEL_MUST_CARRY = (
+    "villain/webapp/assets/index.html",
+    "villain/webapp/assets/app.css",
+    "villain/webapp/assets/app.js",
+    "villain/copy/glossary.toml",
+    "villain/copy/playbook.toml",
+)
+
+
+def check_wheel_data(wheel: Path) -> None:
+    """Fail the build rather than deploy a wheel the browser cannot run."""
+    with zipfile.ZipFile(wheel) as zf:
+        names = set(zf.namelist())
+    missing = [name for name in WHEEL_MUST_CARRY if name not in names]
+    if missing:
+        raise SystemExit(
+            f"{wheel.name} is missing {missing}.\n"
+            "Add them to [tool.setuptools.package-data] in pyproject.toml -- "
+            "without it the hosted app raises on import and the local one does not."
+        )
+    print(f"+ wheel carries {len(WHEEL_MUST_CARRY)} data files")
+
+
 def main() -> int:
     if DIST.exists():
         shutil.rmtree(DIST)
@@ -61,8 +90,18 @@ def main() -> int:
 
     # 1. The package as a wheel. It is pure Python and carries the UI assets
     #    via package-data, so it installs in the browser under micropip.
+    #
+    #    build/ first, and this is not housekeeping: setuptools copies the
+    #    package into build/lib and never removes what is no longer there, so
+    #    a module deleted since the last build is still sitting in it and
+    #    still goes into the wheel. Deleting six modules and finding all six
+    #    in the wheel afterwards is how this was found.
+    stale = ROOT / "build"
+    if stale.exists():
+        shutil.rmtree(stale)
     run(sys.executable, "-m", "build", "--wheel", "--outdir", str(DIST))
     wheel = sorted(DIST.glob("villain-*.whl"))[-1]
+    check_wheel_data(wheel)
 
     # 2. The preloaded database: all ten archetypes playing real hands through
     #    the practice-simulator engine, stored and profiled the ordinary way.

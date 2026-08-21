@@ -34,6 +34,11 @@ include = ["villain*"]
 # in-browser build (villain.webapp.browser) would import a UI it cannot serve.
 [tool.setuptools.package-data]
 "villain.webapp" = ["assets/*"]
+# The interface's words, as data rather than Python. Same reasoning as the
+# assets above: without this line the wheel installs without them and the
+# app raises on import -- in the browser only, where nothing else looks.
+# web/build.py asserts both are present before it will assemble dist/.
+"villain" = ["copy/*.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

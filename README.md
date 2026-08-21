@@ -71,8 +71,8 @@ It is the same interface the hosted page serves, with the transport swapped —
 useful for working on the tool, and for anyone who would rather not sign in
 anywhere. There is no separate desktop build to keep in step.
 
-`villain scout tests/data/pokernow_sample.json --min-hands 1` is the twenty-hand
-parser fixture, if you want CLI output before an export of your own.
+`villain import tests/data/pokernow_sample.json` loads the twenty-hand parser
+fixture, if you want something in the database before an export of your own.
 
 <details>
 <summary><b>Building and deploying the hosted page yourself</b></summary>
@@ -189,27 +189,34 @@ names look like.
 
 ## The command line
 
-The app is the product; the CLI is the same engine without the browser. Every
-command takes `--db PATH` before the subcommand; the default is
+The app is the product. The CLI is the door the data goes through: getting
+hands in, getting a database out, repairing identity, and `profile` as JSON for
+anyone who wants the read as data. It deliberately does not render a second
+copy of any screen — one that drifted from the app every time a leak changed
+how it reads is what this replaced.
+
+Every command takes `--db PATH` before the subcommand; the default is
 `~/.villain/villain.db`.
 
 | command | what it does |
 | --- | --- |
-| `villain scout FILE...` | read a file, save nothing (`--min-hands N`, default 20; `-v`) |
-| `villain import FILE...` | read it and store it (`--quiet`) |
-| `villain players` | who is in the database (`--min-hands N`) |
-| `villain profile NAME` | the full read (`-v` for deviations and timing, `--json`, `--narrate`) |
+| `villain import FILE...` | read hand histories and store them (`--quiet`) |
+| `villain players` | who is in the database, with their ids (`--min-hands N`) |
+| `villain profile NAME` | the full read, as JSON |
 | `villain profile NAME --by-table` | split by table size instead of pooling (`--regime hu\|3max\|6max\|full`) |
 | `villain link --suggest` | find accounts that may be one person |
 | `villain link KEEP ABSORB` | merge player `ABSORB` into player `KEEP` |
 | `villain unlink ID SITE ACCT` | split one alias back onto its own player |
 | `villain note NAME "tilts after a big pot"` | attach a note to a player |
-| `villain hero` | what only your own hand history can show |
-| `villain table NAMES...` | lineup briefing for who is sitting here |
-| `villain fit` | learn priors, clusters and hand strength from your own database (`--min-players N`, default 8) |
 | `villain rebuild` | recompute every profile from stored hands |
 | `villain export FILE` / `import-db FILE` | move a database between machines |
 | `villain test` | run the web app locally (`--port N`, default 8766; `--no-browser`) |
+
+Two research instruments live in `tools/`, outside the package so they do not
+ride into the browser inside the wheel: `python tools/validate.py` scores the
+classifier on hands it has not seen, and `python tools/backtest.py` walks leaks
+forward — found early, checked late. Both ask whether the *tool* is any good,
+which is a different question from the one the app answers.
 
 **PokerNow** is currently the only supported format: open the game log and use
 the export button, which gives a `poker-now-hands-game-*.json` file that both
@@ -217,103 +224,43 @@ the website and the CLI take as-is. Other sites need a parser in
 `villain/parsers/`; the registry sniffs formats by file content, so adding one
 touches nothing downstream.
 
-### Optional: model-suggested exploits
+## Reading a read
 
-Everything else is deterministic -- the same hands always give the same read,
-and no figure on screen came from anywhere but the arithmetic. One optional
-extra sends the finished profile to a language model and asks for exploits the
-rule engine missed: the rules only fire on patterns somebody thought to encode,
-while a model reading the same numbers can combine them and reach spots no
-single rule covers. It is `villain profile NAME --narrate`, and it returns
-bullets, not prose.
+The screen is the app's; what follows is the same read as data, which is what
+`villain profile NAME` prints and what every tab is rendered from.
 
-Off unless configured. Settings come from the environment, falling back to
-**`~/.villain/env`** -- a plain `NAME=value` file, deliberately outside the
-project directory, because a key that never sits under the working tree cannot
-be committed by an absent-minded `git add -A`.
-
-| variable | meaning |
-| --- | --- |
-| `VILLAIN_LLM_MODELS` | comma-separated fallback chain, best first |
-| `VILLAIN_LLM_MODEL` | a single model, if you do not want a chain |
-| `VILLAIN_LLM_URL` | any OpenAI-compatible `/chat/completions` endpoint (default Ollama on localhost) |
-| `VILLAIN_LLM_KEY` | bearer token, if the endpoint needs one |
-
-Local, with nothing leaving the machine:
-
-```bash
-brew install ollama && ollama serve
-ollama pull llama3.2
-VILLAIN_LLM_MODEL=llama3.2 villain profile "seat 4" --narrate
-```
-
-Or a hosted free tier, in `~/.villain/env`:
-
-```
-VILLAIN_LLM_URL=https://generativelanguage.googleapis.com/v1beta/openai/chat/completions
-VILLAIN_LLM_MODELS=gemini-flash-lite-latest,gemini-3.5-flash-lite,gemini-flash-latest
-VILLAIN_LLM_KEY=your-key-here
-```
-
-**Why a chain, lightest first.** Free tiers meter each model separately, so
-when one is out of quota another usually answers at once -- a second name
-recovers faster than any retry, because a spent quota does not clear inside a
-backoff. Small models are enough for short bullets built from a fact sheet, and
-they carry the roomier quotas, which is what decides whether `--narrate` works
-when you run it. Transient failures (429, 5xx, timeouts) retry with backoff
-and honor `Retry-After`; 401 and 404 raise at once, since retrying those only
-delays the same answer. Use floating aliases like `gemini-flash-lite-latest`:
-pinned Gemini versions retire and start returning 404 to a tool that worked
-last month.
-
-**Two guards on what it can say.** It may not state a figure the profile did
-not produce -- the output is checked, and an invented number is sent back with
-the offending figure named, up to two more attempts, before the response is
-refused. And every
-statistic reaches it spelled out ("having bet the flop, how often they fire
-again on the turn: 41%") rather than as an internal key, because a correctly
-quoted number used to mean the wrong thing is a mistake no guard on invented
-figures can catch. Any statistic the glossary cannot describe unambiguously is
-withheld rather than handed over.
-
-Suggestions are labeled as suggestions. They are not measured reads, and the
-evidence view exists to check them against the hands.
-
-## Reading the output
-
-```
-------------------------------------------------------------------------------
-seat 4  --  heads-up, 183 hands (usable)
-------------------------------------------------------------------------------
-READ: TAG  (confidence 51%)
-  Solid and hard to exploit; frequencies sit close to the field.
-
-  No large leak to attack. Play position, take the small edges, and look for
-  the money at another seat.
-  (also plausibly: trapper 20%, station 15%)
-
-EXPLOITS  (1 found)
-  [tentative] Folds too often to river bets  ~2.3 bb/100
-      51% vs 40% breakeven  (field 45%, n=16)
-      Bluff every river you reach with a busted hand, and size up -- they are
-      folding to the decision rather than to the price.
-
-AGAINST YOU  (1 found)
-  Against their own game, not against the field.
-
-    re-raises your opens          19%   (3% otherwise)   32 seen, 99% sure
-
-SKILL: strong (69/100)   confidence 54%
-    showdown judgment         ##############....  77.3
-    hand selection             ###############...  81.5
-    bet sizing                 ###############...  85.3
-    preflop aggression         ##################  97.6  raises 73% of hands played
-    resistance to exploitation ############......  62.1  ~2.3 bb/100 available
-  observed -1.0 bb/100, shrunk and all-in adjusted -0.2 bb/100
+```json
+{
+  "name": "seat 4",
+  "hands": 183,
+  "sample_quality": "usable",
+  "regime": "hu",
+  "archetype": "tag",
+  "archetype_confidence": 0.51,
+  "archetype_mix": [["tag", 0.51], ["trapper", 0.20], ["station", 0.15]],
+  "leaks": [
+    {
+      "headline": "Folds too often to river bets",
+      "severity_bb100": 2.3,
+      "tier": "tentative",
+      "value": 0.51, "breakeven": 0.40, "population": 0.45, "sample": 16,
+      "behavior": "...", "why": "...", "do": "...", "dont": "..."
+    }
+  ],
+  "watchlist": [], "adjustments": [], "combinations": [],
+  "skill": {
+    "score": 69, "tier": "strong", "confidence": 0.54,
+    "observed_bb100": -1.0, "adjusted_bb100": -0.2,
+    "exploitability_bb100": 2.3
+  },
+  "skill_components": [...], "weak_spots": [...], "stats": {...}
+}
 ```
 
 Note what it does *not* claim: 183 hands buy a bucket at 51% confidence and one
-leak still labeled tentative, which is what a session this size contains.
+leak still labeled tentative, which is what a session this size contains. The
+full object also carries `versus`, `table_mix`, `contributions`, `plan` and the
+per-statistic `stats` block with an interval on every frequency.
 
 Each exploit answers four questions — what they are doing (as behavior, not as
 a statistic), why it is exploitable (the breakeven arithmetic), what to do, and
@@ -512,15 +459,15 @@ automatically, and accounts dealt into the same hand can never be linked.
 
 ### Learning from your own pool
 
-`villain fit` runs three models and says which ones your data can support:
-**priors** re-estimated from your own players by a Beta-Binomial moments fit,
-so a home game stops being measured against an online population and the spread
-between your players sets how much a new sample is trusted; **clusters**, a
-Gaussian mixture over profiles with component count by BIC, needing 25+
-profiles; and **hand strength**, gradient boosting from a line (street, action,
+Two models learn from your own database, and each refuses rather than returning
+something authoritative-looking and wrong. **Priors** are re-estimated from your
+own players by a Beta-Binomial moments fit, so a home game stops being measured
+against an online population and the spread between your players sets how much a
+new sample is trusted — fitted automatically on import, once eight players clear
+the bar. **Hand strength** is gradient boosting from a line (street, action,
 sizing, position, board texture, time taken) to the strength behind it, trained
-on revealed cards, needing 300+ revealed decisions. Each refuses rather than
-returning something authoritative-looking and wrong.
+on revealed cards and needing 300+ revealed decisions; the Hero tab fits it when
+it needs it.
 
 ## Known limitations
 
@@ -559,12 +506,13 @@ returning something authoritative-looking and wrong.
 | `priors.py`, `profile.py` | shrinkage, per-regime and cross-regime priors |
 | `archetypes.py`, `exploits.py`, `skill.py` | buckets, priced leaks, rating |
 | `dynamics.py` | how a player plays you differently from everybody else |
-| `playbook.py`, `narrate.py` | written advice, optional LLM summary |
+| `playbook.py`, `glossary.py` | written advice and definitions, held as TOML in `copy/` |
 | `evidence.py`, `replay.py` | the hands behind a number |
-| `cluster.py`, `reads.py` | models learned from your own database |
+| `reads.py` | hand strength, learned from revealed cards |
 | `db.py`, `identity.py` | persistence, aliases, merge safety |
-| `analyze.py`, `glossary.py`, `report.py` | the payload the CLI and UI both render |
-| `cli.py`, `webapp/` | commands; the web app, served locally or in the browser |
+| `analyze.py` | the payload the UI renders and `profile --json` prints |
+| `cli.py`, `webapp/` | the data door; the web app, served locally or in the browser |
+| `tools/` | research instruments, outside the package and out of the wheel |
 
 ## Contributing
 

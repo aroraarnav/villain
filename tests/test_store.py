@@ -266,8 +266,8 @@ def test_cli_import_and_profile(tmp_path, capsys):
     assert "player1" in listing
 
     assert main(["--db", str(db), "profile", "player1"]) == 0
-    card = capsys.readouterr().out
-    assert "READ:" in card and "SKILL:" in card
+    payload = json.loads(capsys.readouterr().out)
+    assert payload and payload[0]["archetype"]
 
 
 def test_cli_json_is_machine_readable(tmp_path, capsys):
@@ -275,7 +275,7 @@ def test_cli_json_is_machine_readable(tmp_path, capsys):
     db = tmp_path / "cli.db"
     main(["--db", str(db), "import", str(FIXTURE)])
     capsys.readouterr()
-    main(["--db", str(db), "profile", "player1", "--json"])
+    main(["--db", str(db), "profile", "player1"])
     payload = json.loads(capsys.readouterr().out)
     assert payload
     entry = payload[0]
@@ -285,12 +285,17 @@ def test_cli_json_is_machine_readable(tmp_path, capsys):
     assert not [k for k in entry["stats"] if k.startswith(("act:", "seat:", "saw:"))]
 
 
-def test_cli_scout_needs_no_database(tmp_path, capsys):
+def test_cli_note_is_the_only_way_to_write_one(tmp_path, capsys):
+    """The app renders notes and has no route that creates them, so this is
+    the whole write path. Dropping it would leave the feature read-only."""
     from tests.conftest import FIXTURE
-    assert main(["--db", str(tmp_path / "unused.db"), "scout", str(FIXTURE),
-                 "--min-hands", "5"]) == 0
-    out = capsys.readouterr().out
-    assert "players" in out
+    db = tmp_path / "cli.db"
+    main(["--db", str(db), "import", str(FIXTURE)])
+    capsys.readouterr()
+    assert main(["--db", str(db), "note", "player1", "tilts", "after", "a", "big", "pot"]) == 0
+    main(["--db", str(db), "profile", "player1"])
+    payload = json.loads(capsys.readouterr().out)
+    assert payload[0]["notes"] == ["tilts after a big pot"]
 
 
 def test_cli_rejects_unknown_files(tmp_path, capsys):
