@@ -63,6 +63,8 @@ def as_dict(profile: Profile) -> dict:
         "archetype_mix": profile.archetype_mix,
         "skill": {
             "score": profile.skill.score,
+            "base": profile.skill.base,
+            "measured": profile.skill.measured,
             "tier": profile.skill.tier,
             "confidence": profile.skill.confidence,
             "exploitability_bb100": profile.skill.exploitability,

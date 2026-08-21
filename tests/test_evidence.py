@@ -140,13 +140,24 @@ def test_leaderboard_ranks_by_skill(stored):
     payload = leaderboard_payload(stored)
     assert payload["players"]
     assert "games" not in payload, "the per-game picker was removed"
-    scores = [p["skill"] for p in payload["players"]]
-    assert scores == sorted(scores, reverse=True)
+    rows = payload["players"]
+    measured = [p for p in rows if p.get("skill_measured")]
+    unknown = [p for p in rows if not p.get("skill_measured")]
+    if measured:
+        scores = [p["skill"] for p in measured]
+        assert scores == sorted(scores, reverse=True)
+    if measured and unknown:
+        last_measured = rows.index(measured[-1])
+        first_unknown = min(rows.index(p) for p in unknown)
+        assert last_measured < first_unknown
 
 
 def test_leaderboard_carries_both_orderings(stored):
     """Skill and attackability are different questions; the table sorts on either."""
     from villain.web import leaderboard_payload
     for row in leaderboard_payload(stored)["players"]:
-        assert "skill" in row and "exploitability" in row
-        assert 0 <= row["skill"] <= 100
+        assert "exploitability" in row
+        if row.get("skill_measured"):
+            assert row["skill"] is not None and 0 <= row["skill"] <= 100
+        else:
+            assert row["skill"] is None

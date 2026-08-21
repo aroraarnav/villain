@@ -12,7 +12,6 @@ from ..analyze import as_dict, enrich
 from ..archetypes import ARCHETYPE_BY_NAME, deviations
 from ..db import Store
 from ..exploits import RULES, find_watchlist
-from ..priors import population_mean
 from ..skill import weaknesses
 from ..timing import timing_tells
 
@@ -51,9 +50,15 @@ DISPLAY_STATS = [
 _THRESHOLD_RULES = {rule.stat: rule for rule in RULES}
 
 
-def _references(stat: str, regime: str, profile) -> dict:
-    """Population frequency and, where one exists, the breakeven threshold."""
-    out = {"population": round(population_mean(stat, regime), 4)}
+def _references(stat: str, _regime: str, profile) -> dict:
+    """Population frequency and, where one exists, the breakeven threshold.
+
+    The tick has to be the same field the estimate was shrunk toward. After
+    ``villain fit`` that is ``profile.population`` (the pool), not the built-in
+    online mean: drawing the online number next to a home-game posterior is how
+    most of a loose pool read "high vs field".
+    """
+    out = {"population": round(profile.population(stat), 4)}
     rule = _THRESHOLD_RULES.get(stat)
     if rule is not None:
         try:
@@ -179,9 +184,13 @@ def roster_payload(store: Store) -> list[dict]:
                 "sample_quality": profile.sample_quality,
                 "archetype": profile.archetype,
                 "confidence": profile.archetype_confidence,
-                "skill": profile.skill.score,
+                # Unmeasured rows carry no skill number so the default sort
+                # (high first) puts them last rather than in the middle at 50.
+                "skill": (None if not profile.skill.measured
+                          else profile.skill.base),
                 "skill_tier": profile.skill.tier,
                 "skill_confidence": profile.skill.confidence,
+                "skill_measured": profile.skill.measured,
                 "exploitability": profile.skill.exploitability,
                 "gto": _gto_rating(_gto_compare(profile)),
                 "top_leak": headline,
@@ -209,8 +218,10 @@ def roster_payload(store: Store) -> list[dict]:
 
 #: A player needs this many hands before the simulator can act from a measured
 #: profile rather than from the prior alone -- below it, every villain plays the
-#: population average and the practice is against nobody in particular.
-MIN_SIM_HANDS = MIN_ROSTER_HANDS
+#: population average and the practice is against nobody in particular. Same
+#: cliff as ``sample_quality == "usable"`` / ``MIN_REGIME_HANDS``: five hands
+#: is the prior with a name attached.
+MIN_SIM_HANDS = 150
 
 
 def tab_availability(store: Store) -> dict[str, dict]:

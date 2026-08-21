@@ -192,6 +192,20 @@ def test_thin_samples_are_pulled_toward_average(synth_profile):
     thin = rate(synth_profile("maniac", opps=3))
     assert 40 < thin.score < 60
     assert thin.confidence < 0.3
+    assert thin.tier == "unknown"
+    assert not thin.measured
+    assert thin.label == "unknown"
+
+
+def test_a_thin_sample_is_not_rated_competent(synth_profile):
+    """The displayed number was 50 plus a sample-size lid, then labeled
+    competent -- ranking a 40-hand player against a 2,000-hand regular."""
+    thin = rate(synth_profile("tag", opps=10))
+    solid = rate(synth_profile("tag", opps=400))
+    assert not thin.measured
+    assert solid.measured
+    assert thin.tier == "unknown"
+    assert solid.tier != "unknown"
 
 
 def test_exploitable_players_rate_below_solid_ones(synth_profile):
@@ -306,3 +320,29 @@ def test_resolve_stat_prefers_oop_fold_sample():
     profile.stats["fold_vs_bet:flop:oop"] = shrink(40, 50, 0.4, 20)
     rule = next(r for r in RULES if r.id == "overfold_flop")
     assert _resolve_stat(profile, rule) == "fold_vs_bet:flop:oop"
+
+
+def test_the_field_tick_uses_the_fitted_population():
+    """The chart compared a shrunk estimate to the online mean after fit
+    replaced it, so most of a home-game pool read high-VPIP vs field."""
+    from villain.priors import population_mean, shrink
+    from villain.webapp.payloads import _references
+
+    book = StatBook(player_id="x", name="X", regime="6max", hands=200)
+    book.meters["table_size"].add(6, 1)
+    profile = build_profile(book, priors={"vpip": (0.42, 30.0)})
+    profile.stats["vpip"] = shrink(80, 200, 0.42, 30)
+    refs = _references("vpip", profile.regime, profile)
+    assert refs["population"] == pytest.approx(0.42)
+    assert population_mean("vpip", "6max") != pytest.approx(0.42)
+
+
+def test_skill_prices_leaks_at_the_same_bar_as_the_profile(synth_profile):
+    """rate() used 0.55; the profile list used 0.70, so worth bb/100 disagreed."""
+    from villain.exploits import MIN_CONFIDENCE, find_leaks
+
+    profile = synth_profile("station", regime="hu", opps=200)
+    skill = rate(profile)
+    listed = find_leaks(profile, min_confidence=MIN_CONFIDENCE)
+    from villain.skill import deduped_exploitability
+    assert skill.exploitability == pytest.approx(deduped_exploitability(listed), abs=0.01)

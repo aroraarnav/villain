@@ -16,7 +16,9 @@ def leaderboard_payload(store: Store) -> dict:
     on either.
     """
     ranked = roster_payload(store)
-    return {"players": sorted(ranked, key=lambda r: -r["skill"])}
+    return {"players": sorted(
+        ranked, key=lambda r: (0 if r.get("skill_measured") else 1,
+                               -(r["skill"] or 0)))}
 
 
 # ---------------------------------------------------------------------------
