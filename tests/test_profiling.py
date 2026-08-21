@@ -321,17 +321,88 @@ def test_showdown_leaks_need_thicker_samples(synth_profile):
         assert "bluffs_rivers" not in ids
 
 
-def test_resolve_stat_prefers_oop_fold_sample():
+def test_resolve_stat_prefers_heads_up_fold_sample():
+    """MDF is a one-defender formula; OOP mixes multiway and is the wrong universe."""
+    from villain.exploits import RULES, _resolve_stat
+    from villain.priors import shrink
+
+    book = StatBook(player_id="x", name="X", regime="6max", hands=200)
+    book.meters["table_size"].add(6, 1)
+    profile = build_profile(book)
+    profile.stats["fold_vs_bet:flop"] = shrink(90, 200, 0.44, 20)
+    profile.stats["fold_vs_bet:flop:oop"] = shrink(75, 150, 0.44, 20)
+    profile.stats["fold_vs_bet:flop:hu"] = shrink(40, 100, 0.44, 20)
+    rule = next(r for r in RULES if r.id == "overfold_flop")
+    assert _resolve_stat(profile, rule) == "fold_vs_bet:flop:hu"
+
+
+def test_heads_up_books_fall_back_to_the_pooled_fold_sample():
+    """Synth profiles and HU-regime books have no multiway mix."""
     from villain.exploits import RULES, _resolve_stat
     from villain.priors import shrink
 
     book = StatBook(player_id="x", name="X", regime="hu", hands=100)
     profile = build_profile(book)
-    # Thick OOP sample, thin pooled.
-    profile.stats["fold_vs_bet:flop"] = shrink(5, 6, 0.4, 20)
-    profile.stats["fold_vs_bet:flop:oop"] = shrink(40, 50, 0.4, 20)
+    profile.stats["fold_vs_bet:flop"] = shrink(40, 50, 0.40, 20)
     rule = next(r for r in RULES if r.id == "overfold_flop")
-    assert _resolve_stat(profile, rule) == "fold_vs_bet:flop:oop"
+    assert _resolve_stat(profile, rule) == "fold_vs_bet:flop"
+
+
+def _flop_fold_book(regime, hands, faced=0.66, **ratios):
+    book = StatBook(player_id="x", name="X", regime=regime, hands=hands)
+    book.meters["table_size"].add({"hu": 2, "6max": 6}[regime], 1)
+    book.meters["faced_size:flop"].add(faced, 200)
+    book.meters["pot_to_bluff:flop"].add(8.0, 200)
+    for stat, (hits, opps) in ratios.items():
+        book.ratios[stat].hits = hits
+        book.ratios[stat].opps = opps
+    return book
+
+
+def test_multiway_oop_folds_are_not_a_heads_up_overfold():
+    """A 6-max field sits on MDF heads-up and folds more multiway / OOP.
+
+    Pricing the OOP slice at a one-defender breakeven is how most of a home
+    game got 'folds too often to flop bets'.
+    """
+    book = _flop_fold_book(
+        "6max", 400,
+        **{"fold_vs_bet:flop": (94, 200),          # 47%, the pooled mix
+           "fold_vs_bet:flop:hu": (39, 100),       # 39%, on the MDF line
+           "fold_vs_bet:flop:oop": (76, 150),      # 51%, MW-inflated
+           "fold_vs_bet:flop:mw": (55, 100),       # 55%
+           "fold_vs_bet:flop:small": (41, 100)})   # past small-bet MDF, mixed
+    profile = build_profile(book)
+    ids = {l.id for l in find_leaks(profile)}
+    assert not any(i.startswith("overfold_flop") for i in ids)
+
+
+def test_heads_up_overfold_still_fires_at_six_max():
+    book = _flop_fold_book(
+        "6max", 400,
+        **{"fold_vs_bet:flop": (70, 100),
+           "fold_vs_bet:flop:hu": (70, 100),
+           "fold_vs_bet:flop:oop": (70, 100)})
+    profile = build_profile(book)
+    ids = {l.id for l in find_leaks(profile)}
+    assert "overfold_flop" in ids
+    leak = next(l for l in find_leaks(profile) if l.id == "overfold_flop")
+    assert leak.stat == "fold_vs_bet:flop:hu"
+
+
+def test_cbet_overfold_does_not_fire_off_a_multiway_mix():
+    """fold_to_cbet pools HU and MW. Without a HU fold leak it must not
+    become the leftover 'surrenders to continuation bets' after the parent
+    overfold_flop stops firing."""
+    book = _flop_fold_book(
+        "6max", 400,
+        **{"fold_vs_bet:flop": (94, 200),
+           "fold_vs_bet:flop:hu": (39, 100),
+           "fold_to_cbet:flop": (70, 120)})
+    profile = build_profile(book)
+    ids = {l.id for l in find_leaks(profile)}
+    assert "overfold_cbet" not in ids
+    assert not any(i.startswith("overfold_flop") for i in ids)
 
 
 def test_the_field_tick_uses_the_fitted_population():
