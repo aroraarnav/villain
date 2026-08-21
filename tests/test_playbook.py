@@ -205,6 +205,25 @@ def test_rounding_is_allowed():
     facts = "Worth 0.09 big blinds per 100 hands over 183 hands."
     assert unsupported_numbers("Worth roughly 0 bb/100 across 183 hands.", facts) == []
 
+def test_narrate_does_not_try_localhost_when_unconfigured(monkeypatch, tmp_path):
+    """The hosted button used to fall through to Ollama on localhost and tell
+    you to start it. With nothing configured, refuse before the request."""
+    from villain import narrate as module
+    monkeypatch.delenv("VILLAIN_LLM_MODEL", raising=False)
+    monkeypatch.delenv("VILLAIN_LLM_MODELS", raising=False)
+    monkeypatch.delenv("VILLAIN_LLM_URL", raising=False)
+    monkeypatch.delenv("VILLAIN_LLM_KEY", raising=False)
+    monkeypatch.setattr(module, "CONFIG_PATH", tmp_path / "absent")
+    with pytest.raises(Unavailable, match="No language model is configured") as caught:
+        module.narrate({"name": "x", "regime": "hu", "hands": 1,
+                        "sample_quality": "guesswork", "archetype": "tag",
+                        "archetype_confidence": 0.5, "summary": "",
+                        "skill": {"score": 50, "tier": "competent"}, "leaks": []})
+    err = str(caught.value).lower()
+    assert "localhost" not in err
+    assert "ollama" not in err
+
+
 def test_narrate_reports_why_it_could_not_run(monkeypatch):
     from villain import narrate as module
     monkeypatch.setenv("VILLAIN_LLM_URL", "http://127.0.0.1:9/none")

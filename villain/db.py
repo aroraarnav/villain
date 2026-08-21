@@ -1266,15 +1266,22 @@ class Store:
         total = (len(wanted) if player_id is not None else
                  self.conn.execute("SELECT COUNT(*) c FROM hands").fetchone()["c"])
         out = []
+        # Report after the work, not before it. Calling progress at at=0 and
+        # then again at total once the loop returns made a bar that jumped to
+        # full the moment the last row was fetched, while gzip+parse of that
+        # last batch -- and everything the caller does next -- still had to
+        # run. Every 200, after decompressing, tracks the wait itself.
+        if progress is not None:
+            progress(0, total)
         for at, row in enumerate(self.conn.execute(query)):
-            if progress is not None and at % 500 == 0:
-                progress(at, total)
             data = json.loads(gzip.decompress(row["payload"]))
             hand = hand_from_dict(data)
             for seat in hand.seats:
                 pid = resolve(hand.site, seat.player_id, seat.name)
                 seat.player_id = str(pid) if pid is not None else seat.player_id
             out.append(hand)
+            if progress is not None and (at + 1) % 200 == 0:
+                progress(at + 1, total)
         if progress is not None:
             progress(total, total)
         return out

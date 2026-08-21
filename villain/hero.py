@@ -97,7 +97,14 @@ def find_hero(store, min_hands: int = MIN_HERO_HANDS, progress=None,
     #
     # Counted when it does load: on a cold build this is the first thing that
     # happens, so it is the first thing anybody waiting is waiting for.
-    for hand in (hands if hands is not None else store.player_hands(progress=progress)):
+    seq = hands
+    if seq is None:
+        seq = store.player_hands(progress=progress)
+        progress = None          # the load already counted itself
+    n = len(seq)
+    for at, hand in enumerate(seq):
+        if progress is not None and at % 200 == 0:
+            progress(at, n)
         for seat in hand.seats:
             try:
                 pid = int(seat.player_id)
@@ -106,6 +113,8 @@ def find_hero(store, min_hands: int = MIN_HERO_HANDS, progress=None,
             total[pid] = total.get(pid, 0) + 1
             if len(seat.hole_cards) == 2:
                 seen[pid] = seen.get(pid, 0) + 1
+    if progress is not None:
+        progress(n, n)
 
     best, best_frac = None, 0.0
     for pid, count in total.items():
@@ -724,7 +733,7 @@ class SizingTell:
         return sentence
 
 
-def sizing_tell(hands: list, hero_id: int) -> SizingTell:
+def sizing_tell(hands: list, hero_id: int, progress=None) -> SizingTell:
     """Does hero bet bigger with better hands? The mirror of fold grading,
     asked of hero's aggression instead of hero's folds -- and, like the fold
     grades, a question that is only answerable at all because hero's hand
@@ -740,12 +749,20 @@ def sizing_tell(hands: list, hero_id: int) -> SizingTell:
     ``hands`` is hero's own hands, e.g. ``store.player_hands(hero_id)``.
     Preflop is excluded for the same reason it is in :func:`fold_grades`:
     :func:`villain.reads.strength_by_street` needs a board.
+
+    ``progress(done, total)`` is the same callback :func:`build_dataset`
+    takes: this walk calls ``strength_by_street`` per hand, and on a cold
+    cache that is a long silence after the histories have already been
+    read.
     """
     by_street: dict[int, tuple[SizeBucket, SizeBucket]] = {
         int(s): (SizeBucket("top half"), SizeBucket("bottom half"))
         for s in (Street.FLOP, Street.TURN, Street.RIVER)
     }
-    for hand in hands:
+    total = len(hands)
+    for at, hand in enumerate(hands):
+        if progress is not None and at % 200 == 0:
+            progress(at, total)
         if not hand.board:
             continue
         seat = next((s for s in hand.seats if s.player_id == str(hero_id)), None)
@@ -763,6 +780,8 @@ def sizing_tell(hands: list, hero_id: int) -> SizingTell:
             bucket = strong if strength >= 0.5 else weak
             bucket.hands += 1
             bucket.total_fraction += decision.bet_fraction
+    if progress is not None:
+        progress(total, total)
     return SizingTell(by_street=by_street)
 
 
@@ -849,7 +868,7 @@ class TimingTell:
         return sentence
 
 
-def timing_tell(hands: list, hero_id: int) -> TimingTell:
+def timing_tell(hands: list, hero_id: int, progress=None) -> TimingTell:
     """Does hero take longer to act with one half of the hand-strength range
     than the other? Scoped to bets and raises, matching :func:`sizing_tell`
     exactly -- the two are read together, "does hero's aggression carry a
@@ -863,7 +882,10 @@ def timing_tell(hands: list, hero_id: int) -> TimingTell:
         int(s): (TimeBucket("top half"), TimeBucket("bottom half"))
         for s in (Street.FLOP, Street.TURN, Street.RIVER)
     }
-    for hand in hands:
+    total = len(hands)
+    for at, hand in enumerate(hands):
+        if progress is not None and at % 200 == 0:
+            progress(at, total)
         if not hand.board:
             continue
         seat = next((s for s in hand.seats if s.player_id == str(hero_id)), None)
@@ -881,6 +903,8 @@ def timing_tell(hands: list, hero_id: int) -> TimingTell:
             bucket = strong if strength >= 0.5 else weak
             bucket.hands += 1
             bucket.total_think_s += min((decision.action.think_ms or 0) / 1000.0, THINK_CAP_S)
+    if progress is not None:
+        progress(total, total)
     return TimingTell(by_street=by_street)
 
 
@@ -900,7 +924,7 @@ class StreetStrength:
     avg_strength: float
 
 
-def range_narrowing(hands: list, hero_id: int) -> list[StreetStrength]:
+def range_narrowing(hands: list, hero_id: int, progress=None) -> list[StreetStrength]:
     """Average hand strength among hero's hands still live at each street,
     flop through river. ``hands`` is hero's own hands.
 
@@ -910,7 +934,10 @@ def range_narrowing(hands: list, hero_id: int) -> list[StreetStrength]:
     double-counting a player who folded before a street was ever dealt.
     """
     totals: dict[int, list[float]] = {int(s): [] for s in (Street.FLOP, Street.TURN, Street.RIVER)}
-    for hand in hands:
+    total = len(hands)
+    for at, hand in enumerate(hands):
+        if progress is not None and at % 200 == 0:
+            progress(at, total)
         if not hand.board:
             continue
         seat = next((s for s in hand.seats if s.player_id == str(hero_id)), None)
@@ -924,5 +951,7 @@ def range_narrowing(hands: list, hero_id: int) -> list[StreetStrength]:
             strength = strengths.get((seat.seat, street))
             if strength is not None:
                 totals[int(street)].append(strength)
+    if progress is not None:
+        progress(total, total)
     return [StreetStrength(street=s, hands=len(vals), avg_strength=sum(vals) / len(vals))
             for s, vals in totals.items() if vals]

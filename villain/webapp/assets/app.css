@@ -1144,6 +1144,13 @@
     background: transparent; border-style: dashed;
   }
   .narrate-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .llm-setup { display: flex; flex-direction: column; gap: 6px; max-width: 28rem; margin-top: 8px; }
+  .llm-setup p { margin: 0 0 6px; }
+  .llm-setup input {
+    font: inherit; background: transparent; border: 1px solid var(--edge);
+    border-radius: 8px; color: var(--ink); padding: 8px 10px;
+  }
+  .llm-setup label { margin-top: 4px; }
   .rank { font-variant-numeric: tabular-nums; color: var(--muted); width: 22px; }
   .ev { display: grid; grid-template-columns: minmax(200px, auto) 1fr auto; gap: 12px;
         align-items: center; padding: 8px 0 8px 8px;

@@ -286,8 +286,14 @@ def _build_hero_payload(store: Store, hero_id: int | None, progress=None) -> dic
     loading = (lambda done, total: progress(done, total, "loading")) if progress else None
     all_hands = store.player_hands(progress=loading)
 
+    # The sit at 100% "Reading your hand histories" was this stretch: the
+    # decompress had finished and reported so, then find_hero and three
+    # strength_by_street walks ran under that same label. They are countable
+    # -- they are loops over hands we already have -- so they get their own
+    # bars rather than a capped one.
+    finding = (lambda done, total: progress(done, total, "finding")) if progress else None
     if hero_id is None:
-        hero_id = _cached_hero_id(store, hands=all_hands)
+        hero_id = _cached_hero_id(store, progress=finding, hands=all_hands)
     if hero_id is None:
         return None
     row = next((r for r in store.players() if int(r["id"]) == hero_id), None)
@@ -301,11 +307,23 @@ def _build_hero_payload(store: Store, hero_id: int | None, progress=None) -> dic
     hero_key = str(hero_id)
     hero_hands = [hand for hand in all_hands
                   if any(str(seat.player_id) == hero_key for seat in hand.seats)]
+    # Three walks that each call strength_by_street. The first is the slow
+    # one (cold cache); the others hit the memo. One bar across all three,
+    # so finishing the first does not look like the whole wait is over.
+    n_hero = len(hero_hands) or 1
+    def measuring(part):
+        if progress is None:
+            return None
+        def inner(done, total, _part=part):
+            progress(_part * n_hero + done, 3 * n_hero, "measuring")
+        return inner
+    if progress is not None:
+        progress(0, 3 * n_hero, "measuring")
     ranges = preflop_range(hero_hands, hero_id)
     seen, total = hero_visibility(hero_hands, hero_id)
-    sizing = sizing_tell(hero_hands, hero_id)
-    timing = timing_tell(hero_hands, hero_id)
-    narrowing = range_narrowing(hero_hands, hero_id)
+    sizing = sizing_tell(hero_hands, hero_id, progress=measuring(0))
+    timing = timing_tell(hero_hands, hero_id, progress=measuring(1))
+    narrowing = range_narrowing(hero_hands, hero_id, progress=measuring(2))
 
     try:
         model = _hero_model(store, progress=progress, hands=all_hands)

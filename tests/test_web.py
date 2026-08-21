@@ -842,8 +842,31 @@ def test_a_cold_hero_build_reports_its_phases(tmp_path, hands):
 
     assert seen, "the build reported nothing at all"
     # The phases that walk hands can be counted; the rest say so with no total.
-    counted = [p for p in seen if p in ("finding", "loading", "reading")]
+    counted = [p for p in seen if p in ("finding", "loading", "reading", "measuring")]
     assert counted, f"no counted phase was reported, only {sorted(set(seen))}"
+    assert "loading" in seen
+    # Loading used to report 100% and then keep that label for the rest of
+    # the wait. Finding is the first thing that has to interrupt it.
+    assert "finding" in seen
+
+
+def test_a_full_loading_bar_is_not_the_last_report(tmp_path, hands):
+    """The dart: loading counted itself out, then minutes of strength walks
+    ran with that bar still full. Later phases must actually start."""
+    from villain.db import Store as _Store
+    from villain.webapp.heroview import hero_payload
+
+    events = []
+    with _Store(tmp_path / "v.db") as store:
+        store.add_hands(hands)
+        store.rebuild()
+        hero_payload(store, progress=lambda done, total, phase: events.append((phase, done, total)))
+    assert events
+    finished_loading = [i for i, (phase, done, total) in enumerate(events)
+                        if phase == "loading" and total > 0 and done == total]
+    assert finished_loading, f"loading never counted out: {events[:8]}"
+    assert finished_loading[-1] < len(events) - 1, (
+        "loading 100% was the last report; later work was unlabeled")
 
 
 def test_build_dataset_reports_progress(hands):
@@ -950,3 +973,58 @@ def test_delete_player_route_404s_on_an_unknown_id(tmp_path, hands):
         store.add_hands(hands)
     status, _, _ = _dispatch(db, "POST", "/api/player/delete", {"player_id": 999999})
     assert status == 404
+
+
+def test_narrate_route_does_not_point_at_localhost_when_unconfigured(
+        tmp_path, hands, monkeypatch):
+    from villain import narrate as module
+    monkeypatch.delenv("VILLAIN_LLM_MODEL", raising=False)
+    monkeypatch.delenv("VILLAIN_LLM_MODELS", raising=False)
+    monkeypatch.delenv("VILLAIN_LLM_URL", raising=False)
+    monkeypatch.delenv("VILLAIN_LLM_KEY", raising=False)
+    monkeypatch.setattr(module, "CONFIG_PATH", tmp_path / "absent")
+    db = tmp_path / "v.db"
+    with Store(db) as store:
+        store.add_hands(hands)
+    status, body, _ = _dispatch(db, "POST", "/api/narrate", {
+        "profile": {"name": "x", "regime": "hu", "hands": 1,
+                    "sample_quality": "guesswork", "archetype": "tag",
+                    "archetype_confidence": 0.5, "summary": "",
+                    "skill": {"score": 50, "tier": "competent"}, "leaks": []},
+    })
+    assert status == 503
+    err = json.loads(body)["error"].lower()
+    assert "localhost" not in err
+    assert "ollama" not in err
+    assert "configured" in err
+
+
+def test_narrate_prepare_returns_a_fact_sheet(tmp_path, hands):
+    db = tmp_path / "v.db"
+    with Store(db) as store:
+        store.add_hands(hands)
+    status, body, _ = _dispatch(db, "POST", "/api/narrate/prepare", {
+        "profile": {"name": "Ghost", "hands": 40, "sample_quality": "thin",
+                    "archetype": "tag", "archetype_confidence": 0.6,
+                    "summary": "", "skill": {"score": 50, "tier": "competent"},
+                    "leaks": []},
+    })
+    assert status == 200, body
+    data = json.loads(body)
+    assert "Ghost" in data["facts"]
+    assert data["system"]
+
+
+def test_narrate_check_rejects_invented_figures(tmp_path, hands):
+    db = tmp_path / "v.db"
+    with Store(db) as store:
+        store.add_hands(hands)
+    facts = "They fold 51% of rivers."
+    status, body, _ = _dispatch(db, "POST", "/api/narrate/check", {
+        "text": "They fold 51% of rivers.", "facts": facts, "model": "test"})
+    assert status == 200, body
+    assert json.loads(body)["text"].startswith("They fold 51%")
+    status, body, _ = _dispatch(db, "POST", "/api/narrate/check", {
+        "text": "They fold 91% of rivers.", "facts": facts, "model": "test"})
+    assert status == 422
+    assert "91%" in json.loads(body)["invented"]

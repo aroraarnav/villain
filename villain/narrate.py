@@ -319,6 +319,14 @@ def narrate(payload: dict, *, url: str | None = None, model: str | None = None,
     exactly what they got wrong, and discarding a whole report over one invented
     percentage is a worse outcome than asking again.
     """
+    # Defaulting the URL to local Ollama is right for the CLI, where that is
+    # the documented setup. It is wrong for a press of the web button with
+    # nothing configured: the hosted app has no loopback model, and the error
+    # then tells you to start one. Refuse here, before the request is made.
+    if url is None and model is None and not enabled():
+        raise Unavailable(
+            "No language model is configured. Set VILLAIN_LLM_URL or "
+            "VILLAIN_LLM_MODEL in ~/.villain/env (see the README).")
     url = url or setting("VILLAIN_LLM_URL", DEFAULT_URL)
     chain = [model] if model else models()
     facts = fact_sheet(payload)

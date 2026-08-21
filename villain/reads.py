@@ -131,12 +131,12 @@ def build_dataset(hands: list[Hand], progress=None) -> list[Row]:
     """
     rows: list[Row] = []
     total = len(hands)
-    # Every 200 hands: often enough to move a bar smoothly, rare enough that
-    # the callback itself is not part of the measurement.
+    # Every 200 hands, after the work: reporting before decompress/score made
+    # the last tick land while that batch -- the slow part -- was still to run.
     every = 200
+    if progress is not None:
+        progress(0, total)
     for at, hand in enumerate(hands):
-        if progress is not None and at % every == 0:
-            progress(at, total)
         if not hand.board:
             continue
         view = HandView(hand)
@@ -181,6 +181,8 @@ def build_dataset(hands: list[Hand], progress=None) -> list[Row]:
                 street=int(decision.street),
                 action=act.name.lower(),
             ))
+        if progress is not None and (at + 1) % every == 0:
+            progress(at + 1, total)
     if progress is not None:
         progress(total, total)
     return rows
