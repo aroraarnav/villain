@@ -104,6 +104,64 @@ def test_cbet_and_fold_to_cbet_denominators():
     assert caller.rate("fold_vs_bet:flop:mid") == 1.0
 
 
+def test_retaking_the_lead_ends_the_delayed_cbet_run():
+    """Check the flop, bet the turn, bet the river: the river is a barrel.
+
+    ``delayed_cbet`` is "raised preflop, checked the flop, stabbing later" --
+    they gave the lead up. Once they bet the turn they have it back, so the
+    river is what ``cbet:river`` counts ("having bet the turn, how often they
+    fire the river as well"). The flag never cleared, so every later street
+    stayed delayed and both cbet:turn and cbet:river lost the opportunity --
+    while the other seat was already being booked fold_to_cbet:river against
+    the very same bet.
+    """
+    hand = build_hand([
+        act(Street.PREFLOP, 1, Act.POST_SB, 5, 5),
+        act(Street.PREFLOP, 2, Act.POST_BB, 10, 10, pot_before=5),
+        act(Street.PREFLOP, 1, Act.RAISE, 25, 30, pot_before=15, to_call=5),
+        act(Street.PREFLOP, 2, Act.CALL, 20, 30, pot_before=40, to_call=20),
+        act(Street.FLOP, 2, Act.CHECK, pot_before=60),
+        act(Street.FLOP, 1, Act.CHECK, pot_before=60),
+        act(Street.TURN, 2, Act.CHECK, pot_before=60),
+        act(Street.TURN, 1, Act.BET, 40, 40, pot_before=60),
+        act(Street.TURN, 2, Act.CALL, 40, 40, pot_before=100, to_call=40),
+        act(Street.RIVER, 2, Act.CHECK, pot_before=140),
+        act(Street.RIVER, 1, Act.BET, 100, 100, pot_before=140),
+        act(Street.RIVER, 2, Act.FOLD, pot_before=240, to_call=100),
+    ], board=["2c", "7d", "9h", "Ks", "3s"])
+    books = {}
+    record_hand(hand, books)
+    raiser, caller = books["a"]["hu"], books["b"]["hu"]
+    assert raiser.rate("cbet:flop") == 0.0            # checked it: gave the lead up
+    assert raiser.rate("delayed_cbet:turn") == 1.0    # took it back here
+    assert raiser.rate("cbet:river") == 1.0           # so this one is a barrel
+    assert raiser.opps("delayed_cbet:river") == 0
+    # The two halves of one decision have to agree about what it was.
+    assert caller.rate("fold_to_cbet:river") == 1.0
+
+
+def test_a_second_check_with_the_lead_is_still_a_delayed_cbet():
+    """The counterpart: never bet, so every later street stays delayed."""
+    hand = build_hand([
+        act(Street.PREFLOP, 1, Act.POST_SB, 5, 5),
+        act(Street.PREFLOP, 2, Act.POST_BB, 10, 10, pot_before=5),
+        act(Street.PREFLOP, 1, Act.RAISE, 25, 30, pot_before=15, to_call=5),
+        act(Street.PREFLOP, 2, Act.CALL, 20, 30, pot_before=40, to_call=20),
+        act(Street.FLOP, 2, Act.CHECK, pot_before=60),
+        act(Street.FLOP, 1, Act.CHECK, pot_before=60),
+        act(Street.TURN, 2, Act.CHECK, pot_before=60),
+        act(Street.TURN, 1, Act.CHECK, pot_before=60),
+        act(Street.RIVER, 2, Act.CHECK, pot_before=60),
+        act(Street.RIVER, 1, Act.BET, 40, 40, pot_before=60),
+    ], board=["2c", "7d", "9h", "Ks", "3s"])
+    books = {}
+    record_hand(hand, books)
+    raiser = books["a"]["hu"]
+    assert raiser.rate("delayed_cbet:turn") == 0.0
+    assert raiser.rate("delayed_cbet:river") == 1.0
+    assert raiser.opps("cbet:river") == 0
+
+
 def test_fold_vs_raise_is_facing_a_raise_not_a_bet():
     """The original bettor folding to a raise is fold_vs_raise, not fold_vs_bet."""
     hand = build_hand([

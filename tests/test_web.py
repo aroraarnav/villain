@@ -1279,3 +1279,39 @@ def test_delete_player_route_404s_on_an_unknown_id(tmp_path, hands):
     status, _, _ = _dispatch(db, "POST", "/api/player/delete", {"player_id": 999999})
     assert status == 404
 
+
+
+def test_unlink_route_404s_on_an_alias_that_is_not_there(tmp_path, hands):
+    """The same shape of answer /api/player/delete gives for an unknown id.
+
+    ``Store.unlink`` raises LookupError, which only the catch-all caught, so
+    asking about an alias that is not on that player came back as a 500 --
+    the tool reporting itself broken instead of answering the question.
+    """
+    db = tmp_path / "v.db"
+    with Store(db) as store:
+        store.add_hands(hands)
+        pid = int(store.players()[0]["id"])
+    status, body, _ = _dispatch(db, "POST", "/api/unlink",
+                                {"player_id": pid, "site": "pokernow",
+                                 "account": "no-such-account"})
+    assert status == 404, body
+    assert "no-such-account" in json.loads(body)["error"]
+
+
+def test_a_sitting_still_renders_after_a_player_is_deleted(tmp_path, hands):
+    """End to end: /api/session-detail is what a delete used to take down."""
+    db = tmp_path / "v.db"
+    with Store(db) as store:
+        store.add_hands(hands)
+        from villain.webapp.heroview import _cached_hero_id
+        hero_id = _cached_hero_id(store)
+        victim = next(int(r["id"]) for r in store.players() if int(r["id"]) != hero_id)
+        sessions = [s["id"] for s in store.sessions()]
+
+    status, _, _ = _dispatch(db, "POST", "/api/player/delete", {"player_id": victim})
+    assert status == 200
+    for sid in sessions:
+        status, body, _ = _dispatch(db, "GET", f"/api/session-detail?id={sid}")
+        assert status == 200, body
+        assert victim not in {p["player_id"] for p in json.loads(body)["players"]}

@@ -58,3 +58,26 @@ def test_session_trends_skip_derived_aggression():
     assert "aggression:flop" not in Store.SESSION_STATS
     assert "aggression:turn" not in Store.SESSION_STATS
     assert Store.SESSION_MIN_OPPS >= 40
+
+
+def test_a_sitting_survives_a_deleted_player(store):
+    """Deleting somebody leaves their seats resolving to nobody.
+
+    The hands stay -- they are the source of truth for everyone else at that
+    table -- so the sitting still has to render. It did not: the unresolved
+    seat kept its raw site account as its book key and ``int()`` on that took
+    the whole route down with a 500, which is every sitting the deleted player
+    ever sat in.
+    """
+    sessions = store.sessions()
+    before = {row["player_id"] for row in store.session_detail(sessions[0])}
+    victim = sorted(before)[0]
+
+    store.delete_player(victim)
+
+    after = store.session_detail(sessions[0])
+    assert {row["player_id"] for row in after} == before - {victim}
+    assert all(isinstance(row["player_id"], int) for row in after)
+    # And every other sitting they sat in, not just the first.
+    for session in store.sessions():
+        store.session_detail(session)

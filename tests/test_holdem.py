@@ -128,6 +128,27 @@ def test_initiative_survives_a_checked_street():
     assert 0 in h.declined_initiative
 
 
+def test_betting_again_takes_the_lead_back():
+    """Check the flop, bet the turn: the next street is a barrel, not a stab.
+
+    ``declined_initiative`` is what the policy reads to tell a delayed c-bet
+    from a second barrel. It never cleared, so once a seat checked a flop with
+    the lead every later street they bet stayed 'delayed' for the rest of the
+    hand -- against a stat whose denominator had by then moved on.
+    """
+    h = Hand(_seats(200, 200), button=0, sb=1, bb=2, rng=np.random.default_rng(11))
+    h.act("raise", 6)
+    h.act("call")
+    assert h.street == 1
+    h.act("check")                              # BB checks
+    h.act("check")                              # BTN checks back with the lead
+    assert 0 in h.declined_initiative
+    assert h.street == 2
+    h.act("check")                              # BB checks
+    h.act("raise", 8)                           # BTN bets the turn
+    assert 0 not in h.declined_initiative
+
+
 def test_a_short_all_in_does_not_reopen_raising():
     """An all-in shorter than a full raise: players already square may call
     the extra or fold, not raise. Players who have not yet acted still can.
