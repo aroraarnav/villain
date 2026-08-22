@@ -389,7 +389,13 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
     first_bettor: int | None = None
     bettor_had_initiative = False
     checked: set[int] = set()
-    declined_initiative: set[int] = set()   # aggressors who checked on an earlier street
+    # Aggressors who checked while holding the lead, and have not bet since.
+    # Membership is what separates a delayed c-bet from a second barrel, so it
+    # has to be released the moment they take the lead back: having checked the
+    # flop and bet the turn, a river bet is "having bet the turn, how often
+    # they fire the river as well" -- which is cbet:river, and is already what
+    # the other seat's fold_to_cbet:river is being counted against.
+    declined_initiative: set[int] = set()
     faced_bet_size: dict[int, float] = {}
     # Who put in the bet each seat is facing. The size was already tracked; the
     # bettor is what says whether the decision was against you.
@@ -515,7 +521,9 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
                             and d.seat != hero_seat
                             and hero_seat in view.saw[street]):
                         book.count(f"{VS_HERO}cbet:{s}", bet)
-                if not bet:
+                if bet:
+                    declined_initiative.discard(d.seat)
+                else:
                     declined_initiative.add(d.seat)
             elif initiative is not None and initiative not in declined_initiative:
                 # Betting into the player who holds the lead.

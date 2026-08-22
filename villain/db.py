@@ -144,7 +144,7 @@ SPURIOUS_OVERLAP = 10
 #: the next page waits for the whole thing. That is only acceptable once: the
 #: stamp has to survive the request that wrote it, or every later open does
 #: the minute again. See :data:`PROGRESS_HOOK` and :func:`consume_cache_dirty`.
-DEFINITIONS_VERSION = "2026-08-21.position-depth-and-pot-type-splits"
+DEFINITIONS_VERSION = "2026-08-22.second-barrel-is-not-a-delayed-cbet"
 
 #: Set by a host that can show a progress bar. Called as
 #: ``hook(done, total, phase)`` while a rebuild works; ``total`` of zero means
@@ -954,8 +954,15 @@ class Store:
             for seat in hand.seats:
                 pid = alias_map.get((hand.site, split_key(seat.player_id, seat.name))) \
                     or alias_map.get((hand.site, seat.player_id))
-                if pid is not None:
-                    seat.player_id = str(pid)
+                # Marked, not left as the raw account -- the same convention
+                # :meth:`rebuild` uses, and for the same reason. Deleting a
+                # player leaves their seats resolving to nobody (the hands
+                # stay; only the aliases go), and a site account string is
+                # indistinguishable from a player id to anything downstream:
+                # ``session_detail`` called int() on one and took the whole
+                # sitting down with it.
+                seat.player_id = (str(pid) if pid is not None
+                                  else UNATTRIBUTED + str(seat.player_id))
             hands.append(hand)
         return record_hands(hands)
 
@@ -985,6 +992,8 @@ class Store:
         names = {str(r["id"]): r["display_name"] for r in self.players()}
         out = []
         for pid, by_regime in books.items():
+            if pid.startswith(UNATTRIBUTED):
+                continue      # seated, counted for others, owned by nobody
             hands = sum(b.hands for b in by_regime.values())
             # Summed across every table size played this sitting -- unlike
             # the deltas below, a result does not need a same-regime baseline

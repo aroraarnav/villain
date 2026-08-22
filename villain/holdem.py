@@ -93,10 +93,12 @@ class Hand:
         self.callers = 0                          # preflop calls after a raise
         self.last_raiser: int | None = None       # seat of the most recent aggressor
         self.initiative: int | None = None         # who bet last *claimed* street
-        # Seats that checked when they held the lead. Betting later is a
-        # delayed c-bet, not a second barrel -- features.py splits those two
-        # and the policy has to, or a flop check wipes the lead and the turn
-        # never fires the number that was counted for it.
+        # Seats that checked when they held the lead, and have not bet since.
+        # Betting later is a delayed c-bet, not a second barrel -- features.py
+        # splits those two and the policy has to, or a flop check wipes the
+        # lead and the turn never fires the number that was counted for it.
+        # Cleared again on a bet, for the same reason: once they have taken
+        # the lead back, the next street is an ordinary barrel.
         self.declined_initiative: set[int] = set()
         # A raise shorter than the minimum (an all-in for less) does not
         # re-open action: players who have already acted can only call or
@@ -292,6 +294,7 @@ class Hand:
                 self.raise_open = False
             self.raises += 1
             self.last_raiser = i
+            self.declined_initiative.discard(i)
             if self.street == 0 and self.opener is None:
                 self.opener = i
             elif self.street == 0 and self.raises == 2 and self.three_bettor is None:

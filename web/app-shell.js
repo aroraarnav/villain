@@ -223,8 +223,13 @@
       // A second account signing in on the same laptop must not inherit the
       // first one's database. The version check below would catch it, but only
       // after having decided the local copy was current.
+      //
+      // Awaited: `wipe` is a round trip to the worker, and the next thing this
+      // does is ask that same worker whether the database exists. Leaving the
+      // promise loose also meant a failed delete surfaced as an unhandled
+      // rejection instead of the boot error the catch below is there to show.
       if (flag.get(ACCOUNT) !== user.sub) {
-        wipe();
+        await wipe();
         flag.set(ACCOUNT, user.sub);
       }
 

@@ -443,8 +443,17 @@ class Handler(BaseHTTPRequestHandler):
                         store, token, body.get("answers") or {}))
             with Store(self.db_path) as store:
                 if route == "/api/unlink":
-                    new_id = store.unlink(int(body["player_id"]),
-                                          str(body["site"]), str(body["account"]))
+                    try:
+                        new_id = store.unlink(int(body["player_id"]),
+                                              str(body["site"]), str(body["account"]))
+                    except LookupError as exc:
+                        # No such alias on that player -- the caller asked
+                        # about something that is not there, the same shape of
+                        # answer /api/player/delete already gives. Served as a
+                        # 500 it read as the tool breaking rather than as the
+                        # answer to the question, which is what sends somebody
+                        # looking for a bug that is not there.
+                        return self._send(404, {"error": str(exc)})
                     # Splitting an account moves hands to a new identity without
                     # changing how many there are, and the hero caches key on
                     # exactly that count -- so if the account that just left was

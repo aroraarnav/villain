@@ -100,7 +100,13 @@ def _draw_bonus(rows: np.ndarray, board: np.ndarray) -> np.ndarray:
     Made-hand evaluation cannot see four-to-a-flush or an open-ender, so
     every polarised bluff that used that ranking was a naked ace-high --
     never a draw. The bonuses are in the same 0-1 units as a percentile
-    so they can be added to one.
+    so :class:`_BoardCache` can fold them into one.
+
+    A *draw* is something the hand does not have yet. Four to a flush already
+    stops counting at five suited, and the straight side has to do the same:
+    scoring a hand that already holds the straight as though it were drawing
+    to one is how a straight came out ahead of quads in the playability order
+    the postflop cuts are taken on.
     """
     n = len(rows)
     if n == 0 or len(board) >= 5:
@@ -116,10 +122,16 @@ def _draw_bonus(rows: np.ndarray, board: np.ndarray) -> np.ndarray:
     for i in range(cards.shape[1]):
         bits |= (np.uint16(1) << ranks[:, i].astype(np.uint16))
 
+    # Four in a row is only open-ended when both ends are live, which is every
+    # window up to T-J-Q-K (a nine or an ace) and stops there. J-Q-K-A takes a
+    # ten and nothing else -- four outs, not eight -- and scoring it as an
+    # open-ender paid it the same 0.18 a genuine wrap gets. Left to the
+    # gutshot pass below, whose T-to-A window already finds it.
     oesd = np.zeros(n, dtype=bool)
-    for start in range(10):
+    for start in range(9):
         mask = np.uint16((0b1111 << start) & 0x1FFF)
         oesd |= (bits & mask) == mask
+    made_straight = np.zeros(n, dtype=bool)
     gut = np.zeros(n, dtype=bool)
     for start in range(9):
         mask = np.uint16((0b11111 << start) & 0x1FFF)
@@ -127,13 +139,18 @@ def _draw_bonus(rows: np.ndarray, board: np.ndarray) -> np.ndarray:
         cnt = np.zeros(n, dtype=np.int8)
         for b in range(5):
             cnt += ((m >> (start + b)) & 1).astype(np.int8)
+        made_straight |= cnt == 5
         gut |= cnt == 4
     wheel = bits & np.uint16(0x100F)          # A2345
     wcnt = np.zeros(n, dtype=np.int8)
     for b in (0, 1, 2, 3, 12):
         wcnt += ((wheel >> b) & 1).astype(np.int8)
+    made_straight |= wcnt == 5
     gut |= wcnt == 4
     gut &= ~oesd
+    # Nothing left to draw to on this axis.
+    oesd &= ~made_straight
+    gut &= ~made_straight
 
     board_max = int(board.max() // 4)
     overcards = (ranks[:, 0] > board_max) & (ranks[:, 1] > board_max)
@@ -175,8 +192,19 @@ class _BoardCache:
         # Frequency cuts use playability: made hand plus draws. Without the
         # draw term a polarised bluff is always the weakest made hand, never
         # a combo draw, and the bot cannot check-raise a flush draw.
+        #
+        # Folded into the headroom above the made-hand percentile rather than
+        # added flat. A flat add lifted hands that were already near the top
+        # past hands that genuinely beat them -- on one paired board a made
+        # straight scored 1.149 against quads at 0.999, and seventy combos
+        # came out above 1.0 -- and the ordering *is* the frequency cut, so
+        # that reordering reached every postflop decision the policy makes.
+        # Scaling leaves a weak draw with almost the whole bonus, which is the
+        # entire point of the term, and a premium with almost none, which is
+        # correct: it has nothing left to draw to.
         self.play = self.pct.copy()
-        self.play[live] = self.pct[live] + _draw_bonus(rows, board_ids)
+        bonus = _draw_bonus(rows, board_ids)
+        self.play[live] = self.pct[live] + bonus * (1.0 - self.pct[live])
 
 
 class Ranges:

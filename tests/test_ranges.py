@@ -1,6 +1,7 @@
 """The range engine: a frequency is a cut inside a range, not inside the deck."""
 
 import numpy as np
+import pytest
 
 from villain.botplay import _OPEN_PCT
 from villain.cards import card_id
@@ -131,3 +132,42 @@ def test_ties_inside_a_class_share_one_percentile():
     pairs = [hole("Ac", "Ad"), hole("Ah", "As"), hole("Ac", "As")]
     got = {round(r.percentile(0, h, OPEN), 9) for h in pairs}
     assert len(got) == 1
+
+
+def test_playability_never_reorders_the_made_hands():
+    """The draw bonus must not lift a hand past one that beats it.
+
+    Playability is made hand *plus* what it can still become, and the ordering
+    it produces is the frequency cut every postflop decision is taken on. A
+    flat bonus on top of a percentile already near the ceiling inverted it: on
+    a paired board a made straight scored 1.149 against quads at 0.999, so the
+    top of a c-betting range was a straight and the quads were in the bluffs.
+    """
+    board = [int(card_id(c)) for c in ("5c", "6d", "7h", "7s")]
+    play = Ranges(2).board_cache(board).play
+    straight = play[index_of(hole("8h", "9d"))]
+    quads = play[index_of(hole("7d", "7c"))]
+    boat = play[index_of(hole("5s", "5d"))]
+    assert quads > boat > straight
+    assert play.max() <= 1.0
+
+
+def test_a_made_straight_is_not_also_drawing_to_one():
+    """Four to a flush already stops counting at five suited; so must this."""
+    from villain.ranges import _draw_bonus
+    board = np.array([int(card_id(c)) for c in ("5c", "6d", "7h", "2s")], dtype=np.int64)
+    made = np.array([[int(card_id("8h")), int(card_id("9d"))]], dtype=np.int64)
+    drawing = np.array([[int(card_id("8h")), int(card_id("Kd"))]], dtype=np.int64)
+    assert _draw_bonus(drawing, board)[0] > 0.15      # 5-6-7-8: a nine or a four
+    assert _draw_bonus(made, board)[0] < 0.15         # already there
+
+
+def test_jqka_is_a_gutshot_not_an_open_ender():
+    """It takes a ten and nothing else -- four outs, not eight."""
+    from villain.ranges import _draw_bonus
+    board = np.array([int(card_id(c)) for c in ("Kh", "As", "2c")], dtype=np.int64)
+    one_way = np.array([[int(card_id("Jd")), int(card_id("Qc"))]], dtype=np.int64)
+    board_low = np.array([int(card_id(c)) for c in ("6h", "7s", "2c")], dtype=np.int64)
+    two_way = np.array([[int(card_id("5d")), int(card_id("4c"))]], dtype=np.int64)
+    assert _draw_bonus(one_way, board)[0] == pytest.approx(0.08)
+    assert _draw_bonus(two_way, board_low)[0] == pytest.approx(0.18)
