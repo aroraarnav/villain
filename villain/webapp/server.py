@@ -610,7 +610,7 @@ def serve(db: Path = DEFAULT_PATH, port: int = 8766, open_browser: bool = True):
     Handler.db_path = Path(db)
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     url = f"http://127.0.0.1:{port}/"
-    print(f"villain UI on {url}  (database: {db})")
+    print(f"villain test on {url}  (database: {db})")
     print("ctrl-c to stop")
     if open_browser:
         threading.Timer(0.4, lambda: webbrowser.open(url)).start()
@@ -631,5 +631,4 @@ def main(argv=None):
     args = parser.parse_args(argv)
     serve(db=args.db, port=args.port, open_browser=not args.no_browser)
     return 0
-
 
