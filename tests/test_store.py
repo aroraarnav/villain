@@ -199,6 +199,33 @@ def test_deleted_player_does_not_come_back_on_rebuild(tmp_path, hands):
         assert pid not in {int(r["id"]) for r in s.players()}
 
 
+def test_narrowed_rebuild_reports_its_own_total(tmp_path, hands):
+    """A rebuild scoped to one player walks only that player's hands, and the
+    bar has to be counted against that set -- against the whole database, a
+    post-merge rebuild claims minutes of work it is not doing."""
+    from villain import db as db_module
+
+    with Store(tmp_path / "v.db") as s:
+        s.add_hands(hands)
+        full = s.conn.execute("SELECT COUNT(*) c FROM hands").fetchone()["c"]
+        pid = int(min(s.players(), key=lambda r: r["hands"] or 0)["id"])
+        theirs = s.conn.execute(
+            "SELECT COUNT(DISTINCT hs.hand_id) c FROM hand_seats hs"
+            " JOIN aliases a ON a.site = hs.site AND a.account = hs.account"
+            " WHERE a.player_id = ?", (pid,)).fetchone()["c"]
+        assert 0 < theirs < full
+
+        totals: list[int] = []
+
+        def hook(done, total, phase):
+            if phase == "reading hands":
+                totals.append(total)
+
+        db_module.PROGRESS_HOOK = hook
+        s.rebuild(only=[pid])
+        assert totals and set(totals) == {theirs}
+
+
 def test_delete_player_rejects_an_unknown_id(tmp_path, hands):
     with Store(tmp_path / "v.db") as s:
         s.add_hands(hands)
