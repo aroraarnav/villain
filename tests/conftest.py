@@ -17,11 +17,14 @@ def _reset_db_module_hooks():
     consumes as `wrote`. Left set, a later GET /api/roster test would claim a
     read had written."""
     from villain import db
+    from villain.webapp import heroview
     db._CACHE_DIRTY = False
     db.PROGRESS_HOOK = None
+    heroview._HERO_DIRTY = False
     yield
     db._CACHE_DIRTY = False
     db.PROGRESS_HOOK = None
+    heroview._HERO_DIRTY = False
 
 
 @pytest.fixture(scope="session")

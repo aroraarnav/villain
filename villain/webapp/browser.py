@@ -104,8 +104,9 @@ def dispatch_json(method: str, path: str, body: str = "") -> dict:
     # alone cannot see it. Without this, a GET that migrated reported false,
     # the stamp never left the worker, and the next visit rebuilt every hand.
     from .. import db
+    from .heroview import consume_hero_dirty
     return {"status": code, "body": out.decode("utf-8"), "content_type": content_type,
-            "wrote": db.consume_cache_dirty() or (
+            "wrote": db.consume_cache_dirty() or consume_hero_dirty() or (
                 method == "POST" and code < 400 and writes_to_disk(
                     path.split("?")[0]))}
 
@@ -142,7 +143,7 @@ def build_hero(progress=None) -> dict:
     it is still going.
     """
     from ..db import Store, consume_cache_dirty
-    from .heroview import hero_payload
+    from .heroview import consume_hero_dirty, hero_payload
     from .jsonutil import dumps
 
     def report(done, total, phase):
@@ -155,10 +156,15 @@ def build_hero(progress=None) -> dict:
     report(0, 0, "starting")
     with Store(Handler.db_path) as store:
         payload = hero_payload(store, progress=report)
+    # A cold build writes ``.hero-cache.json`` beside the db. That file is
+    # what the next visit has to find -- memory dies with the worker -- and
+    # the page only flushes it when ``wrote`` is true. ``consume_cache_dirty``
+    # is the definitions stamp, not this sidecar; without the hero flag the
+    # cache never left MEMFS and every reload rebuilt.
     return {"status": 200 if payload is not None else 404,
             "body": dumps(payload if payload is not None else
                           {"error": "Could not identify hero automatically -- "
                                     "no player has cards known on enough of their "
                                     "own hands."}),
             "content_type": "application/json",
-            "wrote": consume_cache_dirty()}
+            "wrote": consume_cache_dirty() or consume_hero_dirty()}
