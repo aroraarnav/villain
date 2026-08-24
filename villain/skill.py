@@ -118,7 +118,13 @@ def rate(profile: Profile) -> Skill:
 # ---------------------------------------------------------------------------
 
 def _solid(profile: Profile, feature: str) -> float:
-    """What a competent player does with this stat at this table size."""
+    """What a competent player does with this stat at this table size.
+
+    TAG against *this* field, not the built-in online one. A 28% VPIP in a
+    42% home game is a TAG; scoring it against a 15% online target called
+    that hand selection bad and dragged every looser regular's rating down
+    with it.
+    """
     return target_frequency(ARCHETYPE_BY_NAME["tag"], feature, profile.regime, profile)
 
 
@@ -174,7 +180,8 @@ def _preflop_selection(profile: Profile) -> Component | None:
     # Tighter than the field is a mild error and loose is a large one, so the
     # band is generous below the target and strict above it. A player who folds
     # too much leaves value behind; one who plays everything bleeds it.
-    score = _band_score(vpip, _solid(profile, "vpip"),
+    target = _solid(profile, "vpip")
+    score = _band_score(vpip, target,
                         tolerance=_pool_tolerance(profile, "vpip", 0.22),
                         loose_tolerance=0.13)
     limp = profile.get("limp")

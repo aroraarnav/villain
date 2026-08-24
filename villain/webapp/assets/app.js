@@ -4,7 +4,8 @@ const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g,
   c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const SVG = "http://www.w3.org/2000/svg";
 const state = {tab: "players", session: null, player: null, roster: null, glossary: null, game: null, lastEvent: null, stepTimer: null, descOn: true, revealed: false, checkFold: false, checkFoldHand: null, heroPoll: null,
-               sessionId: null, paused: false};
+               sessionId: null, paused: false, muted: false, analysis: null, simGen: 0,
+               dealHand: null, dealUntil: null, stepUntil: null, clockHold: null};
 
 /* Hosted demo, signed out: the sample is readable, not writable. Set by the
    boot page. Absent under `villain test`, which has no accounts and must stay
@@ -1692,8 +1693,13 @@ function actbtn(label, on, cls) {
 
 async function viewPlay() {
   const view = $("#view");
-  if (state.game) { renderTable(view, state.game); return; }
   if (!onScreen("play")) return;
+  if (state.analysis) { renderAnalysis(view, state.analysis); return; }
+  if (state.game) {
+    if (!state.paused) thawSimClock();
+    renderTable(view, state.game);
+    return;
+  }
   view.innerHTML = `<div class="panel"><h2>Simulate</h2>
     <div class="small muted" style="margin:-6px 0 16px">Sit at a table and play real hands
       against players from your database. Each villain acts from their own measured profile —
@@ -1708,10 +1714,13 @@ async function viewPlay() {
     </div></div>`;
   $("#pick-list").appendChild(loadingBlock("Reading your database\u2026"));
   const roster = await get("/api/roster");
+  if (!onScreen("play") || state.game || state.analysis) return;
   const players = (roster.players || [])
     .filter(p => p.player_id != null && p.player_id !== roster.hero_id && p.hands >= 30)
     .sort((a, b) => b.hands - a.hands);
-  const list = $("#pick-list"); list.innerHTML = "";
+  const list = $("#pick-list");
+  if (!list) return;
+  list.innerHTML = "";
   if (!players.length) { list.innerHTML = `<div class="small muted">No players with
     enough hands yet — import some on the Database tab.</div>`; return; }
   const picked = new Set();
@@ -1734,9 +1743,12 @@ async function viewPlay() {
     try {
       const data = await post("/api/sim/new", {villains: [...picked],
         stack: +$("#sit-stack").value, sb: +$("#sit-sb").value, bb: +$("#sit-bb").value});
+      resetSimClock();
+      state.simGen++;
       state.game = data;
       state.paused = false;          // a hold belongs to the table you left
-      renderTable($("#view"), data);
+      state.analysis = null;
+      if (onScreen("play")) renderTable($("#view"), data);
     } catch (err) { $("#sit-go").disabled = false; alert(err.message); }
   };
 }
@@ -1823,32 +1835,115 @@ function actionSound(action) {
   else if (action === "fold") foldSound();
 }
 
+function formatLogLine(line) {
+  const street = line.match(/^(flop|turn|river):/i);
+  if (street) return street[1][0].toUpperCase() + street[1].slice(1).toLowerCase();
+  return line.replace(/\braises to\b/, "raises").replace(/\braise to\b/, "raise");
+}
+
+function logLineKind(line) {
+  if (/^(flop|turn|river):/i.test(line)) return "log-street";
+  if (/\bposts?\b/.test(line)) return "log-post";
+  if (/\bwin[s]?\b/.test(line)) return "log-win";
+  return "log-act";
+}
+
 function actionText(ev) {
   if (!ev) return "";
   if (ev.action === "fold") return "Folds";
   if (ev.action === "check") return "Checks";
   if (ev.action === "call") return "Calls";
+  if (ev.opening) return `Bets ${ev.amount}`;
   return `Raises to ${ev.amount}`;
 }
 
 async function simPost(route, extra) {
-  if (state.stepTimer) { clearTimeout(state.stepTimer); state.stepTimer = null; }
+  if (!state.game) return;
   const token = state.game.token;
+  const gen = state.simGen;
+  clearSimTimer();
   try {
     const d = await post(route, Object.assign({token}, extra || {}));
+    if (gen !== state.simGen || !state.game || state.game.token !== token) return;
     state.game = {token, state: d.state};
-    if (route === "/api/sim/next") { state.lastEvent = null; state.revealed = false; }
-    renderTable($("#view"), state.game);
+    state.stepUntil = null;
+    state.clockHold = null;
+    if (route === "/api/sim/next") {
+      state.lastEvent = null; state.revealed = false;
+      state.dealHand = null; state.dealUntil = null;
+    }
+    if (state.tab === "play" && !state.analysis) renderTable($("#view"), state.game);
+    else armSimClock();
   } catch (err) { /* game gone or navigated away */ }
 }
 
-function renderTable(view, data) {
+function clearSimTimer() {
   if (state.stepTimer) { clearTimeout(state.stepTimer); state.stepTimer = null; }
-  // The simulator outlives the tab. A queued auto-step, or a reply that lands
-  // after you have moved on, used to paint the table over whichever tab you
-  // had switched to. The game is kept in state.game and drawn again by
-  // viewPlay when you come back to it.
+}
+
+function resetSimClock() {
+  clearSimTimer();
+  state.dealHand = null; state.dealUntil = null; state.stepUntil = null;
+  state.clockHold = null; state.revealed = false;
+}
+
+// Leaving the Simulate tab, pausing, or hiding the browser tab used to either
+// keep firing into a missing DOM or clear the timer and never put it back.
+// Hold the remaining wait; thaw it when the table is visible again.
+function holdSimClock() {
+  clearSimTimer();
+  if (state.clockHold) return;
+  if (!state.dealUntil && !state.stepUntil) return;
+  state.clockHold = {
+    dealUntil: state.dealUntil, stepUntil: state.stepUntil, heldAt: Date.now(),
+  };
+  state.dealUntil = null;
+  state.stepUntil = null;
+}
+
+function thawSimClock() {
+  if (!state.clockHold) return;
+  const dt = Date.now() - state.clockHold.heldAt;
+  if (state.clockHold.dealUntil) state.dealUntil = state.clockHold.dealUntil + dt;
+  if (state.clockHold.stepUntil) state.stepUntil = state.clockHold.stepUntil + dt;
+  state.clockHold = null;
+}
+
+function armSimClock() {
+  clearSimTimer();
+  if (!state.game || state.paused || state.clockHold || state.analysis) return;
   if (state.tab !== "play") return;
+  const st = state.game.state;
+  if (!st.over && !st.your_turn) {
+    if (state.stepUntil == null) {
+      const wait = (state.lastEvent && state.lastEvent.action === "fold") ? 2000 : SIM_DELAY;
+      state.stepUntil = Date.now() + wait;
+    }
+    const left = Math.max(0, state.stepUntil - Date.now());
+    const token = state.game.token;
+    const gen = state.simGen;
+    state.stepTimer = setTimeout(() => {
+      state.stepUntil = null;
+      if (gen !== state.simGen || !state.game || state.game.token !== token) return;
+      stepBots(token);
+    }, left);
+  } else if (st.over && !state.revealed) {
+    if (state.dealHand !== st.hand_no) {
+      state.dealHand = st.hand_no;
+      state.dealUntil = Date.now() + SIM_DELAY;
+    }
+    tickDealCountdown();
+  } else {
+    paintDealCount();
+  }
+}
+
+function renderTable(view, data) {
+  // Paint only while Simulate is on screen. A reply that lands after a tab
+  // switch used to either draw the table over Database, or clear the timer
+  // and leave the session frozen when you came back.
+  if (state.tab !== "play" || state.analysis) return;
+  clearSimTimer();
   const st = data.state, n = st.seats.length;
   const pnl = st.pnl || 0;
   const pnlBb = st.bb ? (pnl / st.bb).toFixed(1) : "0";
@@ -1862,11 +1957,10 @@ function renderTable(view, data) {
         <div class="table-center">
           <div class="pot-pill">pot <b>${st.pot}</b></div>
           <div class="board" id="board"></div>
+          <div class="deal-count" id="deal-count" hidden></div>
         </div>
       </div>
       <div class="controls" id="controls"></div>
-      <div class="handlog small muted" id="handlog"></div>
-      <div class="range-review small" id="range-review"></div>
     </div>
     <div class="sim-side">
       <div class="side-label">session P/L</div>
@@ -1886,12 +1980,18 @@ function renderTable(view, data) {
           id="pause-on" aria-pressed="${state.paused}">Pause</button>
       </div>
       <button class="act small" id="end-session">End and analyze</button>
+      <div class="handlog">
+        <div class="handlog-title">Hand log</div>
+        <div class="handlog-body" id="handlog"></div>
+      </div>
     </div>
   </div></div>`;
   const table = $("#ptable");
   st.seats.forEach((s, i) => {
     const theta = Math.PI / 2 + (i / n) * 2 * Math.PI;   // you (0) at the bottom
-    const x = 50 + 45 * Math.cos(theta), y = 50 + 44 * Math.sin(theta);
+    // Sit on the felt rim, inside the stage. 45/44 hung the hero through the
+    // bottom of the box and over the action bar.
+    const x = 50 + 40 * Math.cos(theta), y = 50 + 36 * Math.sin(theta);
     const seat = document.createElement("div");
     seat.className = "tseat" + (s.is_hero ? " me hero-scope" : "")
       + (s.folded ? " folded" : "") + (s.to_act ? " acting" : "") + (s.won ? " won" : "");
@@ -1902,7 +2002,8 @@ function renderTable(view, data) {
     seat.innerHTML = `<div class="tseat-cards">${cards}</div>
       <div class="tseat-body">
         <div class="tseat-name">${esc(s.name)}${
-          s.is_hero ? ' <span class="tag hero-tag">you</span>' : ""}</div>
+          s.is_hero && s.name.toLowerCase() !== "you"
+            ? ' <span class="tag hero-tag">you</span>' : ""}</div>
         <div class="tseat-stack">${s.stack}${
           st.over && s.net ? ` <span class="won-amt${s.net < 0 ? " down" : ""}">${
             s.net > 0 ? "+" : ""}${s.net}</span>` : ""}</div>
@@ -1923,32 +2024,28 @@ function renderTable(view, data) {
     table.appendChild(seat);
     if (s.is_button) {
       const d = document.createElement("div"); d.className = "dealer-btn"; d.textContent = "D";
-      d.style.left = (50 + 33 * Math.cos(theta - 0.4)) + "%";
-      d.style.top = (50 + 32 * Math.sin(theta - 0.4)) + "%";
+      d.style.left = (50 + 29 * Math.cos(theta - 0.4)) + "%";
+      d.style.top = (50 + 24 * Math.sin(theta - 0.4)) + "%";
       table.appendChild(d);
     }
     if (s.committed > 0 && !st.over) {
       const chip = document.createElement("div"); chip.className = "tbet";
-      chip.style.left = (50 + 27 * Math.cos(theta)) + "%";
-      chip.style.top = (50 + 26 * Math.sin(theta)) + "%";
+      chip.style.left = (50 + 23 * Math.cos(theta)) + "%";
+      chip.style.top = (50 + 19 * Math.sin(theta)) + "%";
       chip.innerHTML = `<span class="chip-dot"></span>${s.committed}`;
       table.appendChild(chip);
     }
   });
   $("#board").innerHTML = st.board.length ? st.board.map(c => cardHtml(c, true)).join("") : "";
-  $("#handlog").innerHTML = (st.log || []).map(l => `<div>${esc(l)}</div>`).join("");
-  const review = $("#range-review");
-  if (st.over && st.ranges && Object.keys(st.ranges).length) {
-    review.innerHTML = Object.entries(st.ranges).map(([name, classes]) =>
-      `<div><span class="muted">what ${esc(name)} can still hold</span> · ${
-        classes.map(c => `${esc(c.cls)} ${Math.round(c.share * 100)}%`).join(" · ")
-      }</div>`).join("");
-  } else {
-    review.innerHTML = "";
-  }
+  const logEl = $("#handlog");
+  logEl.innerHTML = (st.log || []).map(l =>
+    `<div class="log-line ${logLineKind(l)}">${esc(formatLogLine(l))}</div>`).join("");
+  logEl.scrollTop = logEl.scrollHeight;
   $("#leave").onclick = () => {
-    if (state.stepTimer) clearTimeout(state.stepTimer);
-    state.game = null; state.lastEvent = null; viewPlay();
+    state.simGen++;
+    resetSimClock();
+    state.game = null; state.lastEvent = null; state.analysis = null;
+    viewPlay();
   };
   const armToggle = (el, on) => {
     el.classList.toggle("on", on);
@@ -1969,30 +2066,64 @@ function renderTable(view, data) {
   $("#pause-on").onclick = (e) => {
     state.paused = !state.paused;
     armToggle(e.currentTarget, state.paused);
-    if (state.paused) {
-      if (state.stepTimer) { clearTimeout(state.stepTimer); state.stepTimer = null; }
-    } else if (state.game) {
-      renderTable(view, state.game);          // resuming re-arms the timer
+    if (state.paused) holdSimClock();
+    else {
+      thawSimClock();
+      armSimClock();
     }
+    paintDealCount();
   };
   $("#end-session").onclick = () => endSession();
   renderControls($("#controls"), data);
-  if (state.paused) return;                  // held: nothing schedules itself
-  if (!st.over && !st.your_turn) {           // pace the villains so you can watch
-    const wait = (state.lastEvent && state.lastEvent.action === "fold") ? 2000 : SIM_DELAY;
-    state.stepTimer = setTimeout(() => stepBots(data.token), wait);
-  } else if (st.over && !state.revealed) {     // auto-deal next, unless paused to reveal
-    state.stepTimer = setTimeout(() => simPost("/api/sim/next"), SIM_DELAY);
+  paintDealCount();
+  if (state.paused) return;
+  armSimClock();
+}
+
+function dealSecsLeft() {
+  if (state.clockHold && state.clockHold.dealUntil) {
+    return Math.max(0, Math.ceil((state.clockHold.dealUntil - state.clockHold.heldAt) / 1000));
   }
+  if (!state.dealUntil) return 0;
+  return Math.max(0, Math.ceil((state.dealUntil - Date.now()) / 1000));
+}
+
+function paintDealCount() {
+  const el = $("#deal-count");
+  if (!el) return;
+  const over = state.game && state.game.state && state.game.state.over;
+  const counting = over && !state.revealed
+    && !!(state.dealUntil || (state.clockHold && state.clockHold.dealUntil));
+  if (!counting) { el.hidden = true; return; }
+  el.hidden = false;
+  el.innerHTML = `Next hand<b>${Math.max(dealSecsLeft(), 1)}</b>`;
+}
+
+function tickDealCountdown() {
+  paintDealCount();
+  if (state.paused || state.clockHold || state.tab !== "play") return;
+  const left = (state.dealUntil || 0) - Date.now();
+  if (left <= 0) {
+    state.dealUntil = null;
+    state.dealHand = null;
+    simPost("/api/sim/next");
+    return;
+  }
+  state.stepTimer = setTimeout(tickDealCountdown, Math.min(200, left));
 }
 
 async function stepBots(token) {
+  const gen = state.simGen;
   try {
     const r = await post("/api/sim/step", {token});
+    if (gen !== state.simGen || !state.game || state.game.token !== token) return;
     if (r.event) actionSound(r.event.action);
     state.game = {token, state: r.state};
     state.lastEvent = r.event;
-    renderTable($("#view"), state.game);
+    state.stepUntil = null;
+    if (state.clockHold) state.clockHold.stepUntil = null;
+    if (state.tab === "play" && !state.analysis) renderTable($("#view"), state.game);
+    else armSimClock();
   } catch (err) { /* game gone or navigated away */ }
 }
 
@@ -2029,21 +2160,19 @@ function renderControls(el, data) {
   if (st.over) {
     if (!state.revealed && st.seats.some(x => x.all_hole && !x.is_hero)) {
       el.appendChild(actbtn("Reveal cards", () => {
-        if (state.stepTimer) { clearTimeout(state.stepTimer); state.stepTimer = null; }
-        state.revealed = true; renderTable($("#view"), data);
+        clearSimTimer();
+        state.revealed = true;
+        state.dealUntil = null; state.dealHand = null;
+        if (state.clockHold) state.clockHold.dealUntil = null;
+        renderTable($("#view"), data);
       }));
     }
     el.appendChild(actbtn("Deal now", () => simPost("/api/sim/next"), "primary"));
     el.appendChild(cfToggle(st));
-    // No second "End and analyze" here. It already lives in the sidebar, where
-    // it is reachable on every street rather than only between hands, and one
-    // action in two places is how a control bar stops being a list of what you
-    // can do right now.
     const won = st.seats.filter(s => s.won);
     if (won.length) {
       const note = document.createElement("span"); note.className = "small muted";
-      note.style.marginLeft = "10px";
-      note.textContent = won.map(s => `${s.name} +${s.won}`).join(" · ") + " · next hand dealing…";
+      note.textContent = won.map(s => `${s.name} +${s.won}`).join(" · ");
       el.appendChild(note);
     }
     return;
@@ -2068,39 +2197,86 @@ function renderControls(el, data) {
     return;
   }
   el.appendChild(cfToggle(st));
-  if (lg.can_fold) el.appendChild(actbtn("Fold", () => act("fold")));
-  if (lg.can_check) el.appendChild(actbtn("Check", () => act("check")));
-  else if (lg.can_call) el.appendChild(actbtn(`Call ${lg.call_amount}`, () => act("call")));
+  const leave = document.createElement("div");
+  leave.className = "controls-leave";
+  if (lg.can_fold) leave.appendChild(actbtn("Fold", () => act("fold")));
+  if (lg.can_check) leave.appendChild(actbtn("Check", () => act("check")));
+  if (leave.childNodes.length) el.appendChild(leave);
   if (lg.can_raise) {
+    const facing = lg.can_call && !lg.can_check;
+    const callTo = lg.committed + lg.call_amount;
     const potAfter = st.pot + lg.call_amount;
     const sizeTo = (frac) => {
       const raw = lg.can_check ? Math.round(frac * st.pot)
-        : (lg.committed + lg.call_amount) + Math.round(frac * potAfter);
+        : callTo + Math.round(frac * potAfter);
       return Math.min(lg.max_raise_to, Math.max(lg.min_raise_to, raw));
+    };
+    const snap = (v) => {
+      v = +v;
+      if (facing && v > callTo && v < lg.min_raise_to) {
+        const mid = (callTo + lg.min_raise_to) / 2;
+        return v < mid ? callTo : lg.min_raise_to;
+      }
+      return v;
+    };
+    const labelFor = (v) => {
+      v = snap(v);
+      if (facing && v <= callTo) return `Call ${lg.call_amount}`;
+      return lg.can_check ? `Bet ${v}` : `Raise to ${v}`;
     };
     const wrap = document.createElement("div"); wrap.className = "raise-wrap";
     const slider = document.createElement("input");
-    slider.type = "range"; slider.min = lg.min_raise_to; slider.max = lg.max_raise_to;
-    slider.value = sizeTo(0.66);
+    slider.type = "range";
+    slider.min = facing ? callTo : lg.min_raise_to;
+    slider.max = lg.max_raise_to;
+    slider.value = facing ? callTo : sizeTo(0.66);
     const amt = document.createElement("span"); amt.className = "raise-amt";
-    const upd = () => { amt.textContent = `to ${slider.value}`; };
+    const go = actbtn("", () => {
+      const v = snap(+slider.value);
+      if (facing && v <= callTo) act("call");
+      else act("raise", v);
+    }, "primary commit");
+    const upd = () => {
+      const v = snap(+slider.value);
+      slider.value = v;
+      amt.textContent = facing && v <= callTo ? "call" : `to ${v}`;
+      go.textContent = labelFor(v);
+    };
     slider.oninput = upd; upd();
     const presets = document.createElement("div"); presets.className = "presets";
-    for (const [label, frac] of [["½", 0.5], ["⅔", 0.66], ["pot", 1.0]]) {
+    if (facing) {
+      presets.appendChild(actbtn("call", () => { slider.value = callTo; upd(); }, "small"));
+    }
+    for (const [label, frac] of [["⅓", 1 / 3], ["½", 0.5], ["⅔", 2 / 3], ["pot", 1.0]]) {
       presets.appendChild(actbtn(label, () => { slider.value = sizeTo(frac); upd(); }, "small"));
     }
     presets.appendChild(actbtn("all-in", () => { slider.value = lg.max_raise_to; upd(); }, "small"));
-    wrap.append(slider, amt, presets,
-      actbtn(lg.can_check ? "Bet" : "Raise", () => act("raise", +slider.value), "primary"));
+    wrap.append(presets, slider, amt);
     el.appendChild(wrap);
+    el.appendChild(go);
+  } else if (lg.can_call) {
+    el.appendChild(actbtn(`Call ${lg.call_amount}`, () => act("call"), "primary commit"));
   }
 }
 
 async function endSession() {
-  if (state.stepTimer) { clearTimeout(state.stepTimer); state.stepTimer = null; }
+  if (!state.game) return;
   const token = state.game.token;
-  const r = await post("/api/sim/analysis", {token});
-  renderAnalysis($("#view"), r.analysis);
+  state.simGen++;
+  const gen = state.simGen;
+  clearSimTimer();
+  try {
+    const r = await post("/api/sim/analysis", {token});
+    if (gen !== state.simGen) return;
+    state.analysis = r.analysis;
+    state.game = null;
+    state.lastEvent = null;
+    resetSimClock();
+    if (onScreen("play")) renderAnalysis($("#view"), state.analysis);
+  } catch (err) {
+    if (state.game && onScreen("play")) armSimClock();
+    alert(err.message);
+  }
 }
 
 function renderAnalysis(view, a) {
@@ -2138,7 +2314,10 @@ function renderAnalysis(view, a) {
         v.net_bb >= 0 ? "+" : ""}${v.net_bb} bb)</span></span>`;
     vs.appendChild(row);
   }
-  $("#a-back").onclick = () => { state.game = null; state.lastEvent = null; viewPlay(); };
+  $("#a-back").onclick = () => {
+    state.analysis = null; state.game = null; state.lastEvent = null;
+    viewPlay();
+  };
 }
 
 async function viewHero() {
@@ -2153,7 +2332,11 @@ async function viewHero() {
   // a veil would be a flash of furniture.
   let cold = false;
   try {
-    cold = (await get("/api/hero?peek=1")).status === "cold";
+    const peek0 = await get("/api/hero?peek=1");
+    // "building" is the same wait as "cold": the work is already running,
+    // usually because this tab asked a moment ago and the reader came back.
+    // Treating it as warm dropped the veil and left a blank poll.
+    cold = peek0.status === "cold" || peek0.status === "building";
   } catch (err) {
     // Do not quietly assume warm. Guessing wrong here means a build that takes
     // minutes runs with no veil and no progress registered -- a bare spinner,
@@ -2177,9 +2360,9 @@ async function viewHero() {
         + 'held. <b>This runs once</b> — after it, the Hero tab opens instantly '
         + 'until your next import.</div>');
     }
-    // Real progress, reported from inside the Python as it walks. The walk
-    // over hands can be counted; fitting the trees cannot, and says so by
-    // sending no total rather than by inventing one.
+    // Real progress, reported from inside the Python as it walks. Walks over
+    // hands are counted per hand; fitting is counted per cross-validation
+    // fold. A total of zero means this phase has nothing honest to count.
     const PHASES = {
       starting: "Opening your database",
       finding: "Finding which seat is yours",
@@ -2197,8 +2380,6 @@ async function viewHero() {
         done(`${label}\u2026 ${counted.toLocaleString()} of ${total.toLocaleString()}`,
              counted / total);
       } else {
-        // No total means this phase cannot be counted -- fitting the trees,
-        // where the only true thing to report is that it is still going.
         done(`${label}\u2026`, undefined);
       }
     };
@@ -2206,21 +2387,28 @@ async function viewHero() {
   let data;
   try {
     data = await get("/api/hero");
+    // Local ``villain test`` answers 202 and builds on a thread. Keep the
+    // counted veil up and poll peek for the same phases the in-process
+    // (browser) build reports directly -- dropping it for "this page will
+    // appear on its own" was a loader with no bar.
+    while (data && data.status === "building") {
+      if (!onScreen("hero")) {
+        delete window.__villainProgress;
+        return;
+      }
+      const peek = await get("/api/hero?peek=1");
+      if (window.__villainProgress && peek.phase) {
+        window.__villainProgress(peek);
+      }
+      if (peek.status !== "building") {
+        data = await get("/api/hero");
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
     delete window.__villainProgress;
     if (done) $("#modal").innerHTML = "";
-    // A cold build takes minutes; the reader may well be somewhere else by now.
     if (!onScreen("hero")) return;
-    if (data && data.status === "building") {
-      // The build runs once per import and takes about a minute and a half.
-      // Say so and keep asking, rather than holding the request open with a
-      // blank tab behind it.
-      view.innerHTML = `<div class="panel"><h2>Hero</h2>
-        <p>${esc(data.message || "Reading your hands…")}</p>
-        <p class="small muted">This page will appear on its own when it is ready.</p></div>`;
-      if (state.heroPoll) clearTimeout(state.heroPoll);
-      state.heroPoll = setTimeout(() => { if (state.tab === "hero") viewHero(); }, 4000);
-      return;
-    }
     if (state.heroPoll) { clearTimeout(state.heroPoll); state.heroPoll = null; }
   } catch (err) {
     delete window.__villainProgress;
@@ -3539,19 +3727,13 @@ function switchTab(tab, playerId) {
   // cleared by whatever it was doing rather than by the tab that replaced it --
   // which left a full-screen dim with nothing on it.
   if (document.querySelector(".veil.busy")) return;
+  if (state.tab === "play" && tab !== "play") holdSimClock();
   state.tab = tab;
   // Bare "go to the database tab" clears which player was open; a link that
   // names a specific player (from Sessions, say) opens straight to them
   // instead of dropping back to the general roster.
   if (tab === "players") state.player = playerId != null ? playerId : null;
-  document.addEventListener("keydown", e => {
-  if (e.key !== "Escape") return;
-  for (const id of ["#modal2", "#modal"]) {
-    const layer = $(id);
-    if (layer && layer.innerHTML.trim()) { layer.innerHTML = ""; return; }
-  }
-});
-document.querySelectorAll("nav button").forEach(b =>
+  document.querySelectorAll("nav button").forEach(b =>
     b.classList.toggle("on", b.dataset.tab === tab));
   $("#meta").textContent = "";
   renderWithSpinner();
@@ -3560,9 +3742,27 @@ document.querySelectorAll("nav button").forEach(b =>
 /* In the browser the whole tool runs on this thread, so the work a tab does to
    build itself is work the page cannot paint through. Put a spinner up, give
    the browser a frame to actually draw it, and only then start. Two frames,
-   because one only schedules the paint -- the second runs after it. */
-const nextFrame = () => new Promise((done) =>
-  requestAnimationFrame(() => requestAnimationFrame(() => done())));
+   because one only schedules the paint -- the second runs after it. A hidden
+   tab never delivers those frames, so waiting for them is how a switch to
+   another tab froze the load until you came back. */
+const nextFrame = () => new Promise((done) => {
+  if (document.visibilityState === "hidden") {
+    done();
+    return;
+  }
+  let settled = false;
+  const finish = () => {
+    if (settled) return;
+    settled = true;
+    document.removeEventListener("visibilitychange", onHide);
+    done();
+  };
+  const onHide = () => {
+    if (document.visibilityState === "hidden") finish();
+  };
+  document.addEventListener("visibilitychange", onHide);
+  requestAnimationFrame(() => requestAnimationFrame(finish));
+});
 
 async function renderWithSpinner() {
   const view = $("#view");
@@ -3682,5 +3882,26 @@ themeBtn.onclick = () => {
 };
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", paintTheme);
 paintTheme();
+
+document.addEventListener("keydown", e => {
+  if (e.key !== "Escape") return;
+  for (const id of ["#modal2", "#modal"]) {
+    const layer = $(id);
+    if (layer && layer.innerHTML.trim()) { layer.innerHTML = ""; return; }
+  }
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (!state.game || state.analysis) return;
+  if (document.visibilityState === "hidden") {
+    holdSimClock();
+    return;
+  }
+  if (state.tab === "play" && !state.paused) {
+    thawSimClock();
+    armSimClock();
+    paintDealCount();
+  }
+});
 
 renderWithSpinner();

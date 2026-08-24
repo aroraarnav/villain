@@ -65,6 +65,14 @@
   // one is worse than a stale page: it silently answers with an older set of
   // calls while the page assumes the new ones exist.
   const worker = new Worker("worker.js?v=" + deployStamp);
+  // A hidden tab freezes requestAnimationFrame and throttles the page. The
+  // worker has to hear about it or it keeps busy-waiting for paints that
+  // will not happen, and the page has to skip those yields or a Hero
+  // build started, then backgrounded, never actually starts.
+  const tellVisibility = () =>
+    worker.postMessage({ type: "visibility", hidden: document.visibilityState === "hidden" });
+  tellVisibility();
+  document.addEventListener("visibilitychange", tellVisibility);
   let nextCall = 0;
   const waiting = new Map();
   worker.onmessage = (event) => {
@@ -127,6 +135,10 @@
     const loading = document.getElementById("loading");
     const submit = form.querySelector("button[type='submit']");
     const label = form.querySelector(".label");
+    const demo = document.getElementById("demo");
+    const back = document.getElementById("back");
+    const DEMO = "View the demo";
+    const DEMO_INSTEAD = "View the demo instead";
     boot.classList.add("gate");
 
     runtime.then(() => {},
@@ -139,6 +151,13 @@
       said.textContent = text;
       said.classList.toggle("bad", !!bad);
       said.classList.toggle("ok", !bad && !!text);
+    };
+    const showForm = () => {
+      boot.classList.remove("sending", "sent");
+      form.email.disabled = false;
+      submit.disabled = false;
+      label.textContent = "Email me a link";
+      demo.textContent = DEMO;
     };
     if (signInError) say(signInError, true);
 
@@ -156,6 +175,7 @@
         await sync.sendLink(email);
         boot.classList.remove("sending");
         boot.classList.add("sent");
+        demo.textContent = DEMO_INSTEAD;
         say("Check your inbox — we sent a link to " + email + ".");
       } catch (err) {
         boot.classList.remove("sending");
@@ -165,8 +185,13 @@
         say(err.message, true);
       }
     };
-    document.getElementById("demo").onclick = () => {
-      boot.classList.remove("gate");
+    back.onclick = () => {
+      showForm();
+      say("");
+      form.email.focus();
+    };
+    demo.onclick = () => {
+      boot.classList.remove("gate", "sent", "sending");
       chose();
     };
   });
@@ -355,13 +380,28 @@
 
     let promptSignIn = () => {};                 // replaced once the header exists
 
-    // Python runs on this thread. Nothing repaints while it does, so a spinner
-    // put up immediately before a call is only drawn once the call is over --
-    // the window simply freezes, which reads as a crash rather than as work.
-    // Two frames is the reliable "let it paint" yield: the first schedules,
-    // the second runs after the compositor has been through.
-    const letItPaint = () => new Promise((done) =>
-      requestAnimationFrame(() => requestAnimationFrame(() => done())));
+    // Python lives in the worker, so the page can paint while it runs. Two
+    // frames before a busy call lets a spinner actually appear. A hidden tab
+    // never delivers those frames -- waiting for them is how a Hero build
+    // started, then backgrounded, sat there until you came back.
+    const letItPaint = () => new Promise((done) => {
+      if (document.visibilityState === "hidden") {
+        done();
+        return;
+      }
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        document.removeEventListener("visibilitychange", onHide);
+        done();
+      };
+      const onHide = () => {
+        if (document.visibilityState === "hidden") finish();
+      };
+      document.addEventListener("visibilitychange", onHide);
+      requestAnimationFrame(() => requestAnimationFrame(finish));
+    });
 
     // Only when the interface has already said it is busy, or is about to
     // write. Yielding on every read would put two frames on each of the many

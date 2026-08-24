@@ -6,7 +6,7 @@ model, and they are named for the mistake rather than the fix.
 
 import pytest
 
-from villain.archetypes import ARCHETYPES, IMPORTANCE, match, target_frequency
+from villain.archetypes import ARCHETYPE_BY_NAME, ARCHETYPES, IMPORTANCE, match, target_frequency
 from villain.exploits import MIN_CONFIDENCE, MIN_OPPS, SHOWDOWN_MIN_OPPS, breakeven_fold, dedupe_leaks, find_leaks, measured_bluff_size, spots_to_confirm
 from villain.priors import POPULATION, Estimate, population_mean, prior_for, regime, shrink
 from villain.profile import PROFILE_FEATURES, build_profile
@@ -153,6 +153,43 @@ def test_a_leak_needs_evidence_not_just_a_prior():
     assert find_leaks(build_profile(empty)) == []
 
 
+def test_a_player_who_is_the_field_still_gets_priced_leaks():
+    """Lift asks 'did the data move the prior'. A 37k-hand exporter who
+    dominates the fit *is* the prior, so lift is ~0 on every real leak and
+    the Hero tab said nothing yet."""
+    book = StatBook(player_id="hero", name="Hero", regime="6max", hands=37000)
+    book.meters["table_size"].add(6, 1)
+    book.ratios["fold_vs_bet:flop"].hits = 7000
+    book.ratios["fold_vs_bet:flop"].opps = 10000
+    profile = build_profile(book)
+    # The fitted field is this player: same rate, a prior strong enough that
+    # posterior and prior both sit on the leak side of pot-odds.
+    profile.stats["fold_vs_bet:flop"] = shrink(7000, 10000, 0.70, 80.0)
+    profile.priors["fold_vs_bet:flop"] = (0.70, 80.0)
+    est = profile.stats["fold_vs_bet:flop"]
+    assert est.weight >= 0.75
+    assert est.prob_above(0.50) - est.prior_prob_above(0.50) < 0.12
+    leaks = find_leaks(profile)
+    assert any(l.id == "overfold_flop" for l in leaks), {l.id for l in leaks}
+    skill = rate(profile)
+    assert skill.exploitability > 0, "silence here is what inflated the rating"
+
+
+def test_a_leaky_fitted_prior_is_still_not_a_read_about_a_thin_sample():
+    """The other half of the same guard: without lift, a new player in a
+    leaky home game inherits the field's leaks before anyone has seen them."""
+    book = StatBook(player_id="new", regime="6max", hands=8)
+    book.meters["table_size"].add(6, 1)
+    book.ratios["fold_vs_bet:flop"].hits = 4
+    book.ratios["fold_vs_bet:flop"].opps = 6
+    profile = build_profile(book)
+    profile.stats["fold_vs_bet:flop"] = shrink(4, 6, 0.70, 80.0)
+    profile.priors["fold_vs_bet:flop"] = (0.70, 80.0)
+    est = profile.stats["fold_vs_bet:flop"]
+    assert est.weight < 0.75
+    assert not any(l.id == "overfold_flop" for l in find_leaks(profile))
+
+
 def test_overfolding_is_detected_and_priced(synth_profile):
     profile = synth_profile("overfolder", regime="hu", opps=120)
     leaks = find_leaks(profile)
@@ -218,6 +255,30 @@ def test_a_thin_sample_is_not_rated_competent(synth_profile):
     assert solid.measured
     assert thin.tier == "unknown"
     assert solid.tier != "unknown"
+
+
+def test_a_tag_in_this_field_is_not_scored_as_loose():
+    """Hand selection is distance from TAG-at-this-table, not online 15% VPIP.
+
+    A 28% VPIP in a 42% home game is a TAG; scoring it against the built-in
+    15% target called that selection bad and dragged every looser regular
+    down with it.
+    """
+    book = StatBook(player_id="hero", name="Hero", regime="6max", hands=5000)
+    book.meters["table_size"].add(6, 1)
+    book.ratios["vpip"].hits = 285
+    book.ratios["vpip"].opps = 1000
+    profile = build_profile(book)
+    profile.stats["vpip"] = shrink(285, 1000, 0.42, 80.0)
+    profile.priors["vpip"] = (0.42, 80.0)
+    tag_here = target_frequency(ARCHETYPE_BY_NAME["tag"], "vpip", "6max", profile)
+    online_tag = target_frequency(ARCHETYPE_BY_NAME["tag"], "vpip", "6max")
+    assert tag_here > 0.25
+    assert online_tag < 0.20
+    selection = next(c for c in rate(profile).components if c.name == "Hand selection")
+    assert selection.score > 90, (
+        f"TAG-at-this-field ({100 * tag_here:.0f}% VPIP) scored {selection.score:.0f} "
+        f"for a {100 * profile.get('vpip'):.1f}% player")
 
 
 def test_exploitable_players_rate_below_solid_ones(synth_profile):

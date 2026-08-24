@@ -99,6 +99,60 @@ def test_board_blockers_drop_impossible_combos():
     assert w[index_of(hole("Ks", "Qs"))] > 0
 
 
+def test_nothing_in_range_beats_a_ten_on_a_double_paired_ten_board():
+    """The cut the river fold was using: weight above QT, not its midpoint.
+
+    After a line that leaves mostly broadway tens, QT is tied for the nuts
+    with every other ten -- and the midpoint of that pile is the middle
+    of the range, not the top.
+    """
+    from villain.ranges import CLASS_NAMES
+    board = [int(card_id(c)) for c in ("9s", "3h", "Tc", "9d", "Th")]
+    r = Ranges(2)
+    keep = {"JTo", "QTo", "KTo", "ATo", "JJ", "QQ", "JTs", "QTs"}
+    r.w[0] = np.array([1.0 if n in keep else 0.0 for n in CLASS_NAMES])
+    cache = r.board_cache(board)
+    qt = hole("Qc", "Td")
+    assert r.better_frac(0, qt, cache.score, board) == 0.0
+    assert r.percentile(0, qt, cache.play, board) < 0.75
+
+
+def test_a_top_continue_cut_keeps_the_whole_boat_pile():
+    """The range tracker used the midpoint too, so a call/raise dropped QT."""
+    from villain.ranges import CLASS_NAMES, index_of
+    board = [int(card_id(c)) for c in ("9s", "3h", "Tc", "9d", "Th")]
+    r = Ranges(2)
+    keep = {"JTo", "QTo", "KTo", "ATo", "JJ", "QQ", "JTs", "QTs"}
+    r.w[0] = np.array([1.0 if n in keep else 0.0 for n in CLASS_NAMES])
+    cache = r.board_cache(board)
+    qt = hole("Qc", "Td")
+    r.narrow(0, cache.score, [(0.79, 1.0)], board)
+    assert r.w[0][index_of(qt)] > 0
+
+
+def test_narrowing_cannot_delete_the_hand_they_hold():
+    from villain.ranges import CLASS_NAMES, index_of
+    board = [int(card_id(c)) for c in ("9s", "3h", "Tc", "9d", "Th")]
+    r = Ranges(2)
+    keep = {"JTo", "QTo", "KTo", "ATo", "JJ", "QQ"}
+    r.w[0] = np.array([1.0 if n in keep else 0.0 for n in CLASS_NAMES])
+    cache = r.board_cache(board)
+    qt = hole("Qc", "Td")
+    r.narrow(0, cache.play, [(0.0, 0.05)], board, keep_hole=qt)
+    assert r.w[0][index_of(qt)] > 0
+
+
+def test_top_made_names_the_boat_not_the_preflop_class():
+    from villain.ranges import CLASS_NAMES
+    board = [int(card_id(c)) for c in ("9s", "3h", "Tc", "9d", "Th")]
+    r = Ranges(2)
+    keep = {"JTo", "QTo", "KTo", "ATo", "JJ", "QQ"}
+    r.w[0] = np.array([1.0 if n in keep else 0.0 for n in CLASS_NAMES])
+    names = [n for n, _ in r.top_made(0, board, 8)]
+    assert "full house" in names
+    assert "QTo" not in names
+
+
 def test_a_flush_draw_outranks_junk_on_the_flop():
     """Made-hand ranking scored a combo draw with 72o. Playability does not."""
     board = [int(card_id(c)) for c in ("Ks", "9s", "2c")]

@@ -954,8 +954,10 @@ def no_threads(monkeypatch):
     monkeypatch.setattr(heroview.threading.Thread, "start", refuse)
     monkeypatch.setattr(heroview, "_THREADS_WORK", None)
     heroview._HERO_BUILDING.clear()
+    heroview._HERO_PROGRESS.clear()
     yield heroview
     heroview._HERO_BUILDING.clear()
+    heroview._HERO_PROGRESS.clear()
     heroview._THREADS_WORK = None
 
 
@@ -1135,6 +1137,29 @@ def test_a_merge_that_cannot_be_honored_is_never_asked(tmp_path, hands):
 # TypeError on every cold Hero build, and a green test suite.
 
 
+def test_hero_peek_includes_live_progress(tmp_path):
+    """Local ``villain test`` answers 202 and the page polls peek for the
+    counted veil. A peek that only said "building" was a loader with no bar."""
+    from villain.webapp import heroview
+
+    db = tmp_path / "v.db"
+    with Store(db) as store:
+        key = (str(store.path), None)
+        heroview._HERO_BUILDING.add(key)
+        heroview._HERO_PROGRESS[key] = (1200, 36000, "measuring")
+        try:
+            status, body, _ = _dispatch(db, "GET", "/api/hero?peek=1")
+        finally:
+            heroview._HERO_BUILDING.discard(key)
+            heroview._HERO_PROGRESS.pop(key, None)
+    assert status == 200, body
+    peek = json.loads(body)
+    assert peek["status"] == "building"
+    assert peek["done"] == 1200
+    assert peek["total"] == 36000
+    assert peek["phase"] == "measuring"
+
+
 def test_a_cold_hero_build_reports_its_phases(tmp_path, hands):
     from villain.db import Store as _Store
     from villain.webapp.heroview import hero_payload
@@ -1146,7 +1171,8 @@ def test_a_cold_hero_build_reports_its_phases(tmp_path, hands):
         hero_payload(store, progress=lambda done, total, phase: seen.append(phase))
 
     assert seen, "the build reported nothing at all"
-    # The phases that walk hands can be counted; the rest say so with no total.
+    # Walks over hands are counted; fitting is counted per fold. A total of
+    # zero was the unlabeled stretch this page used to sit on.
     counted = [p for p in seen if p in ("finding", "loading", "reading", "measuring")]
     assert counted, f"no counted phase was reported, only {sorted(set(seen))}"
     assert "loading" in seen
@@ -1206,6 +1232,69 @@ def test_fit_population_model_passes_progress_down(tmp_path, hands):
 
     assert "loading" in seen, f"the load phase never reported: {sorted(set(seen))}"
     assert "reading" in seen, f"the walk never reported: {sorted(set(seen))}"
+
+
+def test_fit_reports_counted_cv_folds(monkeypatch):
+    """Fitting used to send total=0 and the veil sat on an unmeasured
+    spinner for the whole of the trees. The steps that take the time are
+    the folds plus the final fit -- count those, not an invented hand total."""
+    import numpy as np
+    from sklearn.base import BaseEstimator, RegressorMixin
+    from villain.reads import FEATURES, MIN_ROWS, Row, fit
+
+    class Fake(BaseEstimator, RegressorMixin):
+        def fit(self, x, y):
+            self.n_features_in_ = x.shape[1]
+            return self
+
+        def predict(self, x):
+            return np.full(len(x), 0.5)
+
+    monkeypatch.setattr("sklearn.ensemble.GradientBoostingRegressor",
+                        lambda **k: Fake())
+    rows = [Row(player_id="p", features=[0.0] * len(FEATURES), strength=0.5,
+                unbiased=True, street=1, action="bet") for _ in range(MIN_ROWS)]
+    seen = []
+    fit(rows, progress=lambda done, total: seen.append((done, total)))
+    assert seen, "fit reported nothing"
+    assert seen[0][0] == 0
+    assert seen[-1][0] == seen[-1][1]
+    assert seen[-1][1] >= 3
+    assert all(total > 0 for _, total in seen)
+
+
+def test_a_cold_hero_build_does_not_leave_an_uncounted_tail(tmp_path, hands):
+    """Grading used to report total=0 after measuring 100%, so the bar
+    emptied and sat there for the rest of the wait."""
+    from villain.db import Store as _Store
+    from villain.webapp.heroview import hero_payload
+
+    events = []
+    with _Store(tmp_path / "v.db") as store:
+        store.add_hands(hands)
+        store.rebuild()
+        hero_payload(store, progress=lambda d, t, p: events.append((p, d, t)))
+    assert events
+    assert all(total > 0 for phase, done, total in events if phase != "starting"), events
+
+
+def test_identified_hero_counts_the_leftover_walks(tmp_path, hands):
+    """Once a seat is known, the leftover hero walks used to run with no
+    bar -- measuring after a failed fit, or grading after a successful one."""
+    from villain.db import Store as _Store
+    from villain.hero import find_hero
+    from villain.webapp.heroview import hero_payload
+
+    events = []
+    with _Store(tmp_path / "v.db") as store:
+        store.add_hands(hands)
+        store.rebuild()
+        hero_id = find_hero(store, min_hands=10)
+        assert hero_id is not None
+        hero_payload(store, hero_id, progress=lambda d, t, p: events.append((p, d, t)))
+    leftover = [(p, d, t) for p, d, t in events if p in ("measuring", "grading")]
+    assert leftover, f"leftover walks were unlabeled: {events}"
+    assert all(t > 0 for _, _, t in leftover)
 
 
 def _dispatch(db_path, method, path, body=None):

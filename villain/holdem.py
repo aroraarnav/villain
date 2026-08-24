@@ -122,6 +122,16 @@ class Hand:
 
     # -- setup ---------------------------------------------------------------
 
+    def _did(self, seat: int, they: str, you: str) -> str:
+        """A log clause: third person for a name, first person for You.
+
+        The subject is the seat's display name. ``You calls`` is not a sentence.
+        """
+        name = self.seats[seat].name
+        if seat == getattr(self, "hero_seat", None) or name.lower() == "you":
+            return f"{name} {you}"
+        return f"{name} {they}"
+
     def _post_blinds(self) -> None:
         if self.n == 2:
             sb_seat, bb_seat = self.button, self._next(self.button)
@@ -130,8 +140,8 @@ class Hand:
             bb_seat = self._next(sb_seat)
         self._commit(sb_seat, self.sb)
         self._commit(bb_seat, self.bb)
-        self.log.append(f"{self.seats[sb_seat].name} posts {self.sb}, "
-                        f"{self.seats[bb_seat].name} posts {self.bb}")
+        self.log.append(self._did(sb_seat, f"posts {self.sb}", f"post {self.sb}"))
+        self.log.append(self._did(bb_seat, f"posts {self.bb}", f"post {self.bb}"))
 
     def _first_to_act_preflop(self) -> int | None:
         if self.n == 2:
@@ -251,14 +261,14 @@ class Hand:
 
         if kind == "fold":
             s.folded = True
-            self.log.append(f"{s.name} folds")
+            self.log.append(self._did(i, "folds", "fold"))
         elif kind == "check":
             if not legal.can_check:
                 raise ValueError("cannot check facing a bet")
             self.acted.add(i)
             if self.initiative == i:
                 self.declined_initiative.add(i)
-            self.log.append(f"{s.name} checks")
+            self.log.append(self._did(i, "checks", "check"))
         elif kind == "call":
             if self.street == 0:
                 if self.raises == 0:
@@ -269,7 +279,7 @@ class Hand:
                 self.called_street.add(i)
             self._commit(i, self.bet)
             self.acted.add(i)
-            self.log.append(f"{s.name} calls")
+            self.log.append(self._did(i, "calls", "call"))
         elif kind == "raise":
             if not legal.can_raise:
                 raise ValueError("cannot raise")
@@ -299,7 +309,14 @@ class Hand:
                 self.opener = i
             elif self.street == 0 and self.raises == 2 and self.three_bettor is None:
                 self.three_bettor = i
-            self.log.append(f"{s.name} raises to {actual}")
+            # Opening an unbet street is a bet. The engine has no separate
+            # verb -- a raise from zero is how a flop stab is applied -- but
+            # the log saying "raises to 79" after two checks is how a river
+            # opener read as a reraise.
+            if prev_bet == 0:
+                self.log.append(self._did(i, f"bets {actual}", f"bet {actual}"))
+            else:
+                self.log.append(self._did(i, f"raises to {actual}", f"raise to {actual}"))
         else:
             raise ValueError(f"unknown action {kind!r}")
 
@@ -395,7 +412,7 @@ class Hand:
             self.seats[i].stack += won
         self.winners = {i: w for i, w in winners.items() if w > 0}
         for i, w in self.winners.items():
-            self.log.append(f"{self.seats[i].name} wins {w}")
+            self.log.append(self._did(i, f"wins {w}", f"win {w}"))
 
     def _best(self, seats: list[int]) -> list[int]:
         """The seat(s) with the strongest seven-card hand; ties share."""

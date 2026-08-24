@@ -345,12 +345,12 @@ def test_the_threshold_pivots_on_the_size_they_usually_face():
 
 
 def test_the_bet_depth_in_the_reason_matches_the_action_named():
-    """"3-bets ... at 2-bet depth" contradicted itself in one sentence.
+    """Raising over an open is a 3-bet; the reason has to say so.
 
-    The blind is the 1-bet and an open is the 2-bet, so raising over an open
-    makes a 3-bet. The label said so; the explanation said 2-bet depth.
+    An earlier line said "3-bets ... at 2-bet depth" in one sentence. The
+    label names the action; the explanation names the frequency, not a
+    depth that contradicts it.
     """
-    import re
     profile = _Prof(three_bet=0.99, four_bet=0.99, five_bet=0.99)
     rng = np.random.default_rng(0)
     seen = 0
@@ -364,13 +364,15 @@ def test_the_bet_depth_in_the_reason_matches_the_action_named():
             if h.to_act is None or h.raises != level:
                 continue
             kind, _, why = decide(h, h.to_act, profile, rng)
-            if kind != "raise" or "bet depth" not in why:
+            if kind != "raise":
                 continue
-            named = re.search(r"(\d+)-bets", why)
-            depth = re.search(r"at (\d+)-bet depth", why)
-            if not named or not depth:
-                continue
-            assert named.group(1) == depth.group(1), why
+            if level == 1:
+                assert "3-bet" in why, why
+            elif level == 2:
+                assert "4-bet" in why, why
+            else:
+                assert "5-bet" in why, why
+            assert "at 2-bet depth" not in why, why
             seen += 1
     assert seen, "no raise reasons were produced to check"
 
@@ -784,5 +786,175 @@ def test_cbet_size_follows_the_texture_not_the_all_in_mean():
             sizes.append(amt / max(h.pot, 1))
     assert sizes
     assert max(sizes) < 0.70, sizes
+
+
+def _river_facing(hole, board, bet=80):
+    """Heads-up, checked to the river, BB has just bet. Seat 0 to act."""
+    from villain.cards import card_id
+    h = Hand(_seats(400, 400), button=0, sb=1, bb=2, rng=np.random.default_rng(0))
+    h.act("call")
+    h.act("check")
+    while h.street < 3:
+        h.act("check")
+        h.act("check")
+    assert h.street == 3
+    h.board = [int(card_id(c)) for c in board]
+    h.seats[0].hole = (int(card_id(hole[0])), int(card_id(hole[1])))
+    h.seats[1].hole = (int(card_id("As")), int(card_id("Kd")))
+    h.act("raise", bet)
+    return h
+
+
+def test_a_ten_does_not_fold_the_boat_on_a_double_paired_board():
+    """QT on 9-3-T-9-T is tens full -- the same hand as every other ten.
+
+    After a line that leaves mostly broadway tens, a within-range
+    percentile parks that pile at its midpoint, and a 21% continue cut
+    folded it. Top of the board does not fold.
+    """
+    from villain.botplay import _ranges
+    from villain.ranges import CLASS_NAMES
+    h = _river_facing(("Qc", "Td"), ("9s", "3h", "Tc", "9d", "Th"))
+    keep = {"JTo", "QTo", "KTo", "ATo", "JJ", "QQ", "JTs", "QTs"}
+    _ranges(h).w[0] = np.array([1.0 if n in keep else 0.0 for n in CLASS_NAMES])
+    profile = _Prof(**{
+        "fold_vs_bet:river": 0.79,
+        "fold_vs_bet:river:over": 0.79,
+        "raise_vs_bet:river": 0.06,
+    })
+    kind, _, why = decide(h, 0, profile, np.random.default_rng(0))
+    assert kind != "fold", why
+
+
+def test_calling_a_boat_does_not_drop_it_from_the_range():
+    """The tracker used the midpoint band, so the nuts vanished after a call."""
+    from villain.botplay import _ranges
+    from villain.cards import card_id
+    from villain.ranges import CLASS_NAMES, index_of
+    h = _river_facing(("Qc", "Td"), ("9s", "3h", "Tc", "9d", "Th"))
+    keep = {"JTo", "QTo", "KTo", "ATo", "JJ", "QQ", "JTs", "QTs"}
+    _ranges(h).w[0] = np.array([1.0 if n in keep else 0.0 for n in CLASS_NAMES])
+    profile = _Prof(**{
+        "fold_vs_bet:river": 0.79,
+        "fold_vs_bet:river:over": 0.79,
+        "raise_vs_bet:river": 0.0,
+    })
+    kind, amt, why = decide(h, 0, profile, np.random.default_rng(0))
+    assert kind != "fold", why
+    h.act(kind, amt)
+    qt = (int(card_id("Qc")), int(card_id("Td")))
+    assert _ranges(h).w[0][index_of(qt)] > 0
+
+
+def test_a_flopped_boat_does_not_fold_to_a_bet():
+    """Same bug on the flop: 99T with 9T is nines full, not a midpoint fold."""
+    from villain.cards import card_id
+    h = Hand(_seats(400, 400), button=0, sb=1, bb=2, rng=np.random.default_rng(0))
+    h.act("call")
+    h.act("check")
+    assert h.street == 1
+    h.board = [int(card_id(c)) for c in ("9s", "9h", "Tc")]
+    h.seats[0].hole = (int(card_id("9c")), int(card_id("Td")))
+    h.seats[1].hole = (int(card_id("As")), int(card_id("Kd")))
+    h.act("raise", 20)
+    profile = _Prof(**{"fold_vs_bet:flop": 0.79, "raise_vs_bet:flop": 0.06})
+    kind, _, why = decide(h, 0, profile, np.random.default_rng(0))
+    assert kind != "fold", why
+
+
+def test_does_not_check_back_a_boat_on_the_river():
+    """Checking back tens full is the same dump as folding it, with the lead."""
+    from villain.botplay import _ranges
+    from villain.cards import card_id
+    from villain.ranges import CLASS_NAMES
+    h = Hand(_seats(400, 400), button=0, sb=1, bb=2, rng=np.random.default_rng(1))
+    h.act("raise", 6)
+    h.act("call")
+    while h.street < 3:
+        h.act("check")
+        if h.street < 3:
+            h.act("check")
+    assert h.street == 3
+    h.board = [int(card_id(c)) for c in ("9s", "3h", "Tc", "9d", "Th")]
+    h.seats[0].hole = (int(card_id("Qc")), int(card_id("Td")))
+    h.seats[1].hole = (int(card_id("As")), int(card_id("Kd")))
+    if h.to_act == 1:
+        h.act("check")
+    keep = {"JTo", "QTo", "KTo", "ATo", "JJ", "QQ", "JTs", "QTs"}
+    _ranges(h).w[0] = np.array([1.0 if n in keep else 0.0 for n in CLASS_NAMES])
+    profile = _Prof(**{"cbet:river": 0.15, "delayed_cbet:river": 0.15, "probe:river": 0.15})
+    kind, _, why = decide(h, 0, profile, np.random.default_rng(0))
+    assert kind == "raise", why
+
+
+def test_range_review_omits_players_who_already_folded():
+    """'What they can still hold' is for seats still in the pot."""
+    from villain.ranges import Ranges
+    from villain.sim import Game
+    g = Game(["You", "Arav", "nuj"], [None, _Prof(), _Prof()], 0, 200, 1, 2, seed=0)
+    g.hand.seats[1].folded = True
+    g.hand._ranges = Ranges(3)
+    review = g._range_review()
+    assert "Arav" not in review
+    assert "nuj" in review
+
+
+def _btn_faces_bb_jam(stacks=(400, 400), open_to=6):
+    """HU: button opens, BB jams, action back on the button."""
+    h = Hand(_seats(*stacks), button=0, sb=1, bb=2, rng=np.random.default_rng(1))
+    h.act("raise", open_to)
+    lg = h.legal()
+    h.act("raise", lg.max_raise_to)
+    assert h.to_act == 0
+    return h
+
+
+def test_a_preflop_shove_fold_cites_size_not_stack_depth():
+    """A 200bb jam in a single-raised pot is a size, not a depth.
+
+    fold_to_three_bet ~45% continue used to print 'outside the ~43% that
+    continue at this depth' against an all-in. Depth is 15bb push/fold.
+    """
+    profile = _Prof(rfi=0.99, four_bet=0.02, fold_to_three_bet=0.55)
+    rng = np.random.default_rng(0)
+    folds = []
+    for k in range(80):
+        h = _btn_faces_bb_jam()
+        kind, _, why = decide(h, 0, profile, np.random.default_rng(k + 1))
+        if kind == "fold":
+            folds.append(why)
+    assert folds, "never folded a 200bb jam"
+    assert all("at this depth" not in w for w in folds), folds[0]
+    assert all("vs this size" in w for w in folds), folds[0]
+    assert all("pot odds" in w for w in folds), folds[0]
+
+
+def test_a_station_looks_up_more_preflop_shoves_than_a_nit():
+    """Looseness vs 3-bets has to survive the size shift onto a jam."""
+    nit = _Prof(rfi=0.99, four_bet=0.02, fold_to_three_bet=0.80)
+    station = _Prof(rfi=0.99, four_bet=0.02, fold_to_three_bet=0.25)
+    nit_c = station_c = 0
+    n = 120
+    for k in range(n):
+        rng = np.random.default_rng(k + 3)
+        nit_c += decide(_btn_faces_bb_jam(), 0, nit, rng)[0] != "fold"
+        station_c += decide(_btn_faces_bb_jam(), 0, station, rng)[0] != "fold"
+    assert station_c > nit_c + 8, f"nit {nit_c}/{n} station {station_c}/{n}"
+
+
+def test_continue_vs_a_shove_is_tighter_than_vs_a_three_bet():
+    """The pooled 3-bet continue is the wrong cut against an all-in."""
+    profile = _Prof(rfi=0.99, four_bet=0.04, fold_to_three_bet=0.45)
+    n = 100
+    vs_jam = vs_3bet = 0
+    for k in range(n):
+        rng = np.random.default_rng(k + 9)
+        vs_jam += decide(_btn_faces_bb_jam(), 0, profile, rng)[0] != "fold"
+        h = Hand(_seats(400, 400), button=0, sb=1, bb=2,
+                 rng=np.random.default_rng(1))
+        h.act("raise", 6)
+        h.act("raise", 20)
+        vs_3bet += decide(h, 0, profile, rng)[0] != "fold"
+    assert vs_jam < vs_3bet - 10, f"jam {vs_jam}/{n} vs 3-bet {vs_3bet}/{n}"
 
 

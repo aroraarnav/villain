@@ -224,6 +224,44 @@ def test_signing_out_tells_the_next_load_rather_than_leaving_it_to_guess():
         "a const here would make the signed-out override impossible")
 
 
+def test_a_sent_link_offers_back_and_the_demo_instead():
+    """After the mail goes out the form used to vanish, leaving only
+    'View the demo' and no way back to fix the address."""
+    html = BOOT.read_text()
+    shell = SHELL.read_text()
+    assert 'id="back"' in html
+    assert "View the demo instead" in shell
+    assert "showForm" in shell
+    assert "favicon.svg?v=" in html
+
+
+def test_work_does_not_wait_on_frames_in_a_hidden_tab():
+    """requestAnimationFrame is frozen in a background tab. A yield that
+    only listens for frames never resolves, so a Hero build or import
+    started and then backgrounded sat there until you came back."""
+    shell = SHELL.read_text()
+    assert "letItPaint" in shell
+    assert 'visibilityState === "hidden"' in shell
+    assert 'type: "visibility"' in shell
+    worker = WORKER.read_text()
+    assert "pageHidden" in worker
+    assert 'msg.type === "visibility"' in worker
+    app = (ROOT / "villain" / "webapp" / "assets" / "app.js").read_text()
+    assert "nextFrame" in app
+    assert 'visibilityState === "hidden"' in app
+
+
+def test_the_worker_does_not_spin_while_the_tab_is_hidden():
+    """The 6ms busy-wait existed so the page could paint. In the background
+    there is no paint, and spinning a core for the whole Hero fit is how a
+    backgrounded tab cooked the laptop."""
+    src = WORKER.read_text()
+    assert "yieldForPaint" in src
+    assert "if (pageHidden) return;" in src
+    assert "Atomics.wait" in src
+    assert src.count("while (Date.now() < spin)") <= 1  # fallback only, not per-call
+
+
 def test_signing_out_puts_up_the_blocking_veil():
     """It is a request, then a reload, then a runtime start. With only the
     button greying out, the app looked like it had ignored the click."""
