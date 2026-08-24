@@ -90,6 +90,7 @@ class Hand:
         # only whether a raise had gone in yet -- so count them as they happen
         # rather than reconstructing the street afterwards.
         self.limpers = 0                          # preflop calls before any raise
+        self.limped: set[int] = set()             # seats that open-limped this hand
         self.callers = 0                          # preflop calls after a raise
         self.last_raiser: int | None = None       # seat of the most recent aggressor
         self.initiative: int | None = None         # who bet last *claimed* street
@@ -117,6 +118,7 @@ class Hand:
         self.called_street: set[int] = set()      # called a bet this street
         self.called_prev: set[int] = set()        # called a bet last street
         self.hero_seat: int | None = None         # set by the session, for vs-you keys
+        self.last_think: dict = {}                # seat -> (pace, street, act) for fold_next
         self._staged: tuple[int, object] | None = None   # see :meth:`stage`
         self.to_act: int | None = self._first_to_act_preflop()
 
@@ -273,6 +275,7 @@ class Hand:
             if self.street == 0:
                 if self.raises == 0:
                     self.limpers += 1
+                    self.limped.add(i)
                 else:
                     self.callers += 1
             if self.raises >= 1:

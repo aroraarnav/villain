@@ -447,6 +447,7 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
         book = _book(hand, books, d.seat, reg)
         s = street.label
         ipo = "ip" if d.in_position else "oop"
+        depth = stack_bucket(hand.seat(d.seat).stack / max(hand.big_blind, 1))
         raised = a.act is Act.RAISE
         bet = a.act is Act.BET
         called = a.act is Act.CALL
@@ -509,7 +510,7 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
                     # different plans into one number describing neither: the
                     # same player c-bets small and often heads-up on a dry
                     # board and rarely into three people on a wet one.
-                    for slice_ in ("hu" if d.players_in <= 2 else "mw", tex, ipo, pot_type):
+                    for slice_ in ("hu" if d.players_in <= 2 else "mw", tex, ipo, pot_type, depth):
                         book.count(f"cbet:{s}:{slice_}", bet)
                         if bet:
                             book.measure(f"cbet_size:{s}:{slice_}", d.bet_fraction)
@@ -556,6 +557,11 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
                 book.count(f"fold_vs_bet:{s}:{pot_kind}", folded)
                 pos_kind = "ip" if d.in_position else "oop"
                 book.count(f"fold_vs_bet:{s}:{pos_kind}", folded)
+                # Starting-stack depth. ``:mid`` is already the size bucket
+                # (a third-to-two-thirds pot bet), so the stack slice lives
+                # under ``stk:`` -- mixing them would make a 40bb player's
+                # fold rate look like their fold-to-a-half-pot-bet rate.
+                book.count(f"fold_vs_bet:{s}:stk:{depth}", folded)
                 # An ace-high board and a low one are different bluffs.
                 book.count(f"fold_vs_bet:{s}:{hilo}", folded)
                 # Facing a raise is not facing a bet. fold_vs_bet pools them,

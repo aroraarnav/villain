@@ -144,7 +144,7 @@ SPURIOUS_OVERLAP = 10
 #: the next page waits for the whole thing. That is only acceptable once: the
 #: stamp has to survive the request that wrote it, or every later open does
 #: the minute again. See :data:`PROGRESS_HOOK` and :func:`consume_cache_dirty`.
-DEFINITIONS_VERSION = "2026-08-22.second-barrel-is-not-a-delayed-cbet"
+DEFINITIONS_VERSION = "2026-08-24.sim-plays-the-rest-of-the-book"
 
 #: Set by a host that can show a progress bar. Called as
 #: ``hook(done, total, phase)`` while a rebuild works; ``total`` of zero means

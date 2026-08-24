@@ -31,7 +31,7 @@ from .holdem import STREETS
 from .model import positions_for
 from .ranges import Ranges, class_scores, index_of
 from .reads import texture
-from .stats import VS_HERO, size_bucket, stack_bucket
+from .stats import size_bucket, stack_bucket
 
 # -- preflop ranking ----------------------------------------------------------
 # Two rankings, combo-weighted. "Defends 45%" is a share of the 1,326 dealt
@@ -181,25 +181,47 @@ COLD_CALL_VS_3BET = 0.06
 COLD_CALL_VS_4BET = 0.02
 
 
-def _polar_split(freq: float, value_cap: float) -> tuple[float, float]:
-    """The value share and the bluff share of a betting frequency."""
+def _polar_split(freq: float, value_cap: float,
+                 spr: float | None = None) -> tuple[float, float]:
+    """The value share and the bluff share of a betting frequency.
+
+    Short SPR does not invent a new c-bet rate -- it cuts the *air* slice.
+    Value still fires; stabbing 70% of junk at SPR 2 is the 100bb plan.
+    """
     freq = _clamp(freq, 0.0, 1.0)
-    return min(freq, value_cap), max(0.0, freq - value_cap)
+    value_frac = min(freq, value_cap)
+    bluff_frac = max(0.0, freq - value_cap)
+    if spr is not None and spr <= COMMIT_SPR and bluff_frac > 0:
+        bluff_frac *= _clamp(spr / 4.0, 0.15, 1.0)
+    return value_frac, bluff_frac
 
 
-def _polar_bet(strength: float, freq: float, value_cap: float) -> str | None:
-    """``value``, ``bluff``, or ``None`` (check / fold) for a betting frequency."""
-    value_frac, bluff_frac = _polar_split(freq, value_cap)
-    if strength >= 1 - value_frac:
+def _polar_bet(strength: float, freq: float, value_cap: float,
+               rng=None, spr: float | None = None) -> str | None:
+    """``value``, ``bluff``, or ``None`` (check / fold) for a betting frequency.
+
+    With ``rng`` the inner edges fade across :data:`POLAR_MIX` so the same
+    combo is not a pure strategy. Without it (the unit tests of the split)
+    the cut is hard, which is what "this percentile is a bluff" means.
+    """
+    value_frac, bluff_frac = _polar_split(freq, value_cap, spr)
+    if rng is None:
+        if strength >= 1 - value_frac:
+            return "value"
+        if bluff_frac > 0 and strength <= bluff_frac:
+            return "bluff"
+        return None
+    if _over(strength, 1 - value_frac, rng, POLAR_MIX):
         return "value"
-    if bluff_frac > 0 and strength <= bluff_frac:
+    if bluff_frac > 0 and _under(strength, bluff_frac, rng, POLAR_MIX):
         return "bluff"
     return None
 
 
-def _polar_bands(freq: float, value_cap: float) -> list[tuple[float, float]]:
+def _polar_bands(freq: float, value_cap: float,
+                 spr: float | None = None) -> list[tuple[float, float]]:
     """The range a polarised bet represents: a value slice and an air slice."""
-    value_frac, bluff_frac = _polar_split(freq, value_cap)
+    value_frac, bluff_frac = _polar_split(freq, value_cap, spr)
     bands = [(1 - value_frac, 1.0)]
     if bluff_frac > 0:
         bands.append((0.0, bluff_frac))
@@ -245,8 +267,16 @@ def hand_strength(hole: tuple[int, ...], board: list[int]) -> float:
     return float(np.searchsorted(universe, mine, side="left") / len(universe))
 
 
+def _est(profile, stat: str):
+    """A frequency estimate from ``profile.stats``."""
+    if profile is None:
+        return None
+    stats = getattr(profile, "stats", None) or {}
+    return stats.get(stat)
+
+
 def _freq(profile, stat: str, default: float) -> float:
-    est = profile.stats.get(stat) if profile is not None else None
+    est = _est(profile, stat)
     return est.value if est is not None else default
 
 
@@ -276,13 +306,13 @@ def _size_chain(profile, keys, default, min_n=5.0):
 
 
 def _freq_n(profile, stat, default, min_opps=15.0):
-    est = profile.stats.get(stat) if profile is not None else None
+    est = _est(profile, stat)
     return est.value if (est is not None and est.opps >= min_opps) else default
 
 
 def _sampled(profile, stat, min_opps=15.0) -> bool:
     """Whether this key is a real number, not a prior we would be overriding."""
-    est = profile.stats.get(stat) if profile is not None else None
+    est = _est(profile, stat)
     return est is not None and est.opps >= min_opps
 
 
@@ -307,30 +337,7 @@ def _freq_chain(profile, keys, default, min_opps=15.0):
     return default
 
 
-def _chain(profile, keys, default, min_opps=15.0, vs=False):
-    """``_freq_chain`` that prefers the against-you slice when it has sample.
-
-    ``vs:fold_vs_bet:flop`` is counted and was never read -- so a player who
-    folds 70% to *your* c-bets still defended at their pool rate against you.
-    The vs: keys are thinner; 12 opportunities is enough to prefer them.
-    """
-    if vs:
-        vs_keys = [VS_HERO + k for k in keys if k]
-        hit = _freq_chain(profile, vs_keys, None, 12)
-        if hit is not None:
-            return hit
-    return _freq_chain(profile, keys, default, min_opps)
-
-
-def _vs_hero(hand, seat: int) -> bool:
-    """Whether this decision is against the hero -- the vs: denominator."""
-    hero = getattr(hand, "hero_seat", None)
-    if hero is None or hero == seat:
-        return False
-    if hand.last_raiser == hero:
-        return True
-    live = [i for i, s in enumerate(hand.seats) if not s.folded]
-    return len(live) == 2 and hero in live
+_chain = _freq_chain
 
 
 def _board_ctx(hand) -> tuple[str, str, str, str]:
@@ -347,22 +354,45 @@ def _board_ctx(hand) -> tuple[str, str, str, str]:
     return tex, hilo, mw, pot
 
 
+def _size_sd(profile, key, min_n=5.0):
+    """Measured spread of a size key, or None when the sample is a point."""
+    means = getattr(profile, "means", None) or {}
+    if means.get(key + "#n", 0.0) < min_n:
+        return None
+    return means.get(key + "#sd")
+
+
 def _bet_frac(profile, street: str, rng, default: float = 0.6,
-              slices: tuple[str, ...] = ()) -> float:
+              slices: tuple[str, ...] = (), delayed: bool = False,
+              polar: str | None = None) -> float:
     """Their c-bet size here -- pot type and texture first, then the pool.
 
-    A dry 3-bet flop is not a wet single-raised one, and the mean of every
-    c-bet they ever made (including the all-ins) is how KK 2x-es a board they
-    bet a third on. Features already stores the slices; this is the read.
+    Sampled from the measured spread when we have one, so every stab is not
+    exactly the mean. Delayed c-bets use their own size. Polar air is allowed
+    to fire the overbet coin even when the mean is small; value is not,
+    because that is how KK jammed a texture they bet a third on.
     """
-    keys = [f"cbet_size:{street}:{s}" for s in slices if s]
+    keys = []
+    if delayed:
+        keys.append(f"delayed_cbet_size:{street}")
+    keys += [f"cbet_size:{street}:{s}" for s in slices if s]
     keys += [f"cbet_size:{street}", f"bet_size:{street}"]
     frac = _clamp(_size_chain(profile, keys, default), 0.2, 2.0)
-    # An overbet is a different action, not a noisy version of a third-pot
-    # stab. Emitting one at the pooled overbet rate on a board they size
-    # small is how a value hand jams a texture they bet small.
+    sd = None
+    for key in keys:
+        sd = _size_sd(profile, key)
+        if sd is not None:
+            break
+    if sd is not None and sd > 0.05:
+        frac = _clamp(float(rng.normal(frac, sd)), 0.2, 2.0)
     over_f = _freq_n(profile, f"overbet:{street}", 0.0, 12)
-    if over_f >= 0.05 and frac >= 0.75 and rng.random() < over_f:
+    if polar == "bluff":
+        fire_over = over_f >= 0.05 and rng.random() < over_f
+    elif polar == "value":
+        fire_over = over_f >= 0.25 and frac >= 0.75 and rng.random() < over_f
+    else:
+        fire_over = over_f >= 0.05 and frac >= 0.75 and rng.random() < over_f
+    if fire_over:
         frac = _clamp(max(frac, 1.15), 1.05, 2.0)
     return frac
 
@@ -411,6 +441,20 @@ POOL_RAISE_VS_BET = 0.06
 #: Noise belongs on the decision at the boundary, never on the ranking.
 MIX_BAND = 0.015
 
+#: Wider fade around polar value/bluff gates, so the same combo is not always
+#: the same action. Symmetric about the gate, so a uniform range still realises
+#: the measured frequency. 3-bet / 4-bet / 5-bet keep :data:`MIX_BAND`.
+POLAR_MIX = 0.08
+CONTINUE_MIX = 0.04
+
+#: Think-time clamps for the UI. A 30-second tank in the sample must not freeze
+#: the table; a missing meter must not look like a snap.
+THINK_FLOOR_MS = 400
+THINK_CAP_MS = 8000
+THINK_DEFAULT_MS = 1800
+THINK_TANK_REL = 1.75
+THINK_SNAP_REL = 0.40
+
 #: At or below this remaining effective stack, first-in opens are shoves and
 #: facing a raise is shove-or-fold -- there is no postflop left. Nash charts
 #: live in this band; min-raising 22% of hands for 2.5x with 12bb behind is
@@ -428,13 +472,33 @@ COMMIT_SPR = 2.0
 LEAVE_BEHIND_POTS = 0.5
 
 
-def _over(strength: float, gate: float, rng) -> bool:
-    """Whether a hand clears a frequency cut, mixed inside :data:`MIX_BAND`."""
-    if strength >= gate + MIX_BAND:
+def _over(strength: float, gate: float, rng, band: float = MIX_BAND) -> bool:
+    """Whether a hand clears a frequency cut, mixed inside ``band``."""
+    if band <= 0:
+        return strength >= gate
+    if strength >= gate + band:
         return True
-    if strength <= gate - MIX_BAND:
+    if strength <= gate - band:
         return False
-    p = (strength - (gate - MIX_BAND)) / (2 * MIX_BAND)
+    p = (strength - (gate - band)) / (2 * band)
+    return bool(rng.random() < p)
+
+
+def _under(strength: float, gate: float, rng, band: float = POLAR_MIX) -> bool:
+    """Whether a hand sits in the bottom ``gate`` slice, mixed inside ``band``.
+
+    Polar air is a *low* cut. Reusing :func:`_over` would fade the wrong edge.
+    ``gate <= 0`` is a player who does not polar-bluff -- never a coin flip.
+    """
+    if gate <= 0:
+        return False
+    if band <= 0:
+        return strength <= gate
+    if strength <= gate - band:
+        return True
+    if strength >= gate + band:
+        return False
+    p = (gate + band - strength) / (2 * band)
     return bool(rng.random() < p)
 
 
@@ -540,13 +604,23 @@ def _start_bb(hand, seat) -> float:
 
 
 def _effective(hand, seat) -> int:
-    """Chips this seat can still put in against the biggest remaining opponent."""
+    """Chips this seat can still put in against the relevant opponent.
+
+    Facing a bet, that is the aggressor -- a 20bb jam with a 200bb fish still
+    in is not a 100bb SPR. Opening a street, the shortest live stack: that is
+    who can actually go with you.
+    """
     mine = hand.seats[seat].stack
-    others = [s.stack for i, s in enumerate(hand.seats)
-              if i != seat and not s.folded]
-    if not others:
+    live = [(i, s.stack) for i, s in enumerate(hand.seats)
+            if i != seat and not s.folded]
+    if not live:
         return mine
-    return min(mine, max(others))
+    aggressor = hand.last_raiser
+    if aggressor is not None and aggressor != seat:
+        other = hand.seats[aggressor]
+        if not other.folded:
+            return min(mine, other.stack)
+    return min(mine, min(stack for _, stack in live))
 
 
 def _remain_bb(hand, seat) -> float:
@@ -639,6 +713,55 @@ def _why_call_continue(cont, *, shove, req_eq, cont_why) -> str:
     return f"calls — {cont_why}, roughly their top {cont:.0%}"
 
 
+def think_ms(profile, kind: str, street_idx: int, reason: str, rng) -> int:
+    """A think time from their meters, conditioned on the action.
+
+    Folds and polar bluffs draw from ``think:fold``; raises from
+    ``think:aggro``. Missing meters fall back to a short pause, not zero.
+    """
+    street_label = "pf" if street_idx == 0 else STREETS[street_idx]
+    keys = []
+    if kind == "fold" or "bluff" in reason:
+        keys.append("think:fold")
+    if kind == "raise":
+        keys.append("think:aggro")
+    elif kind == "call":
+        keys.append("think:call")
+    elif kind == "check":
+        keys.append("think:check")
+    keys += [f"think:{street_label}", "think:all"]
+    mean = None
+    hit_key = None
+    for key in keys:
+        m = _size(profile, key, None, 5)
+        if m is not None:
+            mean, hit_key = m, key
+            break
+    if mean is None:
+        return THINK_DEFAULT_MS
+    sd = _size_sd(profile, hit_key) if hit_key else None
+    spread = sd if (sd is not None and sd > 50) else mean * 0.35
+    sample = float(rng.normal(mean, spread))
+    return int(_clamp(sample, THINK_FLOOR_MS, THINK_CAP_MS))
+
+
+def think_pace(profile, ms: int) -> str:
+    """snap / tank / normal against this player's own mean, not an 8s floor."""
+    avg = _size(profile, "think:all", None, 5)
+    if avg is None or avg <= 0:
+        tank, snap = 8000.0, 1200.0
+    else:
+        tank = max(5000.0, avg * THINK_TANK_REL)
+        snap = min(2500.0, avg * THINK_SNAP_REL)
+        if snap >= tank:
+            tank, snap = 8000.0, 1200.0
+    if ms > tank:
+        return "tank"
+    if ms < snap:
+        return "snap"
+    return "normal"
+
+
 def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -> tuple[str, int, str]:
     """One action, driven by the player's own frequencies AND sizes:
     ``(kind, amount, reason)``. They open to their size from their positions at
@@ -718,7 +841,6 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
 
         in_bb = pos == "BB"
         level = hand.raises          # 1 open, 2 = a 3-bet, 3 = a 4-bet, 4+ = a 5-bet+
-        vs = _vs_hero(hand, seat)
         opener_seat = getattr(hand, "opener", None)
         if opener_seat is None:
             opener_seat = hand.last_raiser
@@ -730,7 +852,7 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
             f"three_bet:{pos}:vs:ep" if vs_ep else "",
             "three_bet_vs_steal" if vs_steal and pos in ("SB", "BB") else "",
             f"three_bet:{pos}", f"three_bet:{depth}", "three_bet",
-        ], 0.07, 20, vs=vs)
+        ], 0.07, 20)
         call_s = open_s              # vs 3-bet+ the continue is premiums, not pairs
         if level <= 1:               # facing an open -> a 3-bet can be wide (a bluff)
             steal = vs_steal and pos in ("SB", "BB")
@@ -755,16 +877,16 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
                 rr_freq = tbet
                 rr_label = "3-bets the steal"
                 if in_bb:
-                    cont = _chain(profile, ["bb_defend"], 0.45, 20, vs=vs)
+                    cont = _chain(profile, ["bb_defend"], 0.45, 20)
                 else:
-                    f_steal = _chain(profile, ["fold_to_steal"], 0.55, 20, vs=vs)
-                    cont = (1 - f_steal if _any_sampled(profile, ["fold_to_steal", VS_HERO + "fold_to_steal"])
+                    f_steal = _chain(profile, ["fold_to_steal"], 0.55, 20)
+                    cont = (1 - f_steal if _sampled(profile, "fold_to_steal")
                             else _clamp(1 - f_steal, 0.08, 0.7))
                 cont_why = f"defends the {'BB' if in_bb else 'SB'} vs a {opener_pos} open"
             else:
                 rr_freq, rr_label = tbet, "3-bets"
                 if in_bb:
-                    cont = _chain(profile, ["bb_defend"], 0.40, 20, vs=vs)
+                    cont = _chain(profile, ["bb_defend"], 0.40, 20)
                 else:
                     cont = _clamp(cold + tbet, 0.02, 0.98) if _sampled(profile, "cold_call") \
                         else _clamp(cold + tbet, 0.05, 0.75)
@@ -787,7 +909,7 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
             # default it deserves.
             if getattr(hand, "opener", None) == seat:
                 f3 = _chain(profile, [f"fold_to_three_bet:{ipo}", "fold_to_three_bet"],
-                            0.55, 20, vs=vs)
+                            0.55, 20)
                 cont = _clamp(1 - f3, 0.02, 0.98)
                 cont_why = f"flats the 3-bet {ipo}"
             else:
@@ -812,6 +934,16 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
             rr_gate, rr_label = 0.99, f"{level + 2}-bets"
             rr_to = lg.max_raise_to
             cont, cont_why = 0.02, "calls the shove"
+        if seat in getattr(hand, "limped", ()):
+            # They already limped; this raise is an isolation, not a 3-bet.
+            # limp_raise / limp_fold are the numbers counted on that seat.
+            lr = _freq_n(profile, "limp_raise", None, 12)
+            lf = _freq_n(profile, "limp_fold", None, 12)
+            if lr is not None:
+                rr_gate, rr_label = 1 - lr, "limp-raises"
+            if lf is not None:
+                cont = _clamp(1 - lf, 0.02, 0.98)
+                cont_why = "defends the limp"
         _, _, mdf, req_eq = _price(hand, lg)
         shove = _facing_shove(hand, seat, lg)
         if shove:
@@ -834,11 +966,11 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
                 and lg.can_raise):
             if level <= 1:
                 known = _any_sampled(profile, ["bb_defend", "cold_call",
-                                               "fold_to_steal", VS_HERO + "bb_defend"])
+                                               "fold_to_steal"])
             elif level == 2:
                 known = _any_sampled(profile, [
                     "fold_to_three_bet", "fold_to_three_bet:ip",
-                    "fold_to_three_bet:oop", VS_HERO + "fold_to_three_bet"])
+                    "fold_to_three_bet:oop"])
             else:
                 known = _sampled(profile, "fold_to_four_bet")
             no_flat = not known
@@ -909,8 +1041,10 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
     has_init = hand.initiative == seat
     ipo = _ipo(hand, seat)
     delayed = has_init and seat in getattr(hand, "declined_initiative", ())
-    vs = _vs_hero(hand, seat)
     tex, hilo, mw, pot = _board_ctx(hand)
+    called_prev = getattr(hand, "called_prev", set())
+    depth = stack_bucket(_start_bb(hand, seat))
+    spr = _spr(hand, seat)
 
     if lg.call_amount > 0:                          # facing a bet or a raise
         # Theory (GTO Wizard, blog.gtowizard.com/mdf-alpha): for a bet B into pot
@@ -938,10 +1072,10 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
             strength = 1.0 if monster else _rank_hi(hand, seat, board_order, hand.board)
             raise_f = _chain(profile,
                              [f"raise_vs_bet:{street}:{ipo}", f"raise_vs_bet:{street}"],
-                             POOL_RAISE_VS_BET, 12, vs=vs)
+                             POOL_RAISE_VS_BET, 12)
             fold_raise = _chain(profile,
                                 [f"fold_vs_raise:{street}:{ipo}", f"fold_vs_raise:{street}"],
-                                None, 12, vs=vs)
+                                None, 12)
             depth = "a re-raised pot" if level >= 3 else "a raised pot"
             if fold_raise is not None:
                 # Their number. Theory does not get a second vote.
@@ -968,7 +1102,8 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
                 _, to = _raise_or_jam(hand, seat, lg, hand.bet + int(round(frac * hand.pot)))
                 return ("raise", to,
                         f"re-raises for value — the top {1 - value_bar:.0%} of the range that continues here")
-            if monster or (_over(strength, 1 - defend, rng) and (not price_gate or absolute >= req_eq)):
+            if monster or (_over(strength, 1 - defend, rng, CONTINUE_MIX)
+                            and (not price_gate or absolute >= req_eq)):
                 _keep(hand, seat, board_order, [(1 - defend, 1.0)], hand.board)
                 return ("call", 0,
                         f"calls — {depth}; they continue ~{defend:.0%} vs this size"
@@ -978,14 +1113,13 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
                     + (f" ({req_eq:.0%} pot odds)" if steep or price_gate else ""))
         # level 1: their fold number is the continue cut. MDF and pot odds
         # interpolate a thin or missing number; they do not veto a sampled one.
-        called_prev = getattr(hand, "called_prev", set())
         vs_cbet = (not has_init) and hand.initiative is not None \
             and hand.initiative == hand.last_raiser
         fold_f = None
         fold_measured = False
         sized_key = False            # did the number already know the bet size?
         if seat in called_prev:
-            fold_f = _chain(profile, [f"after_call:{street}:fold"], None, 12, vs=vs)
+            fold_f = _chain(profile, [f"after_call:{street}:fold"], None, 12)
             fold_measured = fold_f is not None
         if fold_f is None and s.street_put == 0:
             fold_f = _freq_n(profile, f"check_fold:{street}", None, 12)
@@ -1002,9 +1136,10 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
                 f"fold_vs_bet:{street}:{hilo}",
                 f"fold_vs_bet:{street}:{mw}",
                 f"fold_vs_bet:{street}:{ipo}",
+                f"fold_vs_bet:{street}:stk:{depth}",
                 f"fold_vs_bet:{street}",
             ]
-            hit = _chain(profile, fold_keys, None, 12, vs=vs)
+            hit = _chain(profile, fold_keys, None, 12)
             if hit is not None:
                 fold_f = hit
                 fold_measured = True
@@ -1026,22 +1161,29 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
                 or POOL_FACED_SIZE.get(street, 0.75)
             be_usual = usual / (1.0 + usual)
             fold_f = _clamp(fold_f + ((1 - mdf) - be_usual), 0.02, 0.98)
-        raise_f = _chain(profile,
-                         [f"raise_vs_bet:{street}:{ipo}", f"raise_vs_bet:{street}"],
-                         0.06, 12, vs=vs)
-        if not _any_sampled(profile, [f"raise_vs_bet:{street}:{ipo}", f"raise_vs_bet:{street}",
-                                      VS_HERO + f"raise_vs_bet:{street}"]):
+        prev = getattr(hand, "last_think", {}).get(seat) if hasattr(hand, "last_think") else None
+        if prev:
+            pace, st, act = prev
+            nxt = _freq_n(profile, f"after:{pace}:{st}:{act}:fold_next", None, 12)
+            if nxt is not None:
+                fold_f = _clamp(0.7 * fold_f + 0.3 * nxt, 0.02, 0.98)
+        raise_keys = [
+            f"after_call:{street}:raise" if seat in called_prev else "",
+            f"raise_vs_bet:{street}:{ipo}", f"raise_vs_bet:{street}",
+        ]
+        raise_f = _chain(profile, raise_keys, 0.06, 12)
+        if not _any_sampled(profile, [k for k in raise_keys if k]):
             raise_f = min(raise_f, 0.20)
         if s.street_put == 0:                          # a raise here is a check-raise
             xr = _freq_n(profile, f"check_raise:{street}", None, 15)
             if xr is not None:
                 raise_f = max(raise_f, xr)
         raise_cap = RAISE_VALUE_CAP.get(street, 0.06)
-        polar = _polar_bet(strength, raise_f, raise_cap)
+        polar = _polar_bet(strength, raise_f, raise_cap, rng, spr)
         if monster and polar != "bluff":
             polar = "value" if lg.can_raise else polar
         if lg.can_raise and polar:
-            _keep(hand, seat, board_order, _polar_bands(raise_f, raise_cap), hand.board)
+            _keep(hand, seat, board_order, _polar_bands(raise_f, raise_cap, spr), hand.board)
             # `raise_ratio` is measured as to_amount / to_call, a ratio whose
             # denominator is the increment still owed. A re-raise over a big
             # bet owes little and books an enormous ratio, and the stat is a
@@ -1056,7 +1198,7 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
             how = "for value" if polar == "value" else "as a bluff"
             return ("raise", to, f"raises {how} — polar vs a {street} bet, ~{raise_f:.0%}")
         continue_frac = _clamp(1 - fold_f, 0.02, 0.98)
-        clears = monster or _over(strength, 1 - continue_frac, rng)
+        clears = monster or _over(strength, 1 - continue_frac, rng, CONTINUE_MIX)
         # A sampled fold rate is an average across the sizes they faced. Even
         # after the MDF shift, a station's 15% fold-vs-bet called A-high off a
         # jam: the frequency cut said "top 40%" and pot odds never got a vote.
@@ -1088,21 +1230,23 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
                 f"cbet:{street}:{tex}",
                 f"cbet:{street}:{mw}",
                 f"cbet:{street}:{ipo}",
+                f"cbet:{street}:{depth}",
                 f"cbet:{street}",
-            ], 0.5, 15, vs=vs)
+            ], 0.5, 15)
             fire = "c-bet"
         cap = _street_value_cap(profile, street, cbet_f, VALUE_CAP.get(street, 0.45))
-        polar = _polar_bet(strength, cbet_f, cap)
+        polar = _polar_bet(strength, cbet_f, cap, rng, spr)
         if monster and polar != "bluff":
             polar = "value"
         if lg.can_raise and polar:
-            _keep(hand, seat, board_order, _polar_bands(cbet_f, cap), hand.board)
-            frac = _bet_frac(profile, street, rng, 0.6, (pot, tex, hilo, mw, ipo))
+            _keep(hand, seat, board_order, _polar_bands(cbet_f, cap, spr), hand.board)
+            frac = _bet_frac(profile, street, rng, 0.6, (pot, tex, hilo, mw, ipo),
+                             delayed=delayed, polar=polar)
             _, to = _raise_or_jam(hand, seat, lg, int(round(frac * hand.pot)))
             how = "value" if polar == "value" else "a bluff"
             return ("raise", to,
                     f"{fire}s {frac:.0%} pot ({how}) — fires ~{cbet_f:.0%} here, their own sizing")
-        value_frac, bluff_frac = _polar_split(cbet_f, cap)
+        value_frac, bluff_frac = _polar_split(cbet_f, cap, spr)
         _keep(hand, seat, board_order, [(bluff_frac, 1 - value_frac)], hand.board)
         return ("check", 0, f"checks back — outside the ~{cbet_f:.0%} they {fire} here")
     # No initiative of our own -- two different spots:
@@ -1114,21 +1258,32 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
         bet_why = f"leads out — donks ~{lead_f:.0%} into the raiser, with a hand worth it"
         check_why = f"checks — hardly ever donks into the raiser (~{lead_f:.0%})"
         cap = RAISE_VALUE_CAP.get(street, 0.08)
+    elif seat in called_prev:
+        # Called last street and checked to: a float / delayed stab, not a
+        # probe of a dead pot. IP and OOP are different numbers.
+        stab_keys = ([f"after_call:{street}:stab:ip"] if ipo == "ip" else [])
+        stab_keys += [f"after_call:{street}:stab",
+                      f"probe:{street}:{ipo}", f"probe:{street}"]
+        lead_f = _freq_chain(profile, stab_keys, 0.30)
+        bet_why = f"floats — stabs ~{lead_f:.0%} after calling last street"
+        check_why = "checks — not a hand they take a stab with after calling"
+        cap = _street_value_cap(profile, street, lead_f, VALUE_CAP.get(street, 0.45))
     else:
         lead_f = _freq_chain(profile, [f"probe:{street}:{ipo}", f"probe:{street}"], 0.30)
         bet_why = f"stabs — bets ~{lead_f:.0%} at a pot no one has bet"
         check_why = f"checks — not a hand they stab here (stabs ~{lead_f:.0%})"
         cap = _street_value_cap(profile, street, lead_f, VALUE_CAP.get(street, 0.45))
-    polar = _polar_bet(strength, lead_f, cap)
+    polar = _polar_bet(strength, lead_f, cap, rng, spr)
     if monster and polar != "bluff":
         polar = "value"
     if lg.can_raise and lead_f > 0.02 and polar:
-        _keep(hand, seat, board_order, _polar_bands(lead_f, cap), hand.board)
-        frac = _bet_frac(profile, street, rng, 0.55, (pot, tex, hilo, mw, ipo))
+        _keep(hand, seat, board_order, _polar_bands(lead_f, cap, spr), hand.board)
+        frac = _bet_frac(profile, street, rng, 0.55, (pot, tex, hilo, mw, ipo),
+                         polar=polar)
         _, to = _raise_or_jam(hand, seat, lg, int(round(frac * hand.pot)))
         return ("raise", to, bet_why)
     if lg.can_check:
-        value_frac, bluff_frac = _polar_split(lead_f, cap)
+        value_frac, bluff_frac = _polar_split(lead_f, cap, spr)
         _keep(hand, seat, board_order, [(bluff_frac, 1 - value_frac)], hand.board)
         return ("check", 0, check_why)
     return ("fold", 0, "folds")
