@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .botplay import decide
+from .botplay import decide, think_ms, think_pace
 from .cards import card_text, describe, evaluate
 from .holdem import STREETS, Hand, Seat
 from .priors import regime as regime_of
@@ -101,12 +101,17 @@ class Game:
         book = who.at(len(h.seats)) if isinstance(who, Villain) else who
         kind, amount, reason = decide(h, seat, book, self.rng,
                                       self.names[seat])
+        ms = think_ms(book, kind, h.street, reason, self.rng)
+        act_tag = "aggro" if kind == "raise" else kind
+        st_label = "pf" if h.street == 0 else STREETS[h.street]
+        h.last_think[seat] = (think_pace(book, ms), st_label, act_tag)
         opening = h.street > 0 and h.bet == 0 and kind == "raise"
         h.act(kind, amount)
         if h.over:
             self._bank()
         return {"seat": seat, "name": self.names[seat], "action": kind,
-                "amount": amount, "reason": reason, "opening": opening}
+                "amount": amount, "reason": reason, "opening": opening,
+                "think_ms": ms}
 
     def act(self, kind: str, amount: int = 0) -> None:
         if self.hand is None or self.hand.over or self.hand.to_act != self.hero_seat:

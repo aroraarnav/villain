@@ -98,10 +98,12 @@ def test_cbet_and_fold_to_cbet_denominators():
     raiser, caller = books["a"]["hu"], books["b"]["hu"]
     assert raiser.rate("cbet:flop") == 1.0
     assert raiser.rate("cbet:flop:srp") == 1.0
+    assert raiser.rate("cbet:flop:deep") == 1.0
     assert caller.rate("fold_to_cbet:flop") == 1.0
     assert caller.rate("fold_vs_bet:flop") == 1.0
     # A half-pot bet lands in the "mid" bucket, not "small".
     assert caller.rate("fold_vs_bet:flop:mid") == 1.0
+    assert caller.rate("fold_vs_bet:flop:stk:deep") == 1.0
 
 
 def test_retaking_the_lead_ends_the_delayed_cbet_run():

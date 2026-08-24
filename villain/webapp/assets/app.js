@@ -1916,7 +1916,12 @@ function armSimClock() {
   const st = state.game.state;
   if (!st.over && !st.your_turn) {
     if (state.stepUntil == null) {
-      const wait = (state.lastEvent && state.lastEvent.action === "fold") ? 2000 : SIM_DELAY;
+      let wait;
+      if (state.lastEvent && state.lastEvent.think_ms != null) {
+        wait = Math.max(400, Math.min(8000, state.lastEvent.think_ms));
+      } else {
+        wait = (state.lastEvent && state.lastEvent.action === "fold") ? 2000 : SIM_DELAY;
+      }
       state.stepUntil = Date.now() + wait;
     }
     const left = Math.max(0, state.stepUntil - Date.now());

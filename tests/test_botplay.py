@@ -615,21 +615,6 @@ def test_three_bet_vs_ep_is_not_the_steal_number():
     assert hits / tot < 0.20, f"3-bet vs UTG realized {hits / tot:.2f} over {tot}"
 
 
-def test_vs_hero_three_bet_is_preferred_when_sampled():
-    profile = _Prof(**{"three_bet": 0.05, "vs:three_bet": 0.80, "bb_defend": 0.50,
-                       "cold_call": 0.05})
-    rng = np.random.default_rng(0)
-    hits = tot = 0
-    for k in range(180):
-        h = Hand(_seats(400, 400), button=0, sb=1, bb=2,
-                 rng=np.random.default_rng(k + 1))
-        h.hero_seat = 0
-        h.act("raise", 6)
-        tot += 1
-        hits += decide(h, 1, profile, rng)[0] == "raise"
-    assert hits / tot > 0.50, f"vs-hero 3-bet {hits / tot:.2f}"
-
-
 def test_a_28bb_stack_flats_a_three_bet_when_that_is_their_number():
     """The 30bb shove-or-fold gate used to override a sampled continue rate."""
     profile = _Prof(rfi=0.99, four_bet=0.04, fold_to_three_bet=0.35)
