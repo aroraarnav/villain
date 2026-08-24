@@ -430,6 +430,14 @@ TYPICAL_THREE_BET_CONTINUE = 0.45
 #: Pool baseline for raising a bet, the reference their own rate modulates.
 POOL_RAISE_VS_BET = 0.06
 
+#: Bet sizes that play as a polar claim when facing them. Frequency is still
+#: ``fold_vs_bet`` (and the MDF shift); only the ordering of the continue
+#: range changes. Small and mid are merged, so draws continue. A pot-or-more
+#: stab is value-or-air — the same made-hand ranking facing a raise already
+#: uses, which is how a competent player defends an overbet without a new
+#: fold number.
+POLAR_FACE_BUCKETS = frozenset({"big", "over"})
+
 #: Half-width of the mixed-strategy band around a frequency cut. Inside it the
 #: call is randomised so the same hand is not always played the same way;
 #: outside it the cut is hard.
@@ -1197,13 +1205,22 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
             _, to = _raise_or_jam(hand, seat, lg, target)
             how = "for value" if polar == "value" else "as a bluff"
             return ("raise", to, f"raises {how} — polar vs a {street} bet, ~{raise_f:.0%}")
+        # Raise used playability so a combo draw can still be the air side.
+        # Calling a polar-sized bet does not: that is a showdown claim, and
+        # ranking it by draws is how a flush draw looks up a jam. How *far*
+        # down the made-hand ranking they call is still their fold number —
+        # a nit's 25% continue is top pair, a station's 85% is underpairs.
+        if bucket in POLAR_FACE_BUCKETS or steep:
+            board_order = cache.score
+            strength = 1.0 if monster else _rank_hi(hand, seat, board_order, hand.board)
         continue_frac = _clamp(1 - fold_f, 0.02, 0.98)
         clears = monster or _over(strength, 1 - continue_frac, rng, CONTINUE_MIX)
         # A sampled fold rate is an average across the sizes they faced. Even
         # after the MDF shift, a station's 15% fold-vs-bet called A-high off a
         # jam: the frequency cut said "top 40%" and pot odds never got a vote.
-        # Overbets and all-ins always need the price. Playability (not made-
-        # hand percentile) is the proxy so a flush draw still continues.
+        # Overbets and all-ins always need the price. Small bets keep
+        # playability so a flush draw still continues; polar sizes already
+        # re-ranked onto made hands above.
         priced = monster or (not steep) or strength >= req_eq
         if clears and priced and (monster or fold_measured or absolute >= req_eq):
             # A call does not deny the nuts. Keep the whole continue slice,

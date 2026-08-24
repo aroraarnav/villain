@@ -744,6 +744,69 @@ def test_ace_high_folds_a_flop_jam():
     assert kind == "fold", why
 
 
+def test_a_flush_draw_calls_a_small_bet_and_folds_a_jam():
+    """Same continue rate, different ordering: polar sizes rank made hands.
+
+    A merged third-pot stab is a drawing hand's call. A jam is value-or-air,
+    and looking it up with playability is how a flush draw called off.
+    """
+    from villain.cards import card_id
+    profile = _Prof(**{
+        "fold_vs_bet:flop": 0.45, "fold_vs_bet:flop:small": 0.45,
+        "fold_vs_bet:flop:over": 0.45, "raise_vs_bet:flop": 0.02,
+        "check_raise:flop": 0.02, "donk:flop": 0.0,
+    })
+    profile.means = {"faced_size:flop": 0.33, "faced_size:flop#n": 80.0}
+
+    def _spot(frac):
+        h = Hand(_seats(400, 400), button=0, sb=1, bb=2,
+                 rng=np.random.default_rng(1))
+        h.act("raise", 6)
+        h.act("call")
+        assert h.street == 1
+        h.board = [card_id("Kc"), card_id("9s"), card_id("2s")]
+        h.seats[0].hole = (card_id("Ad"), card_id("Ah"))
+        h.seats[1].hole = (card_id("Js"), card_id("Ts"))
+        h.act("check")
+        size = h.legal().max_raise_to if frac is None else max(
+            h.legal().min_raise_to, int(frac * h.pot))
+        h.act("raise", size)
+        return decide(h, 1, profile, np.random.default_rng(0))
+
+    kind_small, _, why_small = _spot(0.33)
+    kind_jam, _, why_jam = _spot(None)
+    assert kind_small in ("call", "raise"), why_small
+    assert kind_jam == "fold", why_jam
+
+
+def test_an_underpair_call_follows_how_nitty_they_are():
+    """Polar ranking is made hands; the cut is still their fold frequency."""
+    from villain.cards import card_id
+
+    def _jam():
+        h = Hand(_seats(400, 400), button=0, sb=1, bb=2,
+                 rng=np.random.default_rng(1))
+        h.act("raise", 6)
+        h.act("call")
+        assert h.street == 1
+        h.board = [card_id("Kc"), card_id("9s"), card_id("2d")]
+        h.seats[0].hole = (card_id("Ad"), card_id("Ah"))
+        h.seats[1].hole = (card_id("5h"), card_id("5d"))
+        h.act("check")
+        h.act("raise", h.legal().max_raise_to)
+        return h
+
+    def _act(fold):
+        profile = _Prof(**{
+            "fold_vs_bet:flop": fold, "fold_vs_bet:flop:over": fold,
+            "raise_vs_bet:flop": 0.02, "check_raise:flop": 0.02, "donk:flop": 0.0,
+        })
+        return decide(_jam(), 1, profile, np.random.default_rng(0))[0]
+
+    assert _act(0.75) == "fold"
+    assert _act(0.15) == "call"
+
+
 def test_cbet_size_follows_the_texture_not_the_all_in_mean():
     """Pooled cbet_size includes jams. Dry boards they bet small must stay small."""
     from villain.cards import card_id
