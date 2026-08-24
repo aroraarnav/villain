@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .cards import RANKS, FULL_HOUSE, card_text, evaluate
+from .cards import FULL_HOUSE, RANKS, card_text, evaluate
 from .holdem import STREETS
 from .model import positions_for
 from .ranges import Ranges, class_scores, index_of

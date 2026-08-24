@@ -916,7 +916,6 @@ def test_a_preflop_shove_fold_cites_size_not_stack_depth():
     continue at this depth' against an all-in. Depth is 15bb push/fold.
     """
     profile = _Prof(rfi=0.99, four_bet=0.02, fold_to_three_bet=0.55)
-    rng = np.random.default_rng(0)
     folds = []
     for k in range(80):
         h = _btn_faces_bb_jam()

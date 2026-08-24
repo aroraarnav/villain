@@ -1240,6 +1240,7 @@ def test_fit_reports_counted_cv_folds(monkeypatch):
     the folds plus the final fit -- count those, not an invented hand total."""
     import numpy as np
     from sklearn.base import BaseEstimator, RegressorMixin
+
     from villain.reads import FEATURES, MIN_ROWS, Row, fit
 
     class Fake(BaseEstimator, RegressorMixin):
