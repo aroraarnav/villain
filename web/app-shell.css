@@ -1,7 +1,7 @@
 /* Styles for the parts of the page only the hosted app has: the account
    chip in the header and the guest bar under the nav. They live here and
-   not in app.css because app.css ships inside the wheel, which the local
-   `villain ui` serves too -- and locally there is no account to show.
+   not in app.css because app.css ships inside the wheel for the local app,
+   where there is no account to show.
 
    Everything here is written in app.css's custom properties, so it has to
    be injected after app.css is in the document, which is what app-shell.js
