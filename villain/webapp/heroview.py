@@ -107,8 +107,25 @@ def _hero_disk_cache_load(store: Store, hero_id: int | None,
     return False, None
 
 
+#: True after a hero sidecar was written and the host has not yet been told
+#: the file changed. Same hole as ``db._CACHE_DIRTY``: the hosted page only
+#: flushes IndexedDB (and the account copy) when a request reports ``wrote``,
+#: and a cold Hero build is a GET that writes a sidecar the next visit has to
+#: find. Without this flag that GET reported false, the cache stayed in
+#: MEMFS, and every reload walked every hand again.
+_HERO_DIRTY = False
+
+
+def consume_hero_dirty() -> bool:
+    """True if a hero cache write landed since the last consume."""
+    global _HERO_DIRTY
+    dirty, _HERO_DIRTY = _HERO_DIRTY, False
+    return dirty
+
+
 def _hero_disk_cache_save(store: Store, hero_id: int | None, hand_count: int,
                           payload: dict | None) -> None:
+    global _HERO_DIRTY
     path = _hero_disk_cache_path(store)
     try:
         saved = json.loads(path.read_text()) if path.exists() else {}
@@ -121,6 +138,8 @@ def _hero_disk_cache_save(store: Store, hero_id: int | None, hand_count: int,
         path.write_text(json.dumps(saved))
     except OSError:
         pass    # a stale/missing cache costs time next request, not correctness
+    else:
+        _HERO_DIRTY = True
 
 
 #: Hero builds in flight, so a second request can be told "still building"

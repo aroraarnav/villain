@@ -727,6 +727,36 @@ def test_a_definitions_rebuild_is_reported_as_a_write(tmp_path, hands):
     assert second["wrote"] is False
 
 
+def test_a_cold_hero_build_is_reported_as_a_write(tmp_path, hands):
+    """The hosted page only flushes IndexedDB when `wrote` is true. A cold
+    Hero build writes a sidecar the next visit has to find -- memory dies
+    with the worker -- and used to report false, so the cache stayed in
+    MEMFS and every reload rebuilt."""
+    from villain.webapp import browser, heroview
+
+    db = tmp_path / "v.db"
+    with Store(db) as store:
+        store.add_hands(hands)
+        store.rebuild()
+    browser.set_db(str(db))
+
+    first = browser.build_hero()
+    assert first["wrote"] is True
+    assert (db.with_name(db.name + ".hero-cache.json")).exists()
+
+    # Worker restart: in-memory caches are gone. The sidecar is what boot
+    # will find, or the next visit walks every hand again.
+    heroview._HERO_PAYLOAD_CACHE.clear()
+    heroview._HERO_ID_CACHE.clear()
+    heroview._HERO_MODEL_CACHE.clear()
+    with Store(db) as store:
+        assert heroview.hero_status(store) == "ready"
+
+    second = browser.build_hero()
+    assert second["wrote"] is False, "a cache hit is a read"
+    assert second["body"] == first["body"]
+
+
 # --- the roster cache ---------------------------------------------------------
 
 def test_the_roster_is_rebuilt_when_the_hands_change(tmp_path, hands):
