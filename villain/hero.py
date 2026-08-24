@@ -61,9 +61,10 @@ def find_hero(store, min_hands: int = MIN_HERO_HANDS, progress=None,
         seq = store.player_hands(progress=progress)
         progress = None          # the load already counted itself
     n = len(seq)
+    every = 200
+    if progress is not None:
+        progress(0, n)
     for at, hand in enumerate(seq):
-        if progress is not None and at % 200 == 0:
-            progress(at, n)
         for seat in hand.seats:
             try:
                 pid = int(seat.player_id)
@@ -72,6 +73,8 @@ def find_hero(store, min_hands: int = MIN_HERO_HANDS, progress=None,
             total[pid] = total.get(pid, 0) + 1
             if len(seat.hole_cards) == 2:
                 seen[pid] = seen.get(pid, 0) + 1
+        if progress is not None and (at + 1) % every == 0:
+            progress(at + 1, n)
     if progress is not None:
         progress(n, n)
 
@@ -287,17 +290,17 @@ def fit_population_model(store, progress=None, hands=None) -> StrengthModel:
     for grading hero's folds against what the bet actually represents.
 
     ``progress(done, total, phase)`` is passed through so a caller with a
-    progress bar has something true to put in it. The walk over hands can be
-    counted; fitting the trees cannot, and says so by reporting no total.
+    progress bar has something true to put in it. The walk over hands is
+    counted per hand; fitting is counted per cross-validation fold plus the
+    final fit -- those are the steps that actually take the time.
     """
     if hands is None:
         loading = (lambda done, total: progress(done, total, "loading")) if progress else None
         hands = store.player_hands(progress=loading)
     step = (lambda done, total: progress(done, total, "reading")) if progress else None
     rows = build_dataset(hands, progress=step)
-    if progress:
-        progress(0, 0, "fitting")
-    return fit_strength(rows)
+    fitting = (lambda done, total: progress(done, total, "fitting")) if progress else None
+    return fit_strength(rows, progress=fitting)
 
 
 def _hero_spots(hands: list, hero_id: int, progress=None):
@@ -315,18 +318,20 @@ def _hero_spots(hands: list, hero_id: int, progress=None):
     ``progress(done, total)`` is reported here rather than by each caller for
     the same reason: :func:`~villain.reads.strength_by_street` is the expensive
     call and it happens in this loop, so this is the only place that knows how
-    far along the work actually is.
+    far along the work actually is. Reported after the hand, not before it --
+    a tick that lands while that batch is still to run is a bar that lies.
     """
     total = len(hands)
+    every = 200
+    if progress is not None:
+        progress(0, total)
     for at, hand in enumerate(hands):
-        if progress is not None and at % 200 == 0:
-            progress(at, total)
-        if not hand.board:
-            continue
-        seat = next((s for s in hand.seats if s.player_id == str(hero_id)), None)
-        if seat is None or len(seat.hole_cards) != 2:
-            continue
-        yield hand, seat, strength_by_street(hand, {seat.seat: seat})
+        if hand.board:
+            seat = next((s for s in hand.seats if s.player_id == str(hero_id)), None)
+            if seat is not None and len(seat.hole_cards) == 2:
+                yield hand, seat, strength_by_street(hand, {seat.seat: seat})
+        if progress is not None and (at + 1) % every == 0:
+            progress(at + 1, total)
     if progress is not None:
         progress(total, total)
 
@@ -423,7 +428,8 @@ class FoldReport:
         return sorted(self.mistakes, key=lambda g: -g.worth())[:limit]
 
 
-def fold_grades(hands: list, hero_id: int, model: StrengthModel) -> FoldReport:
+def fold_grades(hands: list, hero_id: int, model: StrengthModel,
+                progress=None) -> FoldReport:
     """Grade every postflop fold hero made against the hand hero actually held.
 
     ``hands`` is hero's own hands, e.g. ``store.player_hands(hero_id)``.
@@ -439,7 +445,7 @@ def fold_grades(hands: list, hero_id: int, model: StrengthModel) -> FoldReport:
     with :func:`preflop_range`, not here.
     """
     grades: list[FoldGrade] = []
-    for hand, seat, strengths in _hero_spots(hands, hero_id):
+    for hand, seat, strengths in _hero_spots(hands, hero_id, progress):
         view = HandView(hand)
         current_street = Street.PREFLOP
         last_aggro: Decision | None = None
@@ -604,7 +610,8 @@ class MissedValueReport:
         return sorted(self.missed, key=lambda g: -g.worth())[:limit]
 
 
-def missed_value(hands: list, hero_id: int, model: StrengthModel) -> MissedValueReport:
+def missed_value(hands: list, hero_id: int, model: StrengthModel,
+                 progress=None) -> MissedValueReport:
     """Grade every postflop check hero made against the hand hero actually held.
 
     ``hands`` is hero's own hands, ``model`` a fitted
@@ -613,7 +620,7 @@ def missed_value(hands: list, hero_id: int, model: StrengthModel) -> MissedValue
     reason it is everywhere else in this module.
     """
     grades: list[MissedValue] = []
-    for hand, seat, strengths in _hero_spots(hands, hero_id):
+    for hand, seat, strengths in _hero_spots(hands, hero_id, progress):
         for decision in HandView(hand).decisions():
             if (decision.seat != seat.seat or decision.street is Street.PREFLOP
                     or decision.action.act is not Act.CHECK):

@@ -118,6 +118,9 @@
     font-variant-numeric: tabular-nums lining-nums;
   }
   .wrap { max-width: 1060px; margin: 0 auto; padding: var(--sp-5) 20px var(--sp-6); }
+  /* Simulate is a table, not a document: use the leftover viewport instead of
+     a 720px oval floating in a sea of panel. */
+  .wrap:has(.sim-panel) { max-width: 1200px; padding-bottom: var(--sp-4); }
   header { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
   /* Display: the one size reserved for the wordmark. A player's own name on
      their profile uses the same size (.hero) -- never both at once, and never
@@ -506,18 +509,22 @@
              border: 1px solid var(--line); color: var(--muted); vertical-align: 1px; }
   .gto-fid.solver { border-color: var(--edge); color: var(--ink); }
   .card.big { font-size: 17px; min-width: 34px; padding: 6px 8px; }
-  .poker-table { position: relative; width: 100%; max-width: 880px; aspect-ratio: 1.7 / 1;
-                 margin: 22px auto 12px; }
+  /* The oval is inset so seats sit on the rim without hanging out of the box
+     and painting over the action bar. Percent placement is relative to this
+     stage; the felt itself does not fill it. */
+  .poker-table { position: relative; width: 100%; flex: 1 1 auto;
+                 min-height: 420px; }
   /* A deep, desaturated felt rather than a bright one. On a near-black page
      with a single warm accent, a saturated casino green was the loudest thing
      in the product and it was the backdrop -- this reads as a table without
      competing with the cards and chips sitting on it, which are the only
      things here that should carry color. */
-  .felt-oval { position: absolute; inset: 0; border-radius: 50% / 50%;
+  .felt-oval { position: absolute; top: 9%; right: 7%; bottom: 14%; left: 7%;
+    border-radius: 50% / 50%;
     background: radial-gradient(ellipse at 50% 38%, #1e463a 0%, #17362d 62%, #102821 100%);
     box-shadow: inset 0 0 0 9px #0a1b16, inset 0 0 70px rgba(0,0,0,.45),
                 0 24px 55px rgba(0,0,0,.5); }
-  .table-center { position: absolute; left: 50%; top: 43%; transform: translate(-50%,-50%);
+  .table-center { position: absolute; left: 50%; top: 46%; transform: translate(-50%,-50%);
     display: flex; flex-direction: column; align-items: center; gap: 12px; }
   .pot-pill { background: rgba(0,0,0,.38); color: #fff; padding: 4px 15px; border-radius: 999px;
     font-size: 14px; }
@@ -549,16 +556,47 @@
   .cardback.sm { width: 21px; height: 29px; }
   .won-amt { color: var(--hero); font-weight: 600; }
   .won-amt.down { color: var(--red); }
-  .sim-layout { display: grid; grid-template-columns: 1fr 208px; gap: 20px; align-items: start; }
-  @media (max-width: 780px) { .sim-layout { grid-template-columns: 1fr; } }
+  .sim-panel { margin-bottom: 0; }
+  .sim-layout { display: grid; grid-template-columns: minmax(0, 1fr) 240px;
+                gap: var(--sp-4); align-items: stretch;
+                min-height: calc(100vh - 190px); }
+  @media (max-width: 780px) { .sim-layout { grid-template-columns: 1fr; min-height: 0; } }
+  .sim-main { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; min-height: 0; }
+  .sim-main .spread { flex: none; }
   .sim-side { border-left: 1px solid var(--line); padding-left: var(--sp-4);
-              display: flex; flex-direction: column; align-items: flex-start;
-              gap: var(--sp-2); }
+              display: flex; flex-direction: column; align-items: stretch;
+              gap: var(--sp-2); min-width: 0; min-height: 0; }
   /* P/L, then the modes, then the one way out -- in that order, with the gap
      doing the grouping instead of six hand-set margins. */
-  .sim-side .side-modes { display: flex; gap: var(--sp-2); flex-wrap: wrap;
-                          margin-top: var(--sp-3); }
-  .sim-side #end-session { margin-top: var(--sp-2); }
+  .sim-side .side-modes { display: grid; grid-template-columns: 1fr 1fr 1fr;
+                          gap: var(--sp-1); margin-top: var(--sp-3); }
+  .sim-side .side-modes .act { width: 100%; padding-left: 0.35em; padding-right: 0.35em;
+                               font-size: 12px; white-space: nowrap; }
+  .sim-side #end-session { margin-top: var(--sp-2); align-self: stretch; }
+  .sim-side .handlog {
+    flex: 1 1 auto; min-height: 180px; margin-top: var(--sp-2); width: 100%;
+    display: flex; flex-direction: column;
+    background: var(--inset); border: 1px solid var(--line); border-radius: 10px;
+    overflow: hidden;
+  }
+  .sim-side .handlog-title {
+    flex: none; font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); padding: 8px 12px 6px; border-bottom: 1px solid var(--line);
+  }
+  .sim-side .handlog-body {
+    flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px 12px 8px;
+  }
+  .sim-side .handlog .log-line {
+    padding: 5px 0; border-bottom: 1px solid var(--line);
+    line-height: 1.3; font-size: 12px; color: var(--muted);
+  }
+  .sim-side .handlog .log-line:last-child { border-bottom: 0; }
+  .sim-side .handlog .log-street {
+    font-size: 10px; font-weight: 600; letter-spacing: .06em;
+    text-transform: uppercase; padding-top: 9px;
+  }
+  .sim-side .handlog .log-street:first-child { padding-top: 5px; }
+  .sim-side .handlog .log-win { color: var(--up); }
   .side-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
   .pnl-big { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums;
              letter-spacing: -0.02em; margin: 3px 0; }
@@ -591,7 +629,18 @@
   /* Realized money only. A frequency that moved is not money and does not get
      this color -- see .sess-delta below. */
   .up { color: var(--up); } .down { color: var(--danger); }
-  .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 4px; min-height: 34px; }
+  /* One toolbar: leave actions, size cluster, then the commit button on the
+     same baseline. Wrapping is how Call 2 ended up under Fold and how the
+     presets slid under the hero seat. */
+  .controls { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: nowrap;
+              flex: none; position: relative; z-index: 4; overflow-x: auto;
+              padding: 4px 0 2px; min-height: 42px; }
+  .controls > .act,
+  .controls-leave .act,
+  .controls .commit {
+    white-space: nowrap; text-align: center; height: 36px; box-sizing: border-box;
+  }
+  .controls-leave { display: flex; gap: var(--sp-2); align-items: center; flex: none; }
   /* Armed / not armed, as fill rather than a tick: the state has to be
      readable at a glance from across the table view. */
   .cf-toggle { border: 1px solid var(--edge); background: transparent; color: var(--muted); }
@@ -604,14 +653,26 @@
     font-weight: 600;
   }
   .cf-toggle.on::before { background: currentColor; }
-  .raise-wrap { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .raise-wrap input[type=range] { accent-color: var(--red); }
+  .raise-wrap { display: flex; align-items: center; gap: var(--sp-2); flex: 1 1 auto;
+                min-width: 0; flex-wrap: nowrap; }
+  .raise-wrap input[type=range] { accent-color: var(--red); flex: 1 1 140px; min-width: 96px; }
+  .presets { display: flex; gap: var(--sp-1); flex: none; }
   .raise-amt { font-family: var(--mono); font-size: .95em; letter-spacing: -0.02em;
-               font-variant-numeric: tabular-nums; min-width: 58px; }
-  .presets { display: flex; gap: 4px; }
-  .handlog { margin-top: 14px; max-height: 118px; overflow-y: auto; line-height: 1.6; }
-  .range-review { margin-top: 10px; line-height: 1.55; }
-  .range-review > div { margin-bottom: 4px; }
+               font-variant-numeric: tabular-nums; min-width: 58px; color: var(--muted);
+               flex: none; }
+  button.act.commit { min-width: 7.6em; justify-content: center; text-align: center; white-space: nowrap; }
+  /* Next-hand countdown sits under the board, in the table-center stack. */
+  .deal-count {
+    text-align: center; pointer-events: none; flex: none;
+    color: rgba(255,255,255,.82); font-size: 11px; font-weight: 600;
+    letter-spacing: .08em; text-transform: uppercase;
+    text-shadow: 0 2px 14px rgba(0,0,0,.75);
+  }
+  .deal-count b {
+    display: block; margin-top: 2px; font-size: 36px; font-weight: 700;
+    letter-spacing: -0.04em; color: #fff; line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
   .lessons { margin: 16px 0 4px; display: flex; flex-direction: column; gap: 8px; }
   .lesson { padding: 8px 12px; border-left: 3px solid var(--accent);
             background: var(--accent-soft); border-radius: 0 8px 8px 0; }

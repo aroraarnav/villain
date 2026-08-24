@@ -31,6 +31,24 @@ const step = (text, pct) => self.postMessage({ type: "step", text, pct });
 
 const exists = (path) => pyodide.FS.analyzePath(path).exists;
 
+// A hidden tab does not paint. Busy-waiting for it burns a core for nothing
+// and stretches a Hero build that the reader is not even looking at.
+let pageHidden = false;
+const nap = (() => {
+  try { return new Int32Array(new SharedArrayBuffer(4)); }
+  catch { return null; }          // no COOP/COEP: Atomics.wait is unavailable
+})();
+
+const yieldForPaint = () => {
+  if (pageHidden) return;
+  if (nap) {
+    Atomics.wait(nap, 0, 0, 6);
+    return;
+  }
+  const spin = Date.now() + 6;
+  while (Date.now() < spin) { /* SAB blocked; this is the remaining cost */ }
+};
+
 const toDisk = (fromDisk) => new Promise((done, fail) =>
   pyodide.FS.syncfs(fromDisk, (err) => (err ? fail(err) : done())));
 
@@ -125,13 +143,12 @@ const handlers = {
       });
       // postMessage queues immediately, but a tight WASM loop can deliver
       // every tick in one turn on the page -- the bar then jumps to the last
-      // fraction. A few milliseconds here lets the other thread paint the
-      // real one. Throttled so the pause is not itself the wait.
+      // fraction. Yield briefly so the other thread can paint; skip it when
+      // the tab is hidden, because there is no paint and a spin is just heat.
       const now = Date.now();
       if (now - lastPaint >= 80) {
         lastPaint = now;
-        const spin = now + 6;
-        while (Date.now() < spin) { /* other thread paints */ }
+        yieldForPaint();
       }
     };
     const proxy = bridge.build_hero(report);
@@ -158,12 +175,11 @@ const handlers = {
       });
       // Same reason as the hero walk: postMessage queues, but a tight WASM
       // loop delivers every tick in one turn on the page unless the other
-      // thread is given a moment to actually paint.
+      // thread is given a moment to actually paint. Hidden: don't wait.
       const now = Date.now();
       if (now - lastPaint >= 80) {
         lastPaint = now;
-        const spin = now + 6;
-        while (Date.now() < spin) { /* other thread paints */ }
+        yieldForPaint();
       }
     };
     bridge.set_progress(report);
@@ -202,7 +218,12 @@ const handlers = {
 };
 
 self.onmessage = async (event) => {
-  const { id, kind, ...args } = event.data || {};
+  const msg = event.data || {};
+  if (msg.type === "visibility") {
+    pageHidden = !!msg.hidden;
+    return;
+  }
+  const { id, kind, ...args } = msg;
   const handler = handlers[kind];
   if (!handler) return say(id, false, { error: `no such worker call: ${kind}` });
   try {

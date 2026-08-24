@@ -15,6 +15,10 @@ Two things that are not obvious from that summary and are load-bearing:
   shove; 20-30bb facing a raise is 3-bet-or-fold; a raise that would leave a
   stub behind gets the chips in. The measured rates still cut the range -- the
   depth decides what action that cut can emit.
+* A made-hand *tie* is the top of the range, not the middle of it. Every ten
+  on T-T-9-9-x is the same boat; ranking that pile at its midpoint is how a
+  21% continue cut folded the nuts. Full house or better never folds, and
+  never checks back the river. Narrowing cannot delete the hole they hold.
 
 """
 
@@ -22,10 +26,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from .cards import RANKS, card_text, evaluate
+from .cards import FULL_HOUSE, RANKS, card_text, evaluate
 from .holdem import STREETS
 from .model import positions_for
-from .ranges import Ranges, class_scores
+from .ranges import Ranges, class_scores, index_of
 from .reads import texture
 from .stats import VS_HERO, size_bucket, stack_bucket
 
@@ -382,6 +386,17 @@ JAM_SHARE = 0.375
 #: anybody chose.
 RAISE_RATIO_CAP = 4.5
 
+#: Typical 3-bet is ~2.2x the pot it faces (9bb into ~4bb). The pivot when
+#: shifting a measured fold-to-3-bet onto a shove: that number was counted
+#: against this size, not against 100bb jams.
+USUAL_PRE_RAISE_POT = 2.2
+
+#: Live players call shoves wider than MDF. 1.6× keeps a station looking you
+#: up with the top of a 3-bet-calling range without giving a nit the same 43%
+#: they continue vs a 9bb 3-bet.
+SHOVE_CONTINUE_LIVE = 1.6
+TYPICAL_THREE_BET_CONTINUE = 0.45
+
 #: Pool baseline for raising a bet, the reference their own rate modulates.
 POOL_RAISE_VS_BET = 0.06
 
@@ -450,6 +465,21 @@ def _rank(hand, seat, order, board=None) -> float:
     return _ranges(hand).percentile(seat, hand.seats[seat].hole, order, board)
 
 
+def _rank_hi(hand, seat, order, board=None) -> float:
+    """``_rank``, counted from the top of a tie rather than its midpoint.
+
+    Midpoint is how preflop class cuts avoid slicing AA in half. Postflop a
+    *made* tie can be most of the range -- every ten on T-T-9-9-x is the
+    same full house -- and the midpoint of that pile sits at 0.6. A 21%
+    continue cut then folds the nuts. The top of the tie is the number
+    that means "this is the best I can hold here."
+    """
+    rs = _ranges(hand)
+    hole = hand.seats[seat].hole
+    better = rs.better_frac(seat, hole, order, board)
+    return max(_rank(hand, seat, order, board), 1.0 - better)
+
+
 def _keep(hand, seat, order, bands, board=None) -> None:
     """Stage the range this action implies, for the engine to commit if played.
 
@@ -460,7 +490,22 @@ def _keep(hand, seat, order, bands, board=None) -> None:
     the range never narrows, which is the whole defect.
     """
     rs = _ranges(hand)
-    hand.stage(seat, lambda: rs.narrow(seat, order, bands, board))
+    hole = tuple(hand.seats[seat].hole)
+    hand.stage(seat, lambda: rs.narrow(seat, order, bands, board, keep_hole=hole))
+
+
+def _made_category(hand, seat) -> int:
+    """Made-hand category of this seat on the current board, or -1."""
+    board = hand.board
+    if not board:
+        return -1
+    score = _ranges(hand).board_cache(board).score[index_of(hand.seats[seat].hole)]
+    return int(score) >> 20
+
+
+def _is_monster(hand, seat) -> bool:
+    """A full house or better. Frequency cuts do not fold these."""
+    return _made_category(hand, seat) >= FULL_HOUSE
 
 
 def _position(hand, seat):
@@ -530,6 +575,68 @@ def _raise_or_jam(hand, seat, legal, target: int) -> tuple[str, int]:
     elif hand.raises >= 1 and _spr(hand, seat) <= COMMIT_SPR:
         to = legal.max_raise_to
     return ("raise", to)
+
+
+def _price(hand, legal) -> tuple[int, float, float, float]:
+    """Chips to call, bet/pot, MDF, required equity to break even."""
+    B = max(legal.call_amount, 1)
+    pot_before = max(hand.pot - B, 1)
+    frac = B / pot_before
+    mdf = 1.0 / (1.0 + frac)
+    req_eq = B / (2.0 * B + pot_before)
+    return B, frac, mdf, req_eq
+
+
+def _facing_shove(hand, seat, legal) -> bool:
+    """Whether the raise in front of them is a jam, not a standard 3-bet.
+
+    ``fold_to_three_bet`` pools sizes. A 9bb 3-bet and a 200bb shove are not
+    the same decision, and treating them as one is how a single-raised-pot
+    jam got "they continue 43% at this depth."
+    """
+    if legal.call_amount >= hand.seats[seat].stack:
+        return True
+    raiser = hand.last_raiser
+    if raiser is not None and getattr(hand.seats[raiser], "all_in", False):
+        return True
+    B = legal.call_amount
+    pot_before = max(hand.pot - B, 1)
+    return (B / pot_before) >= 3.0
+
+
+def _continue_vs_size(base_cont: float, mdf: float) -> float:
+    """Their continue vs a typical raise, shifted onto a shove's price.
+
+    Loose players (high ``base_cont``) still continue more than nits; the
+    pot odds just bind. Against a 100bb jam a station who flats 3-bets
+    continues around 10%; a nit who folds them continues around 3%.
+    """
+    usual_mdf = 1.0 / (1.0 + USUAL_PRE_RAISE_POT)
+    looseness = base_cont / TYPICAL_THREE_BET_CONTINUE
+    price = max(mdf, usual_mdf * 0.12)
+    return _clamp(price * looseness * SHOVE_CONTINUE_LIVE, 0.03, 0.40)
+
+
+def _why_fold_continue(cont, *, shove, req_eq, level, short, cont_why) -> str:
+    if shove:
+        return (f"folds — outside the ~{cont:.0%} they continue vs this size"
+                f" ({req_eq:.0%} pot odds)")
+    if short:
+        return f"folds — outside the ~{cont:.0%} that continue at this depth"
+    if level <= 1:
+        return f"folds — outside the ~{cont:.0%} that {cont_why}"
+    if level == 2:
+        return f"folds — outside the ~{cont:.0%} they continue vs a 3-bet"
+    if level == 3:
+        return f"folds — outside the ~{cont:.0%} they continue vs a 4-bet"
+    return f"folds — outside the ~{cont:.0%} they continue vs a shove"
+
+
+def _why_call_continue(cont, *, shove, req_eq, cont_why) -> str:
+    if shove:
+        return (f"calls — they continue ~{cont:.0%} vs this size"
+                f" ({req_eq:.0%} pot odds)")
+    return f"calls — {cont_why}, roughly their top {cont:.0%}"
 
 
 def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -> tuple[str, int, str]:
@@ -705,6 +812,15 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
             rr_gate, rr_label = 0.99, f"{level + 2}-bets"
             rr_to = lg.max_raise_to
             cont, cont_why = 0.02, "calls the shove"
+        _, _, mdf, req_eq = _price(hand, lg)
+        shove = _facing_shove(hand, seat, lg)
+        if shove:
+            # fold_to_three_bet (and bb_defend vs an open-jam) pool sizes.
+            # A shove is a different price; shift the continue cut onto it
+            # so a 43% 3-bet continuer is not a 43% jam continuer.
+            cont = _continue_vs_size(cont, mdf)
+            cont_why = "continue vs this size"
+        rr_freq = 1 - rr_gate
         # The raise gate is read on the open ordering, the continue gate on the
         # defend ordering, so each is staged against the ordering it was
         # measured on -- mixing them would narrow the range by the wrong key.
@@ -726,13 +842,18 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
             else:
                 known = _sampled(profile, "fold_to_four_bet")
             no_flat = not known
+        fold_why = _why_fold_continue(
+            cont, shove=shove, req_eq=req_eq, level=level, short=short,
+            cont_why=cont_why)
+        call_why = _why_call_continue(
+            cont, shove=shove, req_eq=req_eq, cont_why=cont_why)
         if no_flat and lg.can_raise:
             if _over(strength, rr_gate, rng):
                 _keep(hand, seat, _ORDER_OPEN, [(rr_gate, 1.0)])
                 _, to = _raise_or_jam(hand, seat, lg, lg.max_raise_to)
                 return ("raise", to,
-                        f"shoves { _remain_bb(hand, seat):.0f}bb — {rr_label} at this depth, "
-                        f"no flatting {THREEBET_OR_FOLD_BB:.0f}bb")
+                        f"shoves { _remain_bb(hand, seat):.0f}bb — {rr_label}, "
+                        f"no flatting { _remain_bb(hand, seat):.0f}bb")
             if _over(call_s, 1 - cont, rng):
                 order = _ORDER_DEFEND if level <= 1 else _ORDER_OPEN
                 top = rr_gate if order is _ORDER_OPEN else 1.0
@@ -740,28 +861,29 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
                 _, to = _raise_or_jam(hand, seat, lg, lg.max_raise_to)
                 return ("raise", to,
                         f"shoves { _remain_bb(hand, seat):.0f}bb — the {cont:.0%} that "
-                        f"would continue, getting it in")
+                        f"would continue vs this size, getting it in")
             if lg.can_check:
                 return ("check", 0, "checks")
-            return ("fold", 0, f"folds — outside the ~{cont:.0%} that continue at this depth")
+            return ("fold", 0, fold_why)
         if lg.can_raise and _over(strength, rr_gate, rng):
             _keep(hand, seat, _ORDER_OPEN, [(rr_gate, 1.0)])
             _, to = _raise_or_jam(hand, seat, lg, rr_to)
-            # The blind is the 1-bet and an open is the 2-bet, so raising at
-            # `level` makes an (level + 2)-bet -- which is what rr_label
-            # already says ("3-bets" facing an open). The reason said one
-            # less and contradicted the label in the same sentence.
-            return ("raise", to, f"{rr_label} to {to} — a premium at {level + 2}-bet depth")
+            if to == lg.max_raise_to:
+                return ("raise", to,
+                        f"shoves { _remain_bb(hand, seat):.0f}bb — {rr_label}, "
+                        f"about {rr_freq:.0%} of their range here")
+            return ("raise", to,
+                    f"{rr_label} to {to} — about {rr_freq:.0%} of their range here")
         if lg.can_call and _over(call_s, 1 - cont, rng):
             # Continuing without raising is the band below the raise cut: the
             # hands above it took the other branch.
             order = _ORDER_DEFEND if level <= 1 else _ORDER_OPEN
             top = rr_gate if order is _ORDER_OPEN else 1.0
             _keep(hand, seat, order, [(1 - cont, max(top, 1 - cont))])
-            return ("call", 0, f"{cont_why} — roughly their top {cont:.0%} facing this")
+            return ("call", 0, call_why)
         if lg.can_check:
             return ("check", 0, "checks")
-        return ("fold", 0, f"folds — outside the ~{cont:.0%} that continue at this depth")
+        return ("fold", 0, fold_why)
 
     street = STREETS[hand.street]
     # Two measures, because postflop asks two different questions and the old
@@ -776,8 +898,14 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
     rs = _ranges(hand)
     cache = rs.board_cache(hand.board)
     board_order = cache.play
-    strength = _rank(hand, seat, board_order, hand.board)
+    strength = _rank_hi(hand, seat, board_order, hand.board)
     absolute = rs.board_percentile(s.hole, hand.board)
+    monster = _is_monster(hand, seat)
+    if monster:
+        # Full house+ is the top of the board. A frequency that was counted
+        # over air-heavy spots does not get to dump it, and playability
+        # ranking does not get to check it back.
+        strength = 1.0
     has_init = hand.initiative == seat
     ipo = _ipo(hand, seat)
     delayed = has_init and seat in getattr(hand, "declined_initiative", ())
@@ -807,7 +935,7 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
             # get combo draws all-in and leave a set calling -- the opposite
             # of the street. Made-hand strength is the right cut here.
             board_order = cache.score
-            strength = _rank(hand, seat, board_order, hand.board)
+            strength = 1.0 if monster else _rank_hi(hand, seat, board_order, hand.board)
             raise_f = _chain(profile,
                              [f"raise_vs_bet:{street}:{ipo}", f"raise_vs_bet:{street}"],
                              POOL_RAISE_VS_BET, 12, vs=vs)
@@ -840,14 +968,14 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
                 _, to = _raise_or_jam(hand, seat, lg, hand.bet + int(round(frac * hand.pot)))
                 return ("raise", to,
                         f"re-raises for value — the top {1 - value_bar:.0%} of the range that continues here")
-            if _over(strength, 1 - defend, rng) and (not price_gate or absolute >= req_eq):
-                _keep(hand, seat, board_order, [(1 - defend, value_bar)], hand.board)
+            if monster or (_over(strength, 1 - defend, rng) and (not price_gate or absolute >= req_eq)):
+                _keep(hand, seat, board_order, [(1 - defend, 1.0)], hand.board)
                 return ("call", 0,
-                        f"calls — {depth}; they raise ~{raise_f:.0%} here, so the top "
-                        f"{defend:.0%} continues")
+                        f"calls — {depth}; they continue ~{defend:.0%} vs this size"
+                        + (f" ({req_eq:.0%} pot odds)" if steep else ""))
             return ("fold", 0,
-                    f"folds — {depth}; below the top {defend:.0%} that continues"
-                    + (f", and {req_eq:.0%} pot odds do not rescue one pair" if price_gate else ""))
+                    f"folds — {depth}; outside the ~{defend:.0%} they continue vs this size"
+                    + (f" ({req_eq:.0%} pot odds)" if steep or price_gate else ""))
         # level 1: their fold number is the continue cut. MDF and pot odds
         # interpolate a thin or missing number; they do not veto a sampled one.
         called_prev = getattr(hand, "called_prev", set())
@@ -910,6 +1038,8 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
                 raise_f = max(raise_f, xr)
         raise_cap = RAISE_VALUE_CAP.get(street, 0.06)
         polar = _polar_bet(strength, raise_f, raise_cap)
+        if monster and polar != "bluff":
+            polar = "value" if lg.can_raise else polar
         if lg.can_raise and polar:
             _keep(hand, seat, board_order, _polar_bands(raise_f, raise_cap), hand.board)
             # `raise_ratio` is measured as to_amount / to_call, a ratio whose
@@ -926,23 +1056,17 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
             how = "for value" if polar == "value" else "as a bluff"
             return ("raise", to, f"raises {how} — polar vs a {street} bet, ~{raise_f:.0%}")
         continue_frac = _clamp(1 - fold_f, 0.02, 0.98)
-        # Polar raises take both ends; the call band is the middle.
-        value_frac, bluff_frac = _polar_split(raise_f, raise_cap)
-        call_lo = max(bluff_frac, 1 - continue_frac)
-        call_hi = 1 - value_frac
-        clears = _over(strength, 1 - continue_frac, rng)
+        clears = monster or _over(strength, 1 - continue_frac, rng)
         # A sampled fold rate is an average across the sizes they faced. Even
         # after the MDF shift, a station's 15% fold-vs-bet called A-high off a
         # jam: the frequency cut said "top 40%" and pot odds never got a vote.
         # Overbets and all-ins always need the price. Playability (not made-
         # hand percentile) is the proxy so a flush draw still continues.
-        priced = (not steep) or strength >= req_eq
-        if clears and priced and (fold_measured or absolute >= req_eq):
-            if call_hi > call_lo:
-                _keep(hand, seat, board_order, [(call_lo, call_hi)], hand.board)
-            else:
-                _keep(hand, seat, board_order,
-                      [(1 - continue_frac, 1 - raise_f)], hand.board)
+        priced = monster or (not steep) or strength >= req_eq
+        if clears and priced and (monster or fold_measured or absolute >= req_eq):
+            # A call does not deny the nuts. Keep the whole continue slice,
+            # including value that mixed a call or could not raise.
+            _keep(hand, seat, board_order, [(1 - continue_frac, 1.0)], hand.board)
             return ("call", 0,
                     f"calls — they continue ~{continue_frac:.0%} vs this size"
                     + ("" if fold_measured else f", and this clears the {req_eq:.0%} pot odds"))
@@ -969,6 +1093,8 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
             fire = "c-bet"
         cap = _street_value_cap(profile, street, cbet_f, VALUE_CAP.get(street, 0.45))
         polar = _polar_bet(strength, cbet_f, cap)
+        if monster and polar != "bluff":
+            polar = "value"
         if lg.can_raise and polar:
             _keep(hand, seat, board_order, _polar_bands(cbet_f, cap), hand.board)
             frac = _bet_frac(profile, street, rng, 0.6, (pot, tex, hilo, mw, ipo))
@@ -994,6 +1120,8 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
         check_why = f"checks — not a hand they stab here (stabs ~{lead_f:.0%})"
         cap = _street_value_cap(profile, street, lead_f, VALUE_CAP.get(street, 0.45))
     polar = _polar_bet(strength, lead_f, cap)
+    if monster and polar != "bluff":
+        polar = "value"
     if lg.can_raise and lead_f > 0.02 and polar:
         _keep(hand, seat, board_order, _polar_bands(lead_f, cap), hand.board)
         frac = _bet_frac(profile, street, rng, 0.55, (pot, tex, hilo, mw, ipo))

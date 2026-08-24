@@ -101,11 +101,12 @@ class Game:
         book = who.at(len(h.seats)) if isinstance(who, Villain) else who
         kind, amount, reason = decide(h, seat, book, self.rng,
                                       self.names[seat])
+        opening = h.street > 0 and h.bet == 0 and kind == "raise"
         h.act(kind, amount)
         if h.over:
             self._bank()
         return {"seat": seat, "name": self.names[seat], "action": kind,
-                "amount": amount, "reason": reason}
+                "amount": amount, "reason": reason, "opening": opening}
 
     def act(self, kind: str, amount: int = 0) -> None:
         if self.hand is None or self.hand.over or self.hand.to_act != self.hero_seat:
@@ -272,7 +273,12 @@ class Game:
         }
 
     def _range_review(self) -> dict:
-        """What each villain can still hold, for the post-hand panel."""
+        """What each villain still in the pot can hold, for the post-hand panel.
+
+        Folded seats are out: listing a preflop folder's junk (or a river
+        folder's tens) as "what they can still hold" is how QT on a ten-high
+        board showed up next to a fold.
+        """
         h = self.hand
         rs = getattr(h, "_ranges", None)
         if rs is None:
@@ -280,11 +286,12 @@ class Game:
         out = {}
         board = h.board or None
         for i, s in enumerate(h.seats):
-            if i == self.hero_seat:
+            if i == self.hero_seat or s.folded:
                 continue
-            classes = rs.top_classes(i, 8, board)
-            if classes:
-                out[s.name] = [{"cls": n, "share": round(p, 3)} for n, p in classes]
+            rows = (rs.top_made(i, board, 8) if board and len(h.board) >= 3
+                    else rs.top_classes(i, 8, board))
+            if rows:
+                out[s.name] = [{"cls": n, "share": round(p, 3)} for n, p in rows]
         return out
 
 

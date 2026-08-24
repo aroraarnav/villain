@@ -26,7 +26,7 @@ from ..parsers import UnknownFormat
 from ..replay import replay
 from ..stats import VS_HERO
 from .assets import page, static
-from .heroview import _cached_hero_id, forget_hero, hero_begin, hero_payload, hero_status
+from .heroview import _cached_hero_id, forget_hero, hero_begin, hero_payload, hero_peek, hero_status
 from .jsonutil import encode as json_encode
 from .payloads import MIN_ROSTER_HANDS, profile_payload, roster_payload, tab_availability
 from .sessions import SESSIONS, SIM_GAMES, _reap_sessions, apply_answers, commit_session, parse_upload, question_payload, session_brief, session_payload
@@ -202,7 +202,7 @@ class Handler(BaseHTTPRequestHandler):
                     # request so the page can put a veil up first. It must not
                     # start anything: the whole point is to answer instantly.
                     if parse_qs(route.query).get("peek", ["0"])[0] == "1":
-                        return self._send(200, {"status": hero_status(store)})
+                        return self._send(200, hero_peek(store))
                     # Never block the request on the build. A cold hero is
                     # ~90s of model fitting; the page asks again rather than
                     # holding a socket open and showing nothing.

@@ -167,15 +167,21 @@ def build_dataset(hands: list[Hand], progress=None) -> list[Row]:
     return rows
 
 
-def fit(rows: list[Row], random_state: int = 0) -> StrengthModel:
-    """Fit the population model and each player's residual against it."""
+def fit(rows: list[Row], random_state: int = 0, progress=None) -> StrengthModel:
+    """Fit the population model and each player's residual against it.
+
+    ``progress(done, total)`` counts cross-validation folds plus the final
+    fit. Those are the steps that take the time; inventing a hand count for
+    them would be a bar that moves for a reason the work does not share.
+    """
     if len(rows) < MIN_ROWS:
         raise NotEnoughData(
             f"need {MIN_ROWS} labeled rows to fit a strength model, have {len(rows)}; "
             "keep importing sessions")
 
+    from sklearn.base import clone
     from sklearn.ensemble import GradientBoostingRegressor
-    from sklearn.model_selection import cross_val_predict
+    from sklearn.model_selection import KFold
 
     x = np.array([r.features for r in rows], dtype=float)
     y = np.array([r.strength for r in rows], dtype=float)
@@ -185,8 +191,23 @@ def fit(rows: list[Row], random_state: int = 0) -> StrengthModel:
         subsample=0.85, random_state=random_state)
     # Residuals come from out-of-fold predictions: a player's read must not be
     # measured against a model that already memorised their hands.
-    out_of_fold = cross_val_predict(model, x, y, cv=min(5, max(2, len(rows) // 60)))
+    # Same splitter ``cross_val_predict(cv=n)`` uses for a regressor --
+    # shuffling here would change every residual and every fold grade.
+    n_splits = min(5, max(2, len(rows) // 60))
+    cv = KFold(n_splits=n_splits)
+    steps = n_splits + 1
+    out_of_fold = np.empty(len(y))
+    for i, (train_idx, test_idx) in enumerate(cv.split(x)):
+        if progress is not None:
+            progress(i, steps)
+        fold_model = clone(model)
+        fold_model.fit(x[train_idx], y[train_idx])
+        out_of_fold[test_idx] = fold_model.predict(x[test_idx])
+    if progress is not None:
+        progress(n_splits, steps)
     model.fit(x, y)
+    if progress is not None:
+        progress(steps, steps)
 
     residuals: dict[Line, list[float]] = {}
     for row, predicted in zip(rows, out_of_fold):

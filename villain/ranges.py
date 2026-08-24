@@ -94,6 +94,23 @@ def _within_pct(w: np.ndarray, order: np.ndarray) -> np.ndarray:
     return (below[inv] + group[inv] / 2.0) / total
 
 
+def _above_frac(w: np.ndarray, order: np.ndarray) -> np.ndarray:
+    """Share of ``w`` that strictly outranks each combo.
+
+    This is the cut "top X%" actually means when a made hand is a pile:
+    every ten on T-T-9-9-x is the same boat, and the midpoint of that pile
+    is the middle of the range. Weight *above* the pile is ~0, so the whole
+    pile is in the top of the range.
+    """
+    total = w.sum()
+    if total <= 0:
+        return np.zeros(N_COMBOS)
+    uniq, inv = np.unique(order, return_inverse=True)
+    group = np.bincount(inv, weights=w, minlength=len(uniq))
+    above = np.cumsum(group[::-1])[::-1] - group
+    return above[inv] / total
+
+
 def _draw_bonus(rows: np.ndarray, board: np.ndarray) -> np.ndarray:
     """Playability bump so a flush draw is not ranked with 72o.
 
@@ -259,24 +276,56 @@ class Ranges:
         w = self.live_weights(seat, board)
         return float(_within_pct(w, order)[index_of(hole)])
 
+    def better_frac(self, seat: int, hole, order: np.ndarray,
+                    board: list[int] | None = None) -> float:
+        """Share of this seat's range that strictly outranks ``hole``.
+
+        Percentile-within-range puts a tie at its midpoint, which is right
+        for not slicing a 6-combo pair in half and wrong for a made hand
+        that half the range shares. Every ten on a double-paired ten board
+        is the same boat; the midpoint of that pile is ~0.6, and a 21%
+        continue cut folds it. The weight *above* the hand does not: if
+        nothing in the range beats it, the whole pile continues.
+        """
+        w = self.live_weights(seat, board)
+        total = float(w.sum())
+        if total <= 0:
+            return 0.0
+        return float(_above_frac(w, order)[index_of(hole)])
+
     def narrow(self, seat: int, order: np.ndarray, bands,
-               board: list[int] | None = None) -> None:
+               board: list[int] | None = None, keep_hole=None) -> None:
         """Keep only the percentile ``bands`` of this seat's range.
 
         ``bands`` is a list of ``(lo, hi)`` pairs in within-range percentile
         terms -- a value bet keeps ``[(1 - f, 1.0)]``, a polarised bet keeps
         the value slice and the bluff slice together, and a call keeps the
-        band between folding and raising. Uses the same percentile convention
-        as :meth:`percentile`, so a hand that cleared a gate is always inside
-        the band that gate kept.
+        band between folding and raising.
+
+        High bands (``hi >= 1``) use weight-above, not the midpoint
+        percentile: a made-hand tie that is the top of the range stays in
+        the top of the range. Low bands still use the midpoint, so a 70%
+        air pile is not all spent as a bluff.
+
+        ``keep_hole`` is the holding that just acted. Narrowing cannot
+        delete it -- they have it, regardless of which slice a frequency
+        said they would hold.
         """
         w = self.live_weights(seat, board)
         if w.sum() <= 0:
             return
         pct = _within_pct(w, order)
+        above = _above_frac(w, order)
         keep = np.zeros(N_COMBOS, dtype=bool)
         for lo, hi in bands:
-            keep |= (pct >= lo) & (pct <= hi if hi >= 1.0 else pct < hi)
+            if hi >= 1.0:
+                keep |= above <= (1.0 - lo) + 1e-12
+            elif lo <= 0.0:
+                keep |= pct < hi
+            else:
+                keep |= (above <= (1.0 - lo) + 1e-12) & (pct < hi)
+        if keep_hole is not None:
+            keep[index_of(keep_hole)] = True
         narrowed = np.where(keep, w, 0.0)
         if narrowed.sum() <= 0:                 # never leave a seat with nothing
             return
@@ -293,6 +342,24 @@ class Ranges:
         for i, name in enumerate(CLASS_NAMES):
             if w[i] > 0:
                 shares[name] += float(w[i])
+        ranked = sorted(shares.items(), key=lambda kv: -kv[1])[:n]
+        return [(name, wt / total) for name, wt in ranked]
+
+    def top_made(self, seat: int, board: list[int], n: int = 8) -> list[tuple[str, float]]:
+        """The heaviest *made* hands still in this seat's range.
+
+        Preflop class names on a paired board are how QTo showed up as the
+        thing they folded -- it was tens full. The review has to say that.
+        """
+        from .cards import describe
+        w = self.live_weights(seat, board)
+        total = float(w.sum())
+        if total <= 0:
+            return []
+        scores = self.board_cache(board).score
+        shares: dict[str, float] = defaultdict(float)
+        for i in np.nonzero(w > 0)[0]:
+            shares[describe(int(scores[i]))] += float(w[i])
         ranked = sorted(shares.items(), key=lambda kv: -kv[1])[:n]
         return [(name, wt / total) for name, wt in ranked]
 

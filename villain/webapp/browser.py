@@ -138,9 +138,9 @@ def build_hero(progress=None) -> dict:
     that takes minutes, and an HTTP-shaped interface has nowhere to put it. The
     worker hands in a JavaScript function; Python calls it as the walk goes.
 
-    ``progress(done, total, phase)``. A total of zero means the phase cannot be
-    counted -- fitting the trees, where the only true thing to report is that
-    it is still going.
+    ``progress(done, total, phase)``. A total of zero means this phase has
+    nothing honest to count. Walks over hands send a hand count; fitting
+    sends the cross-validation fold count.
     """
     from ..db import Store, consume_cache_dirty
     from .heroview import consume_hero_dirty, hero_payload

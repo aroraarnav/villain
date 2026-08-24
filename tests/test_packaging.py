@@ -67,3 +67,4 @@ def test_the_files_the_loaders_name_are_really_there():
     assert GLOSSARY.is_file(), GLOSSARY
     assert PLAYBOOK.is_file(), PLAYBOOK
     assert (ASSETS / "app.css").is_file()
+    assert (ASSETS / "favicon.svg").is_file()

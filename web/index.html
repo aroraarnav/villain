@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Villain</title>
+<link rel="icon" href="favicon.svg?v=BUILD_STAMP" type="image/svg+xml">
+<link rel="apple-touch-icon" href="favicon.svg?v=BUILD_STAMP">
 <meta name="description" content="Reads poker hand histories and tells you how to beat the people you play against.">
 <link rel="canonical" href="https://villain.aroraarnav.com/">
 <meta property="og:type" content="website">
@@ -83,8 +85,8 @@
     width: 2.9rem; height: 2.9rem; border-radius: .8rem; flex: none;
     background: var(--red); color: var(--bg); padding: .32rem;
   }
-  #boot p.sub { color: var(--muted); margin: 0 0 1.5rem; }
-  #boot.gate p.sub { margin: 0 0 1.75rem; }
+  #boot p.sub { color: var(--muted); margin: 0 0 1.15rem; }
+  #boot.gate p.sub { margin: 0 0 1.25rem; }
   #step { color: var(--ink-dim); min-height: 1.4em; }
   #bar { height: 4px; border-radius: 4px; background: var(--line); margin: 1.2rem 0 .4rem; overflow: hidden; }
   #bar > i { display: block; height: 100%; width: 0; background: var(--red); transition: width .3s ease; }
@@ -115,7 +117,7 @@
   #gate button:disabled { opacity: .6; cursor: default; }
   #gate .or {
     display: flex; align-items: center; gap: .75rem;
-    color: var(--mark-1); font-size: .74rem; margin: 1.25rem 0;
+    color: var(--mark-1); font-size: .74rem; margin: .9rem 0;
     text-transform: lowercase;
   }
   #gate .or::before, #gate .or::after {
@@ -125,13 +127,23 @@
     background: transparent; color: var(--ink-dim); border-color: var(--edge);
     font-weight: 500; width: 100%; min-width: 0;
   }
-  #gate .ghost:hover { background: transparent; border-color: var(--muted); color: var(--ink); }
-  #gate .why { color: var(--mark-1); font-size: .78rem; margin: 1.35rem 0 0; }
-  #gate .said { color: var(--muted); font-size: .84rem; margin: .7rem 0 0; }
+  #gate button.ghost:hover:not(:disabled) {
+    background: transparent; border-color: var(--muted); color: var(--ink);
+  }
+  #gate .text {
+    display: none; width: auto; min-width: 0; margin: .15rem auto 0;
+    padding: .4rem .7rem; border: none; background: none;
+    color: var(--muted); font-weight: 500; font-size: .84rem;
+  }
+  #gate button.text:hover:not(:disabled) {
+    background: none; border: none; color: var(--ink);
+  }
+  #gate .why { color: var(--mark-1); font-size: .78rem; margin: 1rem 0 0; }
+  #gate .said { color: var(--muted); font-size: .84rem; margin: .65rem 0 0; }
   #gate .said:empty { display: none; }
   #gate .said.bad { color: var(--danger); }
   #gate .said.ok { color: var(--ink-dim); }
-  #gate .loading { color: var(--danger); font-size: .78rem; margin-top: 1.25rem; }
+  #gate .loading { color: var(--danger); font-size: .78rem; margin-top: 1rem; }
 
   /* Sending lives in the button, not as a second status under the form. */
   #gate .spin {
@@ -141,12 +153,19 @@
   }
   #boot.sending #gate .spin { display: block; }
   #boot.sending #gate button:disabled { opacity: 1; }
+  /* After the link goes out, the form is done. What remains is wait, go
+     back and fix the address, or look at the demo instead. */
   #boot.sent #signin, #boot.sent .or { display: none; }
+  #boot.sent .said {
+    margin: 0 0 1.2rem; font-size: .95rem; color: var(--ink); line-height: 1.45;
+  }
+  #boot.sent .said.ok { color: var(--ink); }
+  #boot.sent #back { display: inline-flex; }
   @keyframes gatespin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { #gate .spin { animation-duration: 2.4s; } }
   @media (max-width: 440px) {
     #gate form { flex-direction: column; }
-    #gate button { width: 100%; }
+    #gate button:not(.text) { width: 100%; }
   }
 </style>
 </head>
@@ -166,6 +185,7 @@
     <p class="said" id="said" role="status"></p>
     <div class="or">or</div>
     <button type="button" class="ghost" id="demo">View the demo</button>
+    <button type="button" class="text" id="back">Back</button>
     <p class="why">Hands are parsed in your browser, never uploaded. The demo is read-only.</p>
     <p class="loading" id="loading" hidden></p>
   </div>

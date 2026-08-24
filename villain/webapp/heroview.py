@@ -64,7 +64,7 @@ def _hero_model(store: Store, progress=None, hands=None):
 #: Bump whenever _build_hero_payload's returned shape changes, so an old
 #: cache file from a previous version of this module is a miss rather than a
 #: served-stale response with fields the current frontend does not expect.
-_HERO_CACHE_VERSION = 7
+_HERO_CACHE_VERSION = 9
 
 
 def forget_hero(store: Store) -> None:
@@ -146,6 +146,12 @@ def _hero_disk_cache_save(store: Store, hero_id: int | None, hand_count: int,
 #: instead of queueing behind the lock for a minute and a half.
 _HERO_BUILDING: set = set()
 
+#: Live ``(done, total, phase)`` for an in-flight build, so a peek can drive
+#: the same counted veil the in-process build reports. Without this, a local
+#: ``villain test`` answered 202, the page dropped the veil, and the loader
+#: became a static "this page will appear" with no bar.
+_HERO_PROGRESS: dict = {}
+
 #: Whether this interpreter can start a thread at all. Pyodide cannot, and the
 #: browser build runs the same server module, so "start it in the background
 #: and poll" has nowhere to run there. Probed once and remembered.
@@ -184,6 +190,17 @@ def hero_status(store: Store, hero_id: int | None = None) -> str:
     return "ready" if hit else "cold"
 
 
+def hero_peek(store: Store, hero_id: int | None = None) -> dict:
+    """What ``GET /api/hero?peek=1`` returns: status, plus progress if building."""
+    status = hero_status(store, hero_id)
+    out = {"status": status}
+    progress = _HERO_PROGRESS.get((str(store.path), hero_id))
+    if progress is not None:
+        done, total, phase = progress
+        out.update(done=done, total=total, phase=phase)
+    return out
+
+
 def hero_begin(store: Store, hero_id: int | None = None) -> bool:
     """Start the build on a background thread. True if one was started here.
 
@@ -199,16 +216,21 @@ def hero_begin(store: Store, hero_id: int | None = None) -> bool:
     if not threads_work():
         return False                   # caller builds inline; see server.py
     _HERO_BUILDING.add(key)
+    _HERO_PROGRESS[key] = (0, 0, "starting")
     path = store.path
+
+    def report(done, total, phase):
+        _HERO_PROGRESS[key] = (int(done), int(total), str(phase))
 
     def run():
         try:
             with Store(path) as own:
-                hero_payload(own, hero_id)
+                hero_payload(own, hero_id, progress=report)
         except Exception:
             pass                       # a failed build must not wedge the flag
         finally:
             _HERO_BUILDING.discard(key)
+            _HERO_PROGRESS.pop(key, None)
 
     try:
         threading.Thread(target=run, name="hero-build", daemon=True).start()
@@ -217,6 +239,7 @@ def hero_begin(store: Store, hero_id: int | None = None) -> bool:
         # otherwise leave the key in _HERO_BUILDING with no `finally` to clear
         # it -- and every later request would be told "building" forever.
         _HERO_BUILDING.discard(key)
+        _HERO_PROGRESS.pop(key, None)
         return False
     return True
 
@@ -326,35 +349,50 @@ def _build_hero_payload(store: Store, hero_id: int | None, progress=None) -> dic
     hero_key = str(hero_id)
     hero_hands = [hand for hand in all_hands
                   if any(str(seat.player_id) == hero_key for seat in hand.seats)]
-    # Three walks that each call strength_by_street. The first is the slow
-    # one (cold cache); the others hit the memo. One bar across all three,
-    # so finishing the first does not look like the whole wait is over.
-    n_hero = len(hero_hands) or 1
-    def measuring(part):
-        if progress is None:
-            return None
-        def inner(done, total, _part=part):
-            progress(_part * n_hero + done, 3 * n_hero, "measuring")
-        return inner
-    if progress is not None:
-        progress(0, 3 * n_hero, "measuring")
     ranges = preflop_range(hero_hands, hero_id)
     seen, total = hero_visibility(hero_hands, hero_id)
-    sizing = sizing_tell(hero_hands, hero_id, progress=measuring(0))
-    timing = timing_tell(hero_hands, hero_id, progress=measuring(1))
-    narrowing = range_narrowing(hero_hands, hero_id, progress=measuring(2))
+    n_hero = len(hero_hands) or 1
+
+    def walked(phase, parts):
+        """One bar across ``parts`` equal walks of hero's hands.
+
+        After the model has scored the database, each leftover walk is a
+        similar cache hit -- splitting them into fake thirds of unequal
+        cost was the bar that jumped 0-33% over minutes and 33-100% in
+        a blink. Before the model, the first walk is the cold one and
+        this is still the least-wrong count we have.
+        """
+        def part(i):
+            if progress is None:
+                return None
+            def inner(done, total, _i=i):
+                progress(_i * n_hero + done, parts * n_hero, phase)
+            return inner
+        return part
 
     try:
+        # Score every known hand, then fit. That is the long countable
+        # work; doing the hero-only walks first filled the strength cache
+        # for *your* hands and then "reading" still had the rest of the
+        # field to score -- two long bars, the first of them pretending
+        # three equal walks.
         model = _hero_model(store, progress=progress, hands=all_hands)
+        chunk = walked("grading", 5)
         if progress is not None:
-            # Everything past the model -- grading hero's folds, sizing and
-            # timing -- is a second long stretch with nothing countable in it.
-            # Saying which part is running beats a spinner that never changes.
-            progress(0, 0, "grading")
-        report = fold_grades(hero_hands, hero_id, model)
-        missed_report = missed_value(hero_hands, hero_id, model)
+            progress(0, 5 * n_hero, "grading")
+        sizing = sizing_tell(hero_hands, hero_id, progress=chunk(0))
+        timing = timing_tell(hero_hands, hero_id, progress=chunk(1))
+        narrowing = range_narrowing(hero_hands, hero_id, progress=chunk(2))
+        report = fold_grades(hero_hands, hero_id, model, progress=chunk(3))
+        missed_report = missed_value(hero_hands, hero_id, model, progress=chunk(4))
         grade_error = None
     except NotEnoughData as exc:
+        chunk = walked("measuring", 3)
+        if progress is not None:
+            progress(0, 3 * n_hero, "measuring")
+        sizing = sizing_tell(hero_hands, hero_id, progress=chunk(0))
+        timing = timing_tell(hero_hands, hero_id, progress=chunk(1))
+        narrowing = range_narrowing(hero_hands, hero_id, progress=chunk(2))
         report = missed_report = None
         grade_error = str(exc)
 

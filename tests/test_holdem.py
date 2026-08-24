@@ -187,3 +187,33 @@ def test_a_three_bet_pot_is_tagged_3bp():
     assert h.opener == 0
 
 
+def test_opening_an_unbet_street_logs_as_a_bet():
+    h = Hand(_seats(200, 200), button=0, sb=1, bb=2, rng=np.random.default_rng(10))
+    h.act("call")
+    h.act("check")
+    assert h.street == 1
+    h.act("raise", 6)
+    assert h.log[-1].endswith("bets 6")
+    h.act("raise", 18)
+    assert h.log[-1].endswith("raises to 18")
+
+
+def test_the_hero_log_is_first_person():
+    """The subject is You; 'You calls' is not English."""
+    h = Hand([Seat("You", 200), Seat("Arav", 200)], button=0, sb=1, bb=2,
+             rng=np.random.default_rng(11))
+    h.hero_seat = 0
+    assert h.log[0] == "You post 1"
+    assert h.log[1] == "Arav posts 2"
+    h.act("call")
+    assert h.log[-1] == "You call"
+    h.act("check")
+    assert h.street == 1
+    h.act("check")                                 # Arav, third person
+    assert h.log[-1] == "Arav checks"
+    h.act("raise", 6)
+    assert h.log[-1] == "You bet 6"
+    h.act("fold")
+    assert "You win " in h.log[-1]
+
+
