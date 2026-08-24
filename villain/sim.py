@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 
 from .botplay import decide
-from .cards import card_text
+from .cards import card_text, describe, evaluate
 from .holdem import STREETS, Hand, Seat
 from .priors import regime as regime_of
 
@@ -244,6 +244,10 @@ class Game:
                 "net": ((h.winners or {}).get(i, 0) - s.hand_put) if h.over else 0,
                 "hole": [card_text(c) for c in s.hole] if reveal else None,
                 "all_hole": [card_text(c) for c in s.hole] if h.over else None,
+                # Only you: villains are face-down, so a made-hand label on
+                # them would be a tell. Empty preflop so the seat height does
+                # not jump when the flop names it.
+                "made": _made_name(s.hole, h.board) if i == self.hero_seat else None,
             })
         legal = None
         if not h.over and h.to_act == self.hero_seat:
@@ -261,6 +265,10 @@ class Game:
             "street": STREETS[h.street],
             "board": [card_text(c) for c in h.board],
             "pot": h.pot,
+            # In the middle of the table: only what has been gathered.
+            # This street's chips stay in front of the seats until the
+            # round closes, the way a live pot does not eat the bets.
+            "pot_mid": h.pot_settled,
             "button": self.button,
             "hero_seat": self.hero_seat,
             "seats": seats,
@@ -268,7 +276,7 @@ class Game:
             "showdown": showdown,
             "your_turn": (not h.over) and h.to_act == self.hero_seat,
             "legal": legal,
-            "log": h.log[-12:],
+            "log": list(h.log),
             "ranges": self._range_review() if h.over else None,
         }
 
@@ -293,6 +301,21 @@ class Game:
             if rows:
                 out[s.name] = [{"cls": n, "share": round(p, 3)} for n, p in rows]
         return out
+
+
+def _made_name(hole, board) -> str | None:
+    """Category of this hole on this board: pair, flush, full house, …
+
+    Needs five cards, so nothing until the flop. The evaluator already
+    scores a 5- or 6-card board; we do not pad.
+    """
+    if not hole or len(board) < 3:
+        return None
+    seven = np.concatenate([
+        np.array(hole, dtype=np.int64),
+        np.array(board, dtype=np.int64),
+    ])
+    return describe(int(evaluate(seven[None, :])[0]))
 
 
 def _stat(profile, key: str, min_opps: float = 20.0) -> float | None:

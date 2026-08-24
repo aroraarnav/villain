@@ -887,6 +887,46 @@ def test_does_not_check_back_a_boat_on_the_river():
     assert kind == "raise", why
 
 
+def test_the_mid_pot_waits_for_the_next_street():
+    """Bets this street sit in front of the seats, not in the pot pill."""
+    from villain.sim import Game
+    g = Game(["You", "Arav"], [None, _Prof()], 0, 200, 1, 2, seed=0)
+    st = g.state()
+    assert st["pot_mid"] == 0
+    assert st["pot"] == sum(s.street_put for s in g.hand.seats)
+    g.hand.pot_settled = 24
+    st = g.state()
+    assert st["pot_mid"] == 24
+    assert st["pot"] == 24 + sum(s.street_put for s in g.hand.seats)
+
+
+def test_the_hero_seat_names_the_made_hand_on_the_board():
+    """The plate has to say flush, not leave you to parse the hearts yourself."""
+    from villain.cards import card_id
+    from villain.sim import Game
+    g = Game(["You", "Arav"], [None, _Prof()], 0, 200, 1, 2, seed=0)
+    assert g.state()["seats"][0]["made"] is None
+    assert g.state()["seats"][1]["made"] is None
+    g.hand.seats[0].hole = (int(card_id("Ah")), int(card_id("Kh")))
+    g.hand.board = [int(card_id(c)) for c in ("Qh", "Jh", "9h")]
+    st = g.state()
+    assert st["seats"][0]["made"] == "flush"
+    assert st["seats"][1]["made"] is None
+    g.hand.seats[0].hole = (int(card_id("7c")), int(card_id("7d")))
+    g.hand.board = [int(card_id(c)) for c in ("7h", "2s", "2d")]
+    assert g.state()["seats"][0]["made"] == "full house"
+
+
+def test_the_sim_sends_the_whole_hand_log():
+    """Last-12 used to drop the blinds as soon as the flop got busy."""
+    from villain.sim import Game
+    g = Game(["You", "Arav"], [None, _Prof()], 0, 200, 1, 2, seed=0)
+    g.hand.log = [f"line {i}" for i in range(20)]
+    sent = g.state()["log"]
+    assert sent[0] == "line 0"
+    assert sent == g.hand.log
+
+
 def test_range_review_omits_players_who_already_folded():
     """'What they can still hold' is for seats still in the pot."""
     from villain.ranges import Ranges

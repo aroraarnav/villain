@@ -118,9 +118,20 @@
     font-variant-numeric: tabular-nums lining-nums;
   }
   .wrap { max-width: 1060px; margin: 0 auto; padding: var(--sp-5) 20px var(--sp-6); }
-  /* Simulate is a table, not a document: use the leftover viewport instead of
-     a 720px oval floating in a sea of panel. */
-  .wrap:has(.sim-panel) { max-width: 1200px; padding-bottom: var(--sp-4); }
+  /* Simulate is a table, not a document: lock it to the viewport so a board
+     or a growing log cannot introduce a page scroll, which is a jump. */
+  body:has(.sim-panel) { overflow: hidden; }
+  .wrap:has(.sim-panel) {
+    max-width: 1200px; height: 100vh; height: 100dvh;
+    padding-bottom: var(--sp-4); display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .wrap:has(.sim-panel) > header,
+  .wrap:has(.sim-panel) > nav { flex: none; }
+  .wrap:has(.sim-panel) > #view {
+    flex: 1 1 auto; min-height: 0; overflow: hidden;
+    display: flex; flex-direction: column;
+  }
   header { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
   /* Display: the one size reserved for the wordmark. A player's own name on
      their profile uses the same size (.hero) -- never both at once, and never
@@ -513,7 +524,7 @@
      and painting over the action bar. Percent placement is relative to this
      stage; the felt itself does not fill it. */
   .poker-table { position: relative; width: 100%; flex: 1 1 auto;
-                 min-height: 420px; }
+                 min-height: 0; }
   /* A deep, desaturated felt rather than a bright one. On a near-black page
      with a single warm accent, a saturated casino green was the loudest thing
      in the product and it was the backdrop -- this reads as a table without
@@ -525,12 +536,21 @@
     box-shadow: inset 0 0 0 9px #0a1b16, inset 0 0 70px rgba(0,0,0,.45),
                 0 24px 55px rgba(0,0,0,.5); }
   .table-center { position: absolute; left: 50%; top: 46%; transform: translate(-50%,-50%);
-    display: flex; flex-direction: column; align-items: center; gap: 12px; }
-  .pot-pill { background: rgba(0,0,0,.38); color: #fff; padding: 4px 15px; border-radius: 999px;
-    font-size: 14px; }
+    display: flex; flex-direction: column; align-items: center; gap: 12px;
+    /* Pot + board only. The countdown is absolutely under the board so
+       reserving it cannot lift the pot onto the top seat's chips. */
+    width: 230px; z-index: 3; }
+  .pot-pill { background: rgba(0,0,0,.38); color: #fff; padding: 0 15px; border-radius: 999px;
+    font-size: 14px; flex: none; height: 28px; line-height: 28px; box-sizing: border-box;
+    display: flex; align-items: center; gap: 0.4em; }
   .pot-pill b { font-family: var(--mono); letter-spacing: -0.02em;
                 font-variant-numeric: tabular-nums; }
-  .table-center .board { display: flex; gap: 5px; min-height: 44px; align-items: center; }
+  .table-center .board { display: flex; gap: 5px; height: 44px; min-height: 44px;
+                         align-items: center; justify-content: center; }
+  .table-center .board .card.big {
+    width: 42px; min-width: 42px; height: 40px; box-sizing: border-box;
+  }
+  .table-center .board .card.ghost { visibility: hidden; }
   .tseat { position: absolute; transform: translate(-50%,-50%); width: 118px; text-align: center; z-index: 2; }
   .tseat-cards { display: flex; gap: 3px; justify-content: center; min-height: 26px; margin-bottom: 4px; }
   .tseat-body { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 5px 8px; }
@@ -540,6 +560,14 @@
   .tseat.me .tseat-body { background: var(--hero-soft); }
   .tseat-name { font-weight: 600; font-size: 13px; display: flex; gap: 5px;
     justify-content: center; align-items: center; }
+  /* Always on the hero plate so flop/preflop stay the same height. */
+  .tseat-made {
+    display: block; font-size: 10px; font-weight: 600; letter-spacing: .05em;
+    text-transform: uppercase; color: var(--hero);
+    height: 16px; line-height: 16px; margin: 2px 0 1px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .tseat-made.blank { color: var(--muted); font-weight: 400; letter-spacing: 0; }
   .tseat-stack { font-family: var(--mono); font-size: 12px; letter-spacing: -0.02em;
                  font-variant-numeric: tabular-nums; color: var(--muted); }
   .dealer-btn { position: absolute; transform: translate(-50%,-50%); width: 22px; height: 22px;
@@ -556,12 +584,18 @@
   .cardback.sm { width: 21px; height: 29px; }
   .won-amt { color: var(--hero); font-weight: 600; }
   .won-amt.down { color: var(--red); }
-  .sim-panel { margin-bottom: 0; }
+  .sim-panel { margin-bottom: 0; flex: 1 1 auto; min-height: 0; overflow: hidden;
+               display: flex; flex-direction: column; }
   .sim-layout { display: grid; grid-template-columns: minmax(0, 1fr) 240px;
                 gap: var(--sp-4); align-items: stretch;
-                min-height: calc(100vh - 190px); }
-  @media (max-width: 780px) { .sim-layout { grid-template-columns: 1fr; min-height: 0; } }
-  .sim-main { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; min-height: 0; }
+                flex: 1 1 auto; min-height: 0; }
+  @media (max-width: 780px) {
+    body:has(.sim-panel) { overflow: auto; }
+    .wrap:has(.sim-panel) { height: auto; max-height: none; overflow: visible; }
+    .sim-layout { grid-template-columns: 1fr; min-height: 0; }
+    .poker-table { min-height: 360px; }
+  }
+  .sim-main { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; min-height: 0; overflow: hidden; }
   .sim-main .spread { flex: none; }
   .sim-side { border-left: 1px solid var(--line); padding-left: var(--sp-4);
               display: flex; flex-direction: column; align-items: stretch;
@@ -574,17 +608,24 @@
                                font-size: 12px; white-space: nowrap; }
   .sim-side #end-session { margin-top: var(--sp-2); align-self: stretch; }
   .sim-side .handlog {
-    flex: 1 1 auto; min-height: 180px; margin-top: var(--sp-2); width: 100%;
+    flex: 1 1 auto; min-height: 0; margin-top: var(--sp-2); width: 100%;
     display: flex; flex-direction: column;
     background: var(--inset); border: 1px solid var(--line); border-radius: 10px;
     overflow: hidden;
   }
   .sim-side .handlog-title {
     flex: none; font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
-    color: var(--muted); padding: 8px 12px 6px; border-bottom: 1px solid var(--line);
+    color: var(--muted); padding: 8px 12px 6px; border-bottom: 2px solid var(--edge);
   }
   .sim-side .handlog-body {
-    flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px 12px 8px;
+    flex: 1 1 auto; min-height: 0; overflow-y: scroll; padding: 4px 8px 8px 12px;
+    scrollbar-gutter: stable; scrollbar-width: thin;
+    scrollbar-color: var(--edge) transparent;
+  }
+  .sim-side .handlog-body::-webkit-scrollbar { width: 8px; }
+  .sim-side .handlog-body::-webkit-scrollbar-track { background: transparent; }
+  .sim-side .handlog-body::-webkit-scrollbar-thumb {
+    background: var(--edge); border-radius: 4px;
   }
   .sim-side .handlog .log-line {
     padding: 5px 0; border-bottom: 1px solid var(--line);
@@ -661,13 +702,16 @@
                font-variant-numeric: tabular-nums; min-width: 58px; color: var(--muted);
                flex: none; }
   button.act.commit { min-width: 7.6em; justify-content: center; text-align: center; white-space: nowrap; }
-  /* Next-hand countdown sits under the board, in the table-center stack. */
+  /* Next-hand countdown sits under the board. Out of the flex flow so
+     showing it cannot lift the pot into the top player's chips. */
   .deal-count {
-    text-align: center; pointer-events: none; flex: none;
-    color: rgba(255,255,255,.82); font-size: 11px; font-weight: 600;
+    position: absolute; left: 50%; top: 100%; transform: translateX(-50%);
+    margin-top: 12px; text-align: center; pointer-events: none;
+    height: 54px; color: rgba(255,255,255,.82); font-size: 11px; font-weight: 600;
     letter-spacing: .08em; text-transform: uppercase;
     text-shadow: 0 2px 14px rgba(0,0,0,.75);
   }
+  .deal-count.idle { visibility: hidden; }
   .deal-count b {
     display: block; margin-top: 2px; font-size: 36px; font-weight: 700;
     letter-spacing: -0.04em; color: #fff; line-height: 1;

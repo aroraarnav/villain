@@ -1955,9 +1955,9 @@ function renderTable(view, data) {
       <div class="poker-table" id="ptable">
         <div class="felt-oval"></div>
         <div class="table-center">
-          <div class="pot-pill">pot <b>${st.pot}</b></div>
+          <div class="pot-pill">pot <b>${st.pot_mid ?? st.pot}</b></div>
           <div class="board" id="board"></div>
-          <div class="deal-count" id="deal-count" hidden></div>
+          <div class="deal-count idle" id="deal-count" aria-hidden="true"></div>
         </div>
       </div>
       <div class="controls" id="controls"></div>
@@ -2004,6 +2004,9 @@ function renderTable(view, data) {
         <div class="tseat-name">${esc(s.name)}${
           s.is_hero && s.name.toLowerCase() !== "you"
             ? ' <span class="tag hero-tag">you</span>' : ""}</div>
+        ${s.is_hero ? `<div class="tseat-made${s.made ? "" : " blank"}">${
+          s.made ? esc(s.made) : "—"
+        }</div>` : ""}
         <div class="tseat-stack">${s.stack}${
           st.over && s.net ? ` <span class="won-amt${s.net < 0 ? " down" : ""}">${
             s.net > 0 ? "+" : ""}${s.net}</span>` : ""}</div>
@@ -2036,7 +2039,10 @@ function renderTable(view, data) {
       table.appendChild(chip);
     }
   });
-  $("#board").innerHTML = st.board.length ? st.board.map(c => cardHtml(c, true)).join("") : "";
+  const boardCards = st.board || [];
+  $("#board").innerHTML = [0, 1, 2, 3, 4].map(i =>
+    boardCards[i] ? cardHtml(boardCards[i], true)
+      : '<span class="card big ghost" aria-hidden="true"></span>').join("");
   const logEl = $("#handlog");
   logEl.innerHTML = (st.log || []).map(l =>
     `<div class="log-line ${logLineKind(l)}">${esc(formatLogLine(l))}</div>`).join("");
@@ -2094,8 +2100,9 @@ function paintDealCount() {
   const over = state.game && state.game.state && state.game.state.over;
   const counting = over && !state.revealed
     && !!(state.dealUntil || (state.clockHold && state.clockHold.dealUntil));
-  if (!counting) { el.hidden = true; return; }
-  el.hidden = false;
+  el.classList.toggle("idle", !counting);
+  el.setAttribute("aria-hidden", String(!counting));
+  if (!counting) return;
   el.innerHTML = `Next hand<b>${Math.max(dealSecsLeft(), 1)}</b>`;
 }
 
