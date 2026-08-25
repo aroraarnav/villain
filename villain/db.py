@@ -750,9 +750,12 @@ class Store:
         # Two phases worth reporting, because they are the two that take the
         # time: decoding every stored hand, then walking them for features.
         # Counted in hands rather than percent so the bar cannot claim a
-        # fraction the work does not have.
-        n_total = self.conn.execute(
-            "SELECT COUNT(*) AS c FROM hands").fetchone()["c"]
+        # fraction the work does not have -- and counted against the narrowed
+        # set when ``only`` is given, or a single-player rebuild reports
+        # itself against the whole database.
+        n_total = (len(wanted_ids) if wanted_keys is not None
+                   else self.conn.execute(
+                       "SELECT COUNT(*) AS c FROM hands").fetchone()["c"])
         _report(0, n_total, "reading hands")
         for seen, row in enumerate(self.conn.execute(query, params), 1):
             if seen % 500 == 0:
