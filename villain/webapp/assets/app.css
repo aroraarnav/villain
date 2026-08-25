@@ -560,6 +560,10 @@
   .tseat.me .tseat-body { background: var(--hero-soft); }
   .tseat-name { font-weight: 600; font-size: 13px; display: flex; gap: 5px;
     justify-content: center; align-items: center; }
+  .tseat-name .spinner { margin-left: 1px; }
+  /* Phone caption for the last action. Hidden on desktop — the speech
+     bubble carries the same words there, and showing both is a stutter. */
+  .tseat-act { display: none; }
   /* Always on the hero plate so flop/preflop stay the same height. */
   .tseat-made {
     display: block; font-size: 10px; font-weight: 600; letter-spacing: .05em;
@@ -590,10 +594,7 @@
                 gap: var(--sp-4); align-items: stretch;
                 flex: 1 1 auto; min-height: 0; }
   @media (max-width: 780px) {
-    body:has(.sim-panel) { overflow: auto; }
-    .wrap:has(.sim-panel) { height: auto; max-height: none; overflow: visible; }
     .sim-layout { grid-template-columns: 1fr; min-height: 0; }
-    .poker-table { min-height: 360px; }
   }
   .sim-main { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; min-height: 0; overflow: hidden; }
   .sim-main .spread { flex: none; }
@@ -730,6 +731,78 @@
   .sit-controls { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
   .sit-controls input { background: transparent; border: 1px solid var(--line);
     border-radius: 6px; color: var(--ink); padding: 5px 8px; width: 66px; font: inherit; }
+  /* Phone: keep the sim inside the viewport. Unlocking overflow here is how
+     the seats, the 188px bubbles, the action bar and the log became a page
+     you had to scroll to find your own cards. */
+  @media (max-width: 780px) {
+    .wrap:has(.sim-panel) {
+      padding: max(8px, env(safe-area-inset-top)) 10px
+               max(10px, env(safe-area-inset-bottom));
+    }
+    .wrap:has(.sim-panel) > header { gap: 8px; }
+    .wrap:has(.sim-panel) h1 { font-size: 18px; }
+    .wrap:has(.sim-panel) h1 .mark { width: 22px; height: 22px; }
+    .wrap:has(.sim-panel) .sub { display: none; }
+    .wrap:has(.sim-panel) > nav { margin-top: 6px; }
+    .wrap:has(.sim-panel) > nav button { padding: 6px 10px; font-size: 12px; }
+    .sim-panel { padding: 10px 12px; margin: 0; }
+    .sim-layout { gap: 8px; grid-template-rows: minmax(0, 1fr) auto; }
+    .sim-main { gap: 8px; }
+    .sim-main .spread h2 { font-size: 11px; }
+    .felt-oval { top: 13%; right: 11%; bottom: 17%; left: 11%; }
+    .poker-table { min-height: 0; }
+    .tseat { width: 92px; }
+    .tseat-name { font-size: 11px; }
+    .tseat-stack { font-size: 11px; }
+    .tseat-made { font-size: 9px; height: 14px; line-height: 14px; }
+    .tseat-cards { min-height: 22px; margin-bottom: 2px; }
+    .cardback.sm { width: 18px; height: 24px; }
+    .tseat-act {
+      display: block; font-size: 10px; font-weight: 700; letter-spacing: .02em;
+      color: var(--ink); margin: 1px 0 2px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .think-bubble { display: none; }
+    .table-center { width: 170px; gap: 8px; }
+    .table-center .board { height: 36px; min-height: 36px; gap: 3px; }
+    .table-center .board .card.big {
+      width: 32px; min-width: 32px; height: 34px; font-size: 13px; padding: 4px 5px;
+    }
+    .pot-pill { font-size: 12px; height: 24px; line-height: 24px; padding: 0 10px; }
+    .deal-count { margin-top: 6px; height: 40px; font-size: 10px; }
+    .deal-count b { font-size: 24px; }
+    .tbet { font-size: 11px; padding: 1px 7px; }
+    .dealer-btn { width: 18px; height: 18px; font-size: 10px; }
+    .controls {
+      flex-wrap: wrap; overflow: visible; gap: 6px; min-height: 0; padding: 0;
+    }
+    .controls-leave { order: 1; }
+    .controls > .cf-toggle { order: 1; }
+    .raise-wrap {
+      order: 2; flex: 1 1 100%; min-width: 0; width: 100%;
+    }
+    .raise-wrap input[type=range] { min-width: 0; flex: 1 1 72px; }
+    .presets { flex-wrap: wrap; }
+    .controls .commit { order: 3; flex: 1 1 auto; min-width: 0; }
+    .sim-side {
+      border-left: 0; border-top: 1px solid var(--line);
+      padding-left: 0; padding-top: 8px;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .sim-side .pnl-big { margin: 0; font-size: 18px; }
+    .sim-side .side-modes { margin: 0; }
+    .sim-side #end-session { margin: 0; }
+    .sim-side .handlog {
+      flex: none; min-height: 0; max-height: 88px; margin-top: 0;
+    }
+  }
+  @media (max-width: 780px) and (max-height: 700px) {
+    .sim-side .handlog { max-height: 56px; }
+  }
+  @media (max-width: 780px) and (max-height: 540px) {
+    .sim-side .handlog { display: none; }
+    .tseat-made { display: none; }
+  }
   .cards-row { display: inline-flex; gap: 3px; vertical-align: middle; }
   .card {
     display: inline-flex; align-items: center; gap: 1px;
@@ -932,6 +1005,7 @@
     border: 2px solid var(--line); border-top-color: var(--red);
     animation: spin .7s linear infinite;
   }
+  .spinner.sm { width: 12px; height: 12px; border-width: 1.5px; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
   /* button.act wraps by design (long leak labels); a toolbar button must not. */

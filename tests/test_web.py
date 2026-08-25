@@ -1419,6 +1419,48 @@ def test_unlink_route_404s_on_an_alias_that_is_not_there(tmp_path, hands):
     assert "no-such-account" in json.loads(body)["error"]
 
 
+def test_sim_paces_every_auto_action_the_same():
+    """Snap think times and check/fold used to skip the table.
+
+    A villain's ``think_ms`` could be 400ms next to an 8s tank, folds had a
+    shorter wait than everything else, and an armed check/fold fired on the
+    same paint as the bet it was answering. One 3s beat, shared by bots and
+    the auto-act, is what makes the action readable.
+    """
+    from pathlib import Path
+    app = (Path(__file__).resolve().parent.parent
+           / "villain" / "webapp" / "assets" / "app.js").read_text()
+    assert "const SIM_DELAY = 3000" in app
+    clock = app[app.index("function armSimClock"):app.index("function renderTable")]
+    assert "think_ms" not in clock
+    assert "cfArmed(st)" in clock
+    assert "fireCheckFold" in clock
+    controls = app[app.index("function renderControls"):]
+    controls = controls[:controls.index("\nfunction ", 1)]
+    assert "act(lg.can_check" not in controls
+    assert "checking…" in controls
+    assert "folding…" in controls
+    assert "spinner sm" in app
+    assert "think-bubble pending" not in app
+
+
+def test_simulate_stays_in_the_viewport_on_a_phone():
+    """Unlocking overflow at 780px is how the table became a scroll.
+
+    The seats sit on the rim, the action bar sits under them, and the log
+    used to stack underneath as a document. A phone then had to scroll to
+    find its own cards. The sim stays locked to the viewport; the layout
+    inside it has to fit.
+    """
+    from pathlib import Path
+    css = (Path(__file__).resolve().parent.parent
+           / "villain" / "webapp" / "assets" / "app.css").read_text()
+    assert "body:has(.sim-panel) { overflow: auto; }" not in css
+    assert "body:has(.sim-panel) { overflow: hidden; }" in css
+    assert ".tseat-act" in css
+    assert ".spinner.sm" in css
+
+
 def test_a_sitting_still_renders_after_a_player_is_deleted(tmp_path, hands):
     """End to end: /api/session-detail is what a delete used to take down."""
     db = tmp_path / "v.db"

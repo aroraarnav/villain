@@ -1753,7 +1753,12 @@ async function viewPlay() {
   };
 }
 
-const SIM_DELAY = 4000;                 // ~4s per action so you can watch it
+const SIM_DELAY = 3000;                 // one beat before every auto-action
+const SIM_COMPACT = window.matchMedia("(max-width: 780px)");
+SIM_COMPACT.addEventListener("change", () => {
+  if (state.game && state.tab === "play" && !state.analysis)
+    renderTable($("#view"), state.game);
+});
 let _actx = null;
 function ensureAudio() {
   try {
@@ -1914,23 +1919,19 @@ function armSimClock() {
   if (!state.game || state.paused || state.clockHold || state.analysis) return;
   if (state.tab !== "play") return;
   const st = state.game.state;
-  if (!st.over && !st.your_turn) {
-    if (state.stepUntil == null) {
-      let wait;
-      if (state.lastEvent && state.lastEvent.think_ms != null) {
-        wait = Math.max(400, Math.min(8000, state.lastEvent.think_ms));
-      } else {
-        wait = (state.lastEvent && state.lastEvent.action === "fold") ? 2000 : SIM_DELAY;
-      }
-      state.stepUntil = Date.now() + wait;
-    }
+  // Bots and an armed check/fold share one wait. Profile think times and a
+  // same-paint auto-fold made the table skip: a 400ms snap next to a long
+  // tank, then your cards in the muck the instant theirs hit the felt.
+  if (!st.over && (!st.your_turn || cfArmed(st))) {
+    if (state.stepUntil == null) state.stepUntil = Date.now() + SIM_DELAY;
     const left = Math.max(0, state.stepUntil - Date.now());
     const token = state.game.token;
     const gen = state.simGen;
     state.stepTimer = setTimeout(() => {
       state.stepUntil = null;
       if (gen !== state.simGen || !state.game || state.game.token !== token) return;
-      stepBots(token);
+      if (state.game.state.your_turn) fireCheckFold();
+      else stepBots(token);
     }, left);
   } else if (st.over && !state.revealed) {
     if (state.dealHand !== st.hand_no) {
@@ -1968,10 +1969,12 @@ function renderTable(view, data) {
       <div class="controls" id="controls"></div>
     </div>
     <div class="sim-side">
-      <div class="side-label">session P/L</div>
-      <div class="pnl-big ${pnl >= 0 ? "up" : "down"}">${pnl >= 0 ? "+" : ""}${pnl}</div>
-      <div class="small muted">${pnl >= 0 ? "+" : ""}${pnlBb} bb · ${st.hand_no} hands</div>
-      <div class="small muted" style="margin-top:3px">blinds ${st.sb}/${st.bb}</div>
+      <div class="sim-pnl">
+        <div class="side-label">session P/L</div>
+        <div class="pnl-big ${pnl >= 0 ? "up" : "down"}">${pnl >= 0 ? "+" : ""}${pnl}</div>
+        <div class="small muted">${pnl >= 0 ? "+" : ""}${pnlBb} bb · ${st.hand_no} hands</div>
+        <div class="small muted">blinds ${st.sb}/${st.bb}</div>
+      </div>
       <!-- Three session modes, one control shape. Two of them were checkboxes
            and the third (check/fold) a filled pill, which made "armed" mean two
            different things on one screen. They are all cf-toggles now: filled
@@ -1992,23 +1995,31 @@ function renderTable(view, data) {
     </div>
   </div></div>`;
   const table = $("#ptable");
+  const compact = SIM_COMPACT.matches;
+  const rx = compact ? 33 : 40, ry = compact ? 30 : 36;
   st.seats.forEach((s, i) => {
     const theta = Math.PI / 2 + (i / n) * 2 * Math.PI;   // you (0) at the bottom
     // Sit on the felt rim, inside the stage. 45/44 hung the hero through the
-    // bottom of the box and over the action bar.
-    const x = 50 + 40 * Math.cos(theta), y = 50 + 36 * Math.sin(theta);
+    // bottom of the box and over the action bar. Phone radii sit further in
+    // so a 92px plate still clears the controls.
+    const x = 50 + rx * Math.cos(theta), y = 50 + ry * Math.sin(theta);
     const seat = document.createElement("div");
+    const ev = state.lastEvent;
+    const thinking = s.to_act && !st.over && (!s.is_hero || cfArmed(st));
     seat.className = "tseat" + (s.is_hero ? " me hero-scope" : "")
       + (s.folded ? " folded" : "") + (s.to_act ? " acting" : "") + (s.won ? " won" : "");
     seat.style.left = x + "%"; seat.style.top = y + "%";
     const shownHole = (state.revealed && s.all_hole) ? s.all_hole : s.hole;
     const cards = shownHole ? shownHole.map(c => cardHtml(c, s.is_hero)).join("")
       : (s.folded ? "" : '<span class="cardback sm"></span><span class="cardback sm"></span>');
+    const acted = ev && ev.seat === i && !s.is_hero;
     seat.innerHTML = `<div class="tseat-cards">${cards}</div>
       <div class="tseat-body">
         <div class="tseat-name">${esc(s.name)}${
           s.is_hero && s.name.toLowerCase() !== "you"
-            ? ' <span class="tag hero-tag">you</span>' : ""}</div>
+            ? ' <span class="tag hero-tag">you</span>' : ""}${
+          thinking ? '<span class="spinner sm" aria-hidden="true"></span>' : ""}</div>
+        ${acted ? `<div class="tseat-act">${esc(actionText(ev))}</div>` : ""}
         ${s.is_hero ? `<div class="tseat-made${s.made ? "" : " blank"}">${
           s.made ? esc(s.made) : "—"
         }</div>` : ""}
@@ -2016,12 +2027,11 @@ function renderTable(view, data) {
           st.over && s.net ? ` <span class="won-amt${s.net < 0 ? " down" : ""}">${
             s.net > 0 ? "+" : ""}${s.net}</span>` : ""}</div>
       </div>`;
-    const ev = state.lastEvent;
-    if (ev && ev.seat === i && !s.is_hero) {
+    if (acted) {
       const why = (ev.reason || "").split("—").slice(1).join("—").trim();
       const bubble = document.createElement("div");
       // Outward off the felt, and anchored to whichever edge keeps it inside
-      // the table. Centered on the seat, a bubble on a right-hand seat ran off
+      // the table. Centered on a seat, a bubble on a right-hand seat ran off
       // the table and covered the sidebar's End button while a villain thought.
       bubble.className = "think-bubble" + (y > 50 ? " below" : "")
         + (x > 66 ? " from-right" : x < 34 ? " from-left" : "");
@@ -2032,14 +2042,14 @@ function renderTable(view, data) {
     table.appendChild(seat);
     if (s.is_button) {
       const d = document.createElement("div"); d.className = "dealer-btn"; d.textContent = "D";
-      d.style.left = (50 + 29 * Math.cos(theta - 0.4)) + "%";
-      d.style.top = (50 + 24 * Math.sin(theta - 0.4)) + "%";
+      d.style.left = (50 + (compact ? 24 : 29) * Math.cos(theta - 0.4)) + "%";
+      d.style.top = (50 + (compact ? 20 : 24) * Math.sin(theta - 0.4)) + "%";
       table.appendChild(d);
     }
     if (s.committed > 0 && !st.over) {
       const chip = document.createElement("div"); chip.className = "tbet";
-      chip.style.left = (50 + 23 * Math.cos(theta)) + "%";
-      chip.style.top = (50 + 19 * Math.sin(theta)) + "%";
+      chip.style.left = (50 + (compact ? 19 : 23) * Math.cos(theta)) + "%";
+      chip.style.top = (50 + (compact ? 16 : 19) * Math.sin(theta)) + "%";
       chip.innerHTML = `<span class="chip-dot"></span>${s.committed}`;
       table.appendChild(chip);
     }
@@ -2147,6 +2157,14 @@ function cfArmed(st) {
   return state.checkFold && state.checkFoldHand === st.hand_no;
 }
 
+function fireCheckFold() {
+  const st = state.game && state.game.state;
+  if (!st || st.over || !st.your_turn || !st.legal || !cfArmed(st)) return;
+  const kind = st.legal.can_check ? "check" : "fold";
+  actionSound(kind);
+  simPost("/api/sim/act", {kind, amount: 0});
+}
+
 function cfToggle(st) {
   // Shown in every state of the table, including while the villains act,
   // which is exactly when you want to set it.
@@ -2162,6 +2180,13 @@ function cfToggle(st) {
     const on = !cfArmed(st);
     state.checkFold = on;
     state.checkFoldHand = on ? st.hand_no : null;
+    if (st.your_turn) {
+      // Arming starts a fresh beat; disarming cancels the pending auto-act.
+      // Leave the clock alone while villains are thinking — toggling this
+      // mid-orbit should not reset their wait.
+      state.stepUntil = null;
+      if (state.clockHold) state.clockHold.stepUntil = null;
+    }
     renderTable($("#view"), state.game);
   };
   return b;
@@ -2202,10 +2227,13 @@ function renderControls(el, data) {
     simPost("/api/sim/act", {kind, amount: amount || 0});
   };
   if (cfArmed(st)) {
-    // `act` is declared above this on purpose -- calling it from here while
-    // it was still a `const` below threw a ReferenceError every time, so the
-    // option silently did nothing.
-    act(lg.can_check ? "check" : "fold");
+    // Wait the same beat as a villain. Acting on this paint was a snap
+    // fold — their bet and your muck landed in the same frame.
+    const note = document.createElement("span");
+    note.className = "small muted";
+    note.textContent = lg.can_check ? "checking…" : "folding…";
+    el.appendChild(note);
+    el.appendChild(cfToggle(st));
     return;
   }
   el.appendChild(cfToggle(st));
