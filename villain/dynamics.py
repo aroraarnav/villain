@@ -45,7 +45,7 @@ MIN_GAP = 0.08
 #: numbers. Only the largest is kept, as in `exploits.dedupe_leaks`.
 ONE_DECISION = ("fold_vs_bet", "call_vs_bet", "raise_vs_bet")
 
-#: Regularisation on a borrowed table size's slice -- just enough to keep the
+#: Regularization on a borrowed table size's slice -- just enough to keep the
 #: log-odds finite when somebody folded to none of thirty bets. Tiny on
 #: purpose: :data:`ADJUSTMENT_PRIOR` already applies at the end, and applying
 #: it twice shrinks the borrowed deviation away before the cross-regime

@@ -483,7 +483,7 @@ async function askIdentity(token, questions, onDone, linked, conflicts) {
   for (const q of questions.filter(x => singles.has(x.id))) {
     const div = h("div", isExactName(q) ? "q exact" : "q");
     // Two identical strings are not a choice, so the picker goes away rather
-    // than offering "keep Pratul" or "keep Pratul".
+    // than offering "keep Ghost" or "keep Ghost".
     const distinct = [...new Map((q.names || []).map(n => [displayKey(n), n])).values()];
     const names = distinct.length < 2 ? "" : distinct.map(n => `
       <label><input type="radio" name="name-${esc(q.id)}" value="${esc(n)}"

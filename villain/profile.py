@@ -269,7 +269,7 @@ def build_profiles(by_regime: dict[str, StatBook], min_hands: int = 1,
 # if enough of it was actually observed" -- and each had written its own
 # answer: nine helpers in botplay, one in sim, and an inline
 # ``est is None or est.opps < N`` in exploits, dynamics and timing. They
-# disagreed on the bar (8, 12, 15, 20, MIN_OPPS), which is a modelling
+# disagreed on the bar (8, 12, 15, 20, MIN_OPPS), which is a modeling
 # decision that had ended up hiding inside a utility. The bar stays the
 # caller's to choose; the reading does not.
 #

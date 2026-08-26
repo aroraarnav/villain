@@ -59,7 +59,7 @@ def display_key(name: str) -> str:
     """Case- and punctuation-insensitive, but digits intact.
 
     :func:`normalize` strips trailing digits, which is the wrong tool for
-    "is this literally the same screen name" -- there ``Vik``/``Vik2`` differ."""
+    "is this literally the same screen name" -- there ``Ghost``/``Ghost2`` differ."""
     return re.sub(r"[^a-z0-9]+", "", name.lower())
 
 
@@ -474,7 +474,7 @@ def session_questions(store, hands, min_name_score: float = HIGH_NAME_SCORE) -> 
             names = [left["name"], right["name"]]
         # Two accounts showing the *same* screen name, never dealt in together,
         # is what a reconnect looks like: the site issues a new account id and
-        # the player retypes nothing. Asking "Are Vik and Vik the same person?"
+        # the player retypes nothing. Asking "Are Ghost and Ghost the same person?"
         # gave the reader two identical strings and no way to answer, so say
         # what actually differs and lead with the likely answer. A merge is
         # still the expensive mistake, so the co-occurrence guard above stays
