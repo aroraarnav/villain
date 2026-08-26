@@ -770,6 +770,261 @@ def think_pace(profile, ms: int) -> str:
     return "normal"
 
 
+def _decide_preflop(hand, seat: int, profile, rng, lg, bb: int) -> tuple[str, int, str]:
+    """The preflop half of :func:`decide`.
+
+    Split out because it shares nothing with the postflop half but the
+    hand and the legal actions: it derives its own ranking, position and
+    depth, and every path through it returns. Postflop hangs off a dozen
+    board-derived locals instead -- which is the only reason the two
+    halves sat in one 534-line function despite neither reading the
+    other.
+    """
+    # Ranked inside the range they can still hold, not inside the deck.
+    # Every preflop frequency was counted over a denominator their own
+    # earlier actions already filtered, so this is the measure the cut
+    # belongs on -- see :mod:`villain.ranges`.
+    open_s = _rank(hand, seat, _ORDER_OPEN)
+    defend_s = _rank(hand, seat, _ORDER_DEFEND)
+    strength = open_s
+    pos = _position(hand, seat)
+    depth = stack_bucket(_start_bb(hand, seat))
+    short = _remain_bb(hand, seat) <= PUSH_FOLD_BB
+    opened = hand.bet > bb
+    if not opened and getattr(hand, "limpers", 0) >= 1:
+        # Limpers in, nobody raised: an isolation spot, and a wider one than
+        # opening a folded pot. Pooling it under rfi had every villain
+        # attacking limps at their first-in rate -- PlayerE opens the button
+        # 40% first in and isolates limpers at ~63%.
+        iso_f = _freq_chain(profile, [f"iso:{pos}:{depth}", f"iso:{pos}", "iso",
+                                      f"rfi:{pos}:{depth}", f"rfi:{pos}"], 0.25, 12)
+        if lg.can_raise and _over(strength, 1 - iso_f, rng):
+            _keep(hand, seat, _ORDER_OPEN, [(1 - iso_f, 1.0)])
+            if short:
+                _, to = _raise_or_jam(hand, seat, lg, lg.max_raise_to)
+                return ("raise", to,
+                        f"shoves over {hand.limpers} limper{'s' if hand.limpers > 1 else ''}"
+                        f" — { _remain_bb(hand, seat):.0f}bb, isolates ~{iso_f:.0%} from {pos or 'here'}")
+            obb = _clamp(_size(profile, f"iso_bb:{pos}",
+                               _size(profile, "iso_bb",
+                                     _size(profile, f"open_bb:{pos}", 3.5))), 2.5, 7.0)
+            # An iso is sized to punish the limpers, so it grows with them.
+            _, to = _raise_or_jam(hand, seat, lg, int(round(obb * bb)) + hand.limpers * bb)
+            return ("raise", to,
+                    f"isolates the {hand.limpers} limper{'s' if hand.limpers > 1 else ''}"
+                    f" to {to / bb:.1f}bb — attacks limps ~{iso_f:.0%} from {pos or 'here'}")
+        over = _freq_n(profile, "over_limp", 0.05, 12)
+        over_gate = 1 - _clamp(over * 2, 0.08, 0.45)
+        if lg.can_call and over > 0.05 and _over(strength, over_gate, rng) and not short:
+            _keep(hand, seat, _ORDER_OPEN, [(over_gate, 1.0)])
+            return ("call", 0, f"over-limps behind — comes along ~{over:.0%} in limped pots")
+        if lg.can_check:
+            return ("check", 0, "checks the option behind the limpers")
+        return ("fold", 0, f"folds — isolates only ~{iso_f:.0%} from {pos or 'here'}")
+
+    if not opened:                              # first in: open by position, at their size
+        rfi = _freq_chain(profile, [f"rfi:{pos}:{depth}", f"rfi:{pos}", "rfi"], 0.22, 20)
+        if lg.can_raise and _over(strength, 1 - rfi, rng):
+            _keep(hand, seat, _ORDER_OPEN, [(1 - rfi, 1.0)])
+            if short:
+                _, to = _raise_or_jam(hand, seat, lg, lg.max_raise_to)
+                return ("raise", to,
+                        f"shoves { _remain_bb(hand, seat):.0f}bb from {pos or 'the button'}"
+                        f" — push/fold at this depth, opens ~{rfi:.0%} there")
+            obb = _clamp(_size(profile, f"open_bb:{pos}", _size(profile, "open_bb", 2.5)), 2.0, 5.0)
+            _, to = _raise_or_jam(hand, seat, lg, int(round(obb * bb)))
+            return ("raise", to,
+                    f"opens to {obb:.1f}bb from {pos or 'the button'} — opens ~{rfi:.0%} there, their own size")
+        limp = _freq(profile, "limp", 0.03)
+        limp_gate = 1 - _clamp(limp * 3, 0.1, 0.5)
+        if lg.can_call and limp > 0.06 and _over(strength, limp_gate, rng) and not short:
+            # An open-limp is the slice below the opening range, not above
+            # it: hands good enough to open were raised a branch ago.
+            _keep(hand, seat, _ORDER_OPEN, [(limp_gate, 1 - rfi)])
+            return ("call", 0, f"limps — open-limps about {limp:.0%} of the time")
+        if lg.can_check:
+            return ("check", 0, "checks the option")
+        return ("fold", 0, f"folds — opens only ~{rfi:.0%} from {pos or 'here'}, and this is weaker")
+
+    in_bb = pos == "BB"
+    level = hand.raises          # 1 open, 2 = a 3-bet, 3 = a 4-bet, 4+ = a 5-bet+
+    opener_seat = getattr(hand, "opener", None)
+    if opener_seat is None:
+        opener_seat = hand.last_raiser
+    opener_pos = _position(hand, opener_seat) if opener_seat is not None else ""
+    vs_ep = opener_pos in EP_POS
+    vs_steal = opener_pos in STEAL_POS
+    tbet = _chain(profile, [
+        f"three_bet:{pos}:vs:{opener_pos}" if opener_pos else "",
+        f"three_bet:{pos}:vs:ep" if vs_ep else "",
+        "three_bet_vs_steal" if vs_steal and pos in ("SB", "BB") else "",
+        f"three_bet:{pos}", f"three_bet:{depth}", "three_bet",
+    ], 0.07, 20)
+    call_s = open_s              # vs 3-bet+ the continue is premiums, not pairs
+    if level <= 1:               # facing an open -> a 3-bet can be wide (a bluff)
+        steal = vs_steal and pos in ("SB", "BB")
+        ipo = _ipo(hand, seat)
+        default_3x = 2.8 if ipo == "ip" else 3.5
+        ratio = _clamp(_size(profile, f"three_bet_ratio:{ipo}",
+                             _size(profile, "three_bet_ratio", default_3x)), 2.2, 5.0)
+        rr_to = int(round(ratio * hand.bet))
+        cold = _chain(profile, [
+            f"cold_call:{pos}:vs:{opener_pos}" if opener_pos else "",
+            f"cold_call:{pos}", "cold_call",
+        ], 0.18, 25)
+        if getattr(hand, "callers", 0) >= 1:
+            # Cold-callers behind the open: a squeeze, which is its own
+            # frequency and a much stronger claim than a plain 3-bet.
+            rr_freq = _freq_n(profile, "squeeze", tbet, 15)
+            rr_label = f"squeezes over {hand.callers} caller{'s' if hand.callers > 1 else ''}"
+            cont = _clamp(cold, 0.02, 0.98) if _sampled(profile, "cold_call") \
+                else _clamp(cold, 0.05, 0.6)
+            cont_why = "flats behind the callers"
+        elif steal:
+            rr_freq = tbet
+            rr_label = "3-bets the steal"
+            if in_bb:
+                cont = _chain(profile, ["bb_defend"], 0.45, 20)
+            else:
+                f_steal = _chain(profile, ["fold_to_steal"], 0.55, 20)
+                cont = (1 - f_steal if _sampled(profile, "fold_to_steal")
+                        else _clamp(1 - f_steal, 0.08, 0.7))
+            cont_why = f"defends the {'BB' if in_bb else 'SB'} vs a {opener_pos} open"
+        else:
+            rr_freq, rr_label = tbet, "3-bets"
+            if in_bb:
+                cont = _chain(profile, ["bb_defend"], 0.40, 20)
+            else:
+                cont = _clamp(cold + tbet, 0.02, 0.98) if _sampled(profile, "cold_call") \
+                    else _clamp(cold + tbet, 0.05, 0.75)
+            cont_why = "defends their blind" if in_bb else "continues"
+        rr_gate = 1 - rr_freq
+        call_s = defend_s
+    elif level == 2:             # facing a 3-bet -> a 4-bet is premiums only
+        four_f = _freq_n(profile, "four_bet", 0.04, 12)   # GTO ~4%; sample-gated
+        rr_gate, rr_label = 1 - four_f, "4-bets"
+        rr_to = int(round(_clamp(_size(profile, "four_bet_ratio", 2.3), 2.0, 2.8) * hand.bet))
+        # In and out of position facing a 3-bet are different decisions;
+        # prefer the side we are actually on when it has sample.
+        ipo = _ipo(hand, seat)
+        # `fold_to_three_bet` is counted only for the player who *opened*
+        # (features.py gates it on ``d.seat == opener``). Someone who cold
+        # called the open and now faces a 3-bet never posted that number,
+        # and handing them the opener's continue rate is how a blind ends
+        # up cold-calling a 3-bet with a hand nobody cold-calls -- there is
+        # no measured rate for that spot at all, so it takes the tight
+        # default it deserves.
+        if getattr(hand, "opener", None) == seat:
+            f3 = _chain(profile, [f"fold_to_three_bet:{ipo}", "fold_to_three_bet"],
+                        0.55, 20)
+            cont = _clamp(1 - f3, 0.02, 0.98)
+            cont_why = f"flats the 3-bet {ipo}"
+        else:
+            cont = COLD_CALL_VS_3BET
+            cont_why = "cold-calls the 3-bet"
+    elif level == 3:             # facing a 4-bet -> a 5-bet jam is QQ+/AK
+        five_f = _freq_n(profile, "five_bet", 0.02, 10)   # GTO ~2%; sample-gated
+        rr_gate, rr_label = 1 - five_f, "5-bets"
+        rr_to = lg.max_raise_to
+        # Same split as the 3-bet above: `fold_to_four_bet` is counted on
+        # the seat that made the 3-bet. A cold caller now facing a 4-bet
+        # never posted it, and lending them the 3-bettor's continue rate
+        # is how a 4-bet shove gets called by a hand that folds to a raise.
+        if getattr(hand, "three_bettor", None) == seat:
+            f4 = _freq_n(profile, "fold_to_four_bet", 0.50, 12)
+            cont = _clamp(1 - f4, 0.02, 0.98)
+            cont_why = "calls the 4-bet"
+        else:
+            cont = COLD_CALL_VS_4BET
+            cont_why = "cold-calls the 4-bet"
+    else:                        # facing a 5-bet+ shove -- only the nuts
+        rr_gate, rr_label = 0.99, f"{level + 2}-bets"
+        rr_to = lg.max_raise_to
+        cont, cont_why = 0.02, "calls the shove"
+    if seat in getattr(hand, "limped", ()):
+        # They already limped; this raise is an isolation, not a 3-bet.
+        # limp_raise / limp_fold are the numbers counted on that seat.
+        lr = _freq_n(profile, "limp_raise", None, 12)
+        lf = _freq_n(profile, "limp_fold", None, 12)
+        if lr is not None:
+            rr_gate, rr_label = 1 - lr, "limp-raises"
+        if lf is not None:
+            cont = _clamp(1 - lf, 0.02, 0.98)
+            cont_why = "defends the limp"
+    _, _, mdf, req_eq = _price(hand, lg)
+    shove = _facing_shove(hand, seat, lg)
+    if shove:
+        # fold_to_three_bet (and bb_defend vs an open-jam) pool sizes.
+        # A shove is a different price; shift the continue cut onto it
+        # so a 43% 3-bet continuer is not a 43% jam continuer.
+        cont = _continue_vs_size(cont, mdf)
+        cont_why = "continue vs this size"
+    rr_freq = 1 - rr_gate
+    # The raise gate is read on the open ordering, the continue gate on the
+    # defend ordering, so each is staged against the ordering it was
+    # measured on -- mixing them would narrow the range by the wrong key.
+    #
+    # Short: there is no flat. The continue range shoves; calling a raise
+    # with 15bb behind to play a 3bb pot is the line the stack knob is
+    # supposed to kill. 20-30bb only does the same when we do *not* have
+    # their continue number -- if they flatted 3-bets at 28bb, they flat.
+    no_flat = short
+    if (not short and _remain_bb(hand, seat) <= THREEBET_OR_FOLD_BB
+            and lg.can_raise):
+        if level <= 1:
+            known = _any_sampled(profile, ["bb_defend", "cold_call",
+                                           "fold_to_steal"])
+        elif level == 2:
+            known = _any_sampled(profile, [
+                "fold_to_three_bet", "fold_to_three_bet:ip",
+                "fold_to_three_bet:oop"])
+        else:
+            known = _sampled(profile, "fold_to_four_bet")
+        no_flat = not known
+    fold_why = _why_fold_continue(
+        cont, shove=shove, req_eq=req_eq, level=level, short=short,
+        cont_why=cont_why)
+    call_why = _why_call_continue(
+        cont, shove=shove, req_eq=req_eq, cont_why=cont_why)
+    if no_flat and lg.can_raise:
+        if _over(strength, rr_gate, rng):
+            _keep(hand, seat, _ORDER_OPEN, [(rr_gate, 1.0)])
+            _, to = _raise_or_jam(hand, seat, lg, lg.max_raise_to)
+            return ("raise", to,
+                    f"shoves { _remain_bb(hand, seat):.0f}bb — {rr_label}, "
+                    f"no flatting { _remain_bb(hand, seat):.0f}bb")
+        if _over(call_s, 1 - cont, rng):
+            order = _ORDER_DEFEND if level <= 1 else _ORDER_OPEN
+            top = rr_gate if order is _ORDER_OPEN else 1.0
+            _keep(hand, seat, order, [(1 - cont, max(top, 1 - cont))])
+            _, to = _raise_or_jam(hand, seat, lg, lg.max_raise_to)
+            return ("raise", to,
+                    f"shoves { _remain_bb(hand, seat):.0f}bb — the {cont:.0%} that "
+                    f"would continue vs this size, getting it in")
+        if lg.can_check:
+            return ("check", 0, "checks")
+        return ("fold", 0, fold_why)
+    if lg.can_raise and _over(strength, rr_gate, rng):
+        _keep(hand, seat, _ORDER_OPEN, [(rr_gate, 1.0)])
+        _, to = _raise_or_jam(hand, seat, lg, rr_to)
+        if to == lg.max_raise_to:
+            return ("raise", to,
+                    f"shoves { _remain_bb(hand, seat):.0f}bb — {rr_label}, "
+                    f"about {rr_freq:.0%} of their range here")
+        return ("raise", to,
+                f"{rr_label} to {to} — about {rr_freq:.0%} of their range here")
+    if lg.can_call and _over(call_s, 1 - cont, rng):
+        # Continuing without raising is the band below the raise cut: the
+        # hands above it took the other branch.
+        order = _ORDER_DEFEND if level <= 1 else _ORDER_OPEN
+        top = rr_gate if order is _ORDER_OPEN else 1.0
+        _keep(hand, seat, order, [(1 - cont, max(top, 1 - cont))])
+        return ("call", 0, call_why)
+    if lg.can_check:
+        return ("check", 0, "checks")
+    return ("fold", 0, fold_why)
+
+
 def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -> tuple[str, int, str]:
     """One action, driven by the player's own frequencies AND sizes:
     ``(kind, amount, reason)``. They open to their size from their positions at
@@ -781,249 +1036,7 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
     bb = hand.bb
 
     if hand.street == 0:
-        # Ranked inside the range they can still hold, not inside the deck.
-        # Every preflop frequency was counted over a denominator their own
-        # earlier actions already filtered, so this is the measure the cut
-        # belongs on -- see :mod:`villain.ranges`.
-        open_s = _rank(hand, seat, _ORDER_OPEN)
-        defend_s = _rank(hand, seat, _ORDER_DEFEND)
-        strength = open_s
-        pos = _position(hand, seat)
-        depth = stack_bucket(_start_bb(hand, seat))
-        short = _remain_bb(hand, seat) <= PUSH_FOLD_BB
-        opened = hand.bet > bb
-        if not opened and getattr(hand, "limpers", 0) >= 1:
-            # Limpers in, nobody raised: an isolation spot, and a wider one than
-            # opening a folded pot. Pooling it under rfi had every villain
-            # attacking limps at their first-in rate -- PlayerE opens the button
-            # 40% first in and isolates limpers at ~63%.
-            iso_f = _freq_chain(profile, [f"iso:{pos}:{depth}", f"iso:{pos}", "iso",
-                                          f"rfi:{pos}:{depth}", f"rfi:{pos}"], 0.25, 12)
-            if lg.can_raise and _over(strength, 1 - iso_f, rng):
-                _keep(hand, seat, _ORDER_OPEN, [(1 - iso_f, 1.0)])
-                if short:
-                    _, to = _raise_or_jam(hand, seat, lg, lg.max_raise_to)
-                    return ("raise", to,
-                            f"shoves over {hand.limpers} limper{'s' if hand.limpers > 1 else ''}"
-                            f" — { _remain_bb(hand, seat):.0f}bb, isolates ~{iso_f:.0%} from {pos or 'here'}")
-                obb = _clamp(_size(profile, f"iso_bb:{pos}",
-                                   _size(profile, "iso_bb",
-                                         _size(profile, f"open_bb:{pos}", 3.5))), 2.5, 7.0)
-                # An iso is sized to punish the limpers, so it grows with them.
-                _, to = _raise_or_jam(hand, seat, lg, int(round(obb * bb)) + hand.limpers * bb)
-                return ("raise", to,
-                        f"isolates the {hand.limpers} limper{'s' if hand.limpers > 1 else ''}"
-                        f" to {to / bb:.1f}bb — attacks limps ~{iso_f:.0%} from {pos or 'here'}")
-            over = _freq_n(profile, "over_limp", 0.05, 12)
-            over_gate = 1 - _clamp(over * 2, 0.08, 0.45)
-            if lg.can_call and over > 0.05 and _over(strength, over_gate, rng) and not short:
-                _keep(hand, seat, _ORDER_OPEN, [(over_gate, 1.0)])
-                return ("call", 0, f"over-limps behind — comes along ~{over:.0%} in limped pots")
-            if lg.can_check:
-                return ("check", 0, "checks the option behind the limpers")
-            return ("fold", 0, f"folds — isolates only ~{iso_f:.0%} from {pos or 'here'}")
-
-        if not opened:                              # first in: open by position, at their size
-            rfi = _freq_chain(profile, [f"rfi:{pos}:{depth}", f"rfi:{pos}", "rfi"], 0.22, 20)
-            if lg.can_raise and _over(strength, 1 - rfi, rng):
-                _keep(hand, seat, _ORDER_OPEN, [(1 - rfi, 1.0)])
-                if short:
-                    _, to = _raise_or_jam(hand, seat, lg, lg.max_raise_to)
-                    return ("raise", to,
-                            f"shoves { _remain_bb(hand, seat):.0f}bb from {pos or 'the button'}"
-                            f" — push/fold at this depth, opens ~{rfi:.0%} there")
-                obb = _clamp(_size(profile, f"open_bb:{pos}", _size(profile, "open_bb", 2.5)), 2.0, 5.0)
-                _, to = _raise_or_jam(hand, seat, lg, int(round(obb * bb)))
-                return ("raise", to,
-                        f"opens to {obb:.1f}bb from {pos or 'the button'} — opens ~{rfi:.0%} there, their own size")
-            limp = _freq(profile, "limp", 0.03)
-            limp_gate = 1 - _clamp(limp * 3, 0.1, 0.5)
-            if lg.can_call and limp > 0.06 and _over(strength, limp_gate, rng) and not short:
-                # An open-limp is the slice below the opening range, not above
-                # it: hands good enough to open were raised a branch ago.
-                _keep(hand, seat, _ORDER_OPEN, [(limp_gate, 1 - rfi)])
-                return ("call", 0, f"limps — open-limps about {limp:.0%} of the time")
-            if lg.can_check:
-                return ("check", 0, "checks the option")
-            return ("fold", 0, f"folds — opens only ~{rfi:.0%} from {pos or 'here'}, and this is weaker")
-
-        in_bb = pos == "BB"
-        level = hand.raises          # 1 open, 2 = a 3-bet, 3 = a 4-bet, 4+ = a 5-bet+
-        opener_seat = getattr(hand, "opener", None)
-        if opener_seat is None:
-            opener_seat = hand.last_raiser
-        opener_pos = _position(hand, opener_seat) if opener_seat is not None else ""
-        vs_ep = opener_pos in EP_POS
-        vs_steal = opener_pos in STEAL_POS
-        tbet = _chain(profile, [
-            f"three_bet:{pos}:vs:{opener_pos}" if opener_pos else "",
-            f"three_bet:{pos}:vs:ep" if vs_ep else "",
-            "three_bet_vs_steal" if vs_steal and pos in ("SB", "BB") else "",
-            f"three_bet:{pos}", f"three_bet:{depth}", "three_bet",
-        ], 0.07, 20)
-        call_s = open_s              # vs 3-bet+ the continue is premiums, not pairs
-        if level <= 1:               # facing an open -> a 3-bet can be wide (a bluff)
-            steal = vs_steal and pos in ("SB", "BB")
-            ipo = _ipo(hand, seat)
-            default_3x = 2.8 if ipo == "ip" else 3.5
-            ratio = _clamp(_size(profile, f"three_bet_ratio:{ipo}",
-                                 _size(profile, "three_bet_ratio", default_3x)), 2.2, 5.0)
-            rr_to = int(round(ratio * hand.bet))
-            cold = _chain(profile, [
-                f"cold_call:{pos}:vs:{opener_pos}" if opener_pos else "",
-                f"cold_call:{pos}", "cold_call",
-            ], 0.18, 25)
-            if getattr(hand, "callers", 0) >= 1:
-                # Cold-callers behind the open: a squeeze, which is its own
-                # frequency and a much stronger claim than a plain 3-bet.
-                rr_freq = _freq_n(profile, "squeeze", tbet, 15)
-                rr_label = f"squeezes over {hand.callers} caller{'s' if hand.callers > 1 else ''}"
-                cont = _clamp(cold, 0.02, 0.98) if _sampled(profile, "cold_call") \
-                    else _clamp(cold, 0.05, 0.6)
-                cont_why = "flats behind the callers"
-            elif steal:
-                rr_freq = tbet
-                rr_label = "3-bets the steal"
-                if in_bb:
-                    cont = _chain(profile, ["bb_defend"], 0.45, 20)
-                else:
-                    f_steal = _chain(profile, ["fold_to_steal"], 0.55, 20)
-                    cont = (1 - f_steal if _sampled(profile, "fold_to_steal")
-                            else _clamp(1 - f_steal, 0.08, 0.7))
-                cont_why = f"defends the {'BB' if in_bb else 'SB'} vs a {opener_pos} open"
-            else:
-                rr_freq, rr_label = tbet, "3-bets"
-                if in_bb:
-                    cont = _chain(profile, ["bb_defend"], 0.40, 20)
-                else:
-                    cont = _clamp(cold + tbet, 0.02, 0.98) if _sampled(profile, "cold_call") \
-                        else _clamp(cold + tbet, 0.05, 0.75)
-                cont_why = "defends their blind" if in_bb else "continues"
-            rr_gate = 1 - rr_freq
-            call_s = defend_s
-        elif level == 2:             # facing a 3-bet -> a 4-bet is premiums only
-            four_f = _freq_n(profile, "four_bet", 0.04, 12)   # GTO ~4%; sample-gated
-            rr_gate, rr_label = 1 - four_f, "4-bets"
-            rr_to = int(round(_clamp(_size(profile, "four_bet_ratio", 2.3), 2.0, 2.8) * hand.bet))
-            # In and out of position facing a 3-bet are different decisions;
-            # prefer the side we are actually on when it has sample.
-            ipo = _ipo(hand, seat)
-            # `fold_to_three_bet` is counted only for the player who *opened*
-            # (features.py gates it on ``d.seat == opener``). Someone who cold
-            # called the open and now faces a 3-bet never posted that number,
-            # and handing them the opener's continue rate is how a blind ends
-            # up cold-calling a 3-bet with a hand nobody cold-calls -- there is
-            # no measured rate for that spot at all, so it takes the tight
-            # default it deserves.
-            if getattr(hand, "opener", None) == seat:
-                f3 = _chain(profile, [f"fold_to_three_bet:{ipo}", "fold_to_three_bet"],
-                            0.55, 20)
-                cont = _clamp(1 - f3, 0.02, 0.98)
-                cont_why = f"flats the 3-bet {ipo}"
-            else:
-                cont = COLD_CALL_VS_3BET
-                cont_why = "cold-calls the 3-bet"
-        elif level == 3:             # facing a 4-bet -> a 5-bet jam is QQ+/AK
-            five_f = _freq_n(profile, "five_bet", 0.02, 10)   # GTO ~2%; sample-gated
-            rr_gate, rr_label = 1 - five_f, "5-bets"
-            rr_to = lg.max_raise_to
-            # Same split as the 3-bet above: `fold_to_four_bet` is counted on
-            # the seat that made the 3-bet. A cold caller now facing a 4-bet
-            # never posted it, and lending them the 3-bettor's continue rate
-            # is how a 4-bet shove gets called by a hand that folds to a raise.
-            if getattr(hand, "three_bettor", None) == seat:
-                f4 = _freq_n(profile, "fold_to_four_bet", 0.50, 12)
-                cont = _clamp(1 - f4, 0.02, 0.98)
-                cont_why = "calls the 4-bet"
-            else:
-                cont = COLD_CALL_VS_4BET
-                cont_why = "cold-calls the 4-bet"
-        else:                        # facing a 5-bet+ shove -- only the nuts
-            rr_gate, rr_label = 0.99, f"{level + 2}-bets"
-            rr_to = lg.max_raise_to
-            cont, cont_why = 0.02, "calls the shove"
-        if seat in getattr(hand, "limped", ()):
-            # They already limped; this raise is an isolation, not a 3-bet.
-            # limp_raise / limp_fold are the numbers counted on that seat.
-            lr = _freq_n(profile, "limp_raise", None, 12)
-            lf = _freq_n(profile, "limp_fold", None, 12)
-            if lr is not None:
-                rr_gate, rr_label = 1 - lr, "limp-raises"
-            if lf is not None:
-                cont = _clamp(1 - lf, 0.02, 0.98)
-                cont_why = "defends the limp"
-        _, _, mdf, req_eq = _price(hand, lg)
-        shove = _facing_shove(hand, seat, lg)
-        if shove:
-            # fold_to_three_bet (and bb_defend vs an open-jam) pool sizes.
-            # A shove is a different price; shift the continue cut onto it
-            # so a 43% 3-bet continuer is not a 43% jam continuer.
-            cont = _continue_vs_size(cont, mdf)
-            cont_why = "continue vs this size"
-        rr_freq = 1 - rr_gate
-        # The raise gate is read on the open ordering, the continue gate on the
-        # defend ordering, so each is staged against the ordering it was
-        # measured on -- mixing them would narrow the range by the wrong key.
-        #
-        # Short: there is no flat. The continue range shoves; calling a raise
-        # with 15bb behind to play a 3bb pot is the line the stack knob is
-        # supposed to kill. 20-30bb only does the same when we do *not* have
-        # their continue number -- if they flatted 3-bets at 28bb, they flat.
-        no_flat = short
-        if (not short and _remain_bb(hand, seat) <= THREEBET_OR_FOLD_BB
-                and lg.can_raise):
-            if level <= 1:
-                known = _any_sampled(profile, ["bb_defend", "cold_call",
-                                               "fold_to_steal"])
-            elif level == 2:
-                known = _any_sampled(profile, [
-                    "fold_to_three_bet", "fold_to_three_bet:ip",
-                    "fold_to_three_bet:oop"])
-            else:
-                known = _sampled(profile, "fold_to_four_bet")
-            no_flat = not known
-        fold_why = _why_fold_continue(
-            cont, shove=shove, req_eq=req_eq, level=level, short=short,
-            cont_why=cont_why)
-        call_why = _why_call_continue(
-            cont, shove=shove, req_eq=req_eq, cont_why=cont_why)
-        if no_flat and lg.can_raise:
-            if _over(strength, rr_gate, rng):
-                _keep(hand, seat, _ORDER_OPEN, [(rr_gate, 1.0)])
-                _, to = _raise_or_jam(hand, seat, lg, lg.max_raise_to)
-                return ("raise", to,
-                        f"shoves { _remain_bb(hand, seat):.0f}bb — {rr_label}, "
-                        f"no flatting { _remain_bb(hand, seat):.0f}bb")
-            if _over(call_s, 1 - cont, rng):
-                order = _ORDER_DEFEND if level <= 1 else _ORDER_OPEN
-                top = rr_gate if order is _ORDER_OPEN else 1.0
-                _keep(hand, seat, order, [(1 - cont, max(top, 1 - cont))])
-                _, to = _raise_or_jam(hand, seat, lg, lg.max_raise_to)
-                return ("raise", to,
-                        f"shoves { _remain_bb(hand, seat):.0f}bb — the {cont:.0%} that "
-                        f"would continue vs this size, getting it in")
-            if lg.can_check:
-                return ("check", 0, "checks")
-            return ("fold", 0, fold_why)
-        if lg.can_raise and _over(strength, rr_gate, rng):
-            _keep(hand, seat, _ORDER_OPEN, [(rr_gate, 1.0)])
-            _, to = _raise_or_jam(hand, seat, lg, rr_to)
-            if to == lg.max_raise_to:
-                return ("raise", to,
-                        f"shoves { _remain_bb(hand, seat):.0f}bb — {rr_label}, "
-                        f"about {rr_freq:.0%} of their range here")
-            return ("raise", to,
-                    f"{rr_label} to {to} — about {rr_freq:.0%} of their range here")
-        if lg.can_call and _over(call_s, 1 - cont, rng):
-            # Continuing without raising is the band below the raise cut: the
-            # hands above it took the other branch.
-            order = _ORDER_DEFEND if level <= 1 else _ORDER_OPEN
-            top = rr_gate if order is _ORDER_OPEN else 1.0
-            _keep(hand, seat, order, [(1 - cont, max(top, 1 - cont))])
-            return ("call", 0, call_why)
-        if lg.can_check:
-            return ("check", 0, "checks")
-        return ("fold", 0, fold_why)
+        return _decide_preflop(hand, seat, profile, rng, lg, bb)
 
     street = STREETS[hand.street]
     # Two measures, because postflop asks two different questions and the old
