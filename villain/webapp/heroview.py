@@ -427,7 +427,7 @@ def _build_hero_payload(store: Store, hero_id: int | None, progress=None) -> dic
 
     return {
         "hero_id": hero_id, "name": row["display_name"],
-        "visibility": round(seen / total, 4) if total else 0.0, "hands": row["hands"] or 0,
+        "visibility": seen / total if total else 0.0, "hands": row["hands"] or 0,
         "ranges": [
             {"position": p.position, "hands": p.hands, "raised": p.raised,
              "called": p.called, "checked": p.checked, "folded": p.folded}
@@ -442,7 +442,7 @@ def _build_hero_payload(store: Store, hero_id: int | None, progress=None) -> dic
         "timing": _tell_json(timing),
         "narrowing": [
             {"street": STREET_LABELS.get(s.street, s.street), "hands": s.hands,
-             "avg_strength": round(s.avg_strength, 4)}
+             "avg_strength": s.avg_strength}
             for s in sorted(narrowing, key=lambda s: s.street)
         ],
         "self": _hero_self(store, hero_id),

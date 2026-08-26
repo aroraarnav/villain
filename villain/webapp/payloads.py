@@ -16,6 +16,7 @@ from ..db import Store
 from ..exploits import RULES, find_watchlist
 from ..skill import weaknesses
 from ..timing import timing_tells
+from .jsonutil import as_json
 
 DISPLAY_STATS = [
     ("vpip", "VPIP", "hands played"),
@@ -60,11 +61,11 @@ def _references(stat: str, _regime: str, profile) -> dict:
     online mean: drawing the online number next to a home-game posterior is how
     most of a loose pool read "high vs field".
     """
-    out = {"population": round(profile.population(stat), 4)}
+    out = {"population": profile.population(stat)}
     rule = _THRESHOLD_RULES.get(stat)
     if rule is not None:
         try:
-            out["breakeven"] = round(rule.threshold(profile), 4)
+            out["breakeven"] = rule.threshold(profile)
             out["breakeven_label"] = ("bluff breaks even"
                                       if stat.startswith(("fold_vs_bet", "fold_to_cbet"))
                                       else "exploit threshold")
@@ -87,12 +88,12 @@ def profile_payload(profile, player_id: int | None = None) -> dict:
             continue
         payload["rows"].append({
             "stat": stat, "label": label, "denominator": denominator,
-            "value": round(est.value, 4), "lo": round(est.lo, 4), "hi": round(est.hi, 4),
-            "raw": None if est.raw is None else round(est.raw, 4),
+            "value": est.value, "lo": est.lo, "hi": est.hi,
+            "raw": est.raw,
             # Opportunity counts are fractional inside the model (pooling
             # across table sizes), but a sample size rendered as
             # 92.86041666666667 is noise on screen.
-            "opps": round(est.opps, 1), "weight": round(est.weight, 3),
+            "opps": round(est.opps, 1), "weight": est.weight,
             **_references(stat, profile.regime, profile),
         })
     arch = ARCHETYPE_BY_NAME.get(profile.archetype)
@@ -100,7 +101,7 @@ def profile_payload(profile, player_id: int | None = None) -> dict:
     payload["summary"] = arch.summary if arch else ""
     payload["regime_label"] = profile.regime_label
     payload["deviations"] = [
-        {"feature": f, "z": round(z, 2)}
+        {"feature": f, "z": z}
         for f, z in sorted(deviations(profile).items(), key=lambda kv: -abs(kv[1]))[:10]
     ]
     payload["timing"] = {
@@ -110,31 +111,14 @@ def profile_payload(profile, player_id: int | None = None) -> dict:
                     "think:pf", "think:flop", "think:turn", "think:river")
         if profile.means.get(key)
     }
-    payload["timing_tells"] = [
-        {"pace": c.pace, "street": c.street, "action": c.action,
-         "action_label": c.action_label, "n": c.n, "total": c.total,
-         "share": None if c.share is None else round(c.share, 3),
-         "won": None if c.won is None else round(c.won, 3),
-         "won_base": None if c.won_base is None else round(c.won_base, 3),
-         "wtsd": None if c.wtsd is None else round(c.wtsd, 3),
-         "wtsd_base": None if c.wtsd_base is None else round(c.wtsd_base, 3),
-         "fold_next": None if c.fold_next is None else round(c.fold_next, 3),
-         "fold_next_base": None if c.fold_next_base is None else round(c.fold_next_base, 3),
-         "fold_next_n": c.fold_next_n,
-         "sd_strength": None if c.sd_strength is None else round(c.sd_strength, 3),
-         "sd_base": None if c.sd_base is None else round(c.sd_base, 3),
-         "sd_n": c.sd_n,
-         "label": c.label, "read": c.read}
-        for c in timing_tells(profile)
-    ]
+    payload["timing_tells"] = [as_json(c, "action_label") for c in timing_tells(profile)]
     from ..gto import compare as _gto_compare
     from ..gto import rating as _gto_rating
     _grows = _gto_compare(profile)
     payload["gto"] = {
         "rating": _gto_rating(_grows),
-        "rows": [{"stat": r.stat, "player": r.player, "target": r.target,
-                  "deviation": round(r.deviation, 4), "fidelity": r.fidelity,
-                  "opps": round(r.opps, 1)} for r in _grows],
+        "rows": [as_json(r, "deviation") | {"opps": round(r.opps, 1)}
+                 for r in _grows],
     }
     return payload
 

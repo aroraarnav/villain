@@ -342,8 +342,8 @@ class Handler(BaseHTTPRequestHandler):
             reading = entry.get("high" if rate >= pop else "low", "")
         return self._send(200, {
             "stat": stat, "count": len(found), "hits": len(hits),
-            "rate": None if rate is None else round(rate, 4),
-            "population": None if pop is None else round(pop, 4),
+            "rate": rate,
+            "population": pop,
             "compared_to": against,
             "reading": reading,
             "shown_hits": sum(1 for e in shown if e.hit),
