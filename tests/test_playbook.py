@@ -88,13 +88,10 @@ def test_in_words_states_the_direction_correctly(synth_profile):
     assert "less often than" in low.in_words
 
 
-def test_analyze_export_carries_the_language(tmp_path, hands):
+def test_analyze_export_carries_the_language(seeded):
     from villain.analyze import as_dict
-    from villain.db import Store
-    with Store(tmp_path / "v.db") as store:
-        store.add_hands(hands)
-        player = max(store.players(), key=lambda r: r["hands"] or 0)
-        payload = as_dict(store.profiles(int(player["id"]))[0])
+    player = max(seeded.players(), key=lambda r: r["hands"] or 0)
+    payload = as_dict(seeded.profiles(int(player["id"]))[0])
     assert "combinations" in payload and "plan" in payload
     json.dumps(payload)
     for leak in payload["leaks"]:

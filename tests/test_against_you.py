@@ -105,13 +105,10 @@ def test_the_payload_has_the_key_even_when_empty():
 # -- wiring -----------------------------------------------------------------
 
 
-def test_the_store_attaches_them(tmp_path, hands):
-    from villain.db import Store
+def test_the_store_attaches_them(seeded):
 
-    with Store(tmp_path / "v.db") as store:
-        store.add_hands(hands)
-        for row in store.players():
-            pooled = store.profile(int(row["id"]))
-            assert pooled.adjustments == []      # twenty hands clears no floor
-            for split in store.profiles(int(row["id"])):
-                assert split.adjustments == []
+    for row in seeded.players():
+        pooled = seeded.profile(int(row["id"]))
+        assert pooled.adjustments == []      # twenty hands clears no floor
+        for split in seeded.profiles(int(row["id"])):
+            assert split.adjustments == []

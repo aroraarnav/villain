@@ -379,7 +379,7 @@ def test_the_bet_depth_in_the_reason_matches_the_action_named():
 
 # -- the sim plays the table it is actually at --------------------------------
 
-def test_a_villain_uses_the_book_for_the_table_size():
+def test_a_villain_uses_the_book_for_the_table_size(hands):
     """Heads-up and six-handed are two strategies, not one with a label."""
     from villain.sim import MIN_REGIME_HANDS, Villain
 
@@ -395,7 +395,7 @@ def test_a_villain_uses_the_book_for_the_table_size():
     assert v.at(6) is six
 
 
-def test_a_thin_regime_book_falls_back_to_the_pooled_one():
+def test_a_thin_regime_book_falls_back_to_the_pooled_one(hands):
     """A book on forty hands describes the right game and nothing else."""
     from villain.sim import MIN_REGIME_HANDS, Villain
 
