@@ -21,7 +21,7 @@ from ..model import hand_from_dict, hand_to_dict
 from ..parsers import parse_file
 from ..profile import build_unified, primary_regime
 from .heroview import _to_you
-from .payloads import profile_payload
+from .payloads import profile_payload, roster_row
 
 SESSIONS: dict[str, dict] = {}
 #: Live practice games, held in memory only. Keyed by an opaque token.
@@ -269,7 +269,6 @@ def session_payload(token: str, store: Store | None = None) -> dict:
     profile_payloads = []
     for player_key, profile in keyed:
         enrich(profile)
-        top = profile.tags[0] if profile.tags else None
         link = labels.get(profile.name) or {}
         db_name = link.get("db_name")
         session_names = [n for n in (link.get("session_names") or [])
@@ -277,21 +276,10 @@ def session_payload(token: str, store: Store | None = None) -> dict:
         if db_name and db_name != profile.name and profile.name not in session_names:
             session_names = [profile.name] + session_names
         is_hero = hero_key is not None and player_key == hero_key
-        row = {
-            "player_id": None, "name": profile.name, "is_hero": is_hero,
+        row = roster_row(profile) | {
+            "player_id": None, "is_hero": is_hero,
             "db_name": db_name if db_name else None,
             "session_names": session_names,
-            "regime": profile.regime, "regime_label": profile.regime_label,
-            "table_mix": profile.table_mix,
-            "hands": profile.hands, "sample_quality": profile.sample_quality,
-            "archetype": profile.archetype, "confidence": profile.archetype_confidence,
-            "skill": (None if not profile.skill.measured else profile.skill.base),
-            "skill_tier": profile.skill.tier,
-            "skill_confidence": profile.skill.confidence,
-            "skill_measured": profile.skill.measured,
-            "exploitability": profile.skill.exploitability,
-            "top_leak": top.headline if top else None,
-            "leak_count": len(profile.tags),
         }
         rows.append(row)
         pp = profile_payload(profile)

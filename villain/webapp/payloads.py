@@ -137,6 +137,35 @@ MIN_ROSTER_HANDS = 5
 _ROSTER_CACHE: dict[str, tuple[tuple, list[dict]]] = {}
 
 
+def roster_row(profile) -> dict:
+    """The columns a player occupies in a list of players.
+
+    Both lists build it: the Database tab's roster and the Sessions tab's
+    preview of who was at a sitting. They were written out separately, so the
+    rule that an unmeasured player carries no skill number -- which is what
+    keeps the default sort putting them last instead of in the middle at 50 --
+    existed twice, and the two tabs would have sorted differently the moment
+    one of them changed."""
+    top = profile.tags[0] if profile.tags else None
+    return {
+        "name": profile.name,
+        "regime": profile.regime,
+        "regime_label": profile.regime_label,
+        "table_mix": profile.table_mix,
+        "hands": profile.hands,
+        "sample_quality": profile.sample_quality,
+        "archetype": profile.archetype,
+        "confidence": profile.archetype_confidence,
+        "skill": None if not profile.skill.measured else profile.skill.base,
+        "skill_tier": profile.skill.tier,
+        "skill_confidence": profile.skill.confidence,
+        "skill_measured": profile.skill.measured,
+        "exploitability": profile.skill.exploitability,
+        "top_leak": top.headline if top else None,
+        "leak_count": len(profile.tags),
+    }
+
+
 def _roster_fingerprint(store: Store) -> tuple:
     """Everything the roster is computed from, cheaply enough to check first.
 
@@ -204,31 +233,15 @@ def _build_roster(store: Store) -> list[dict]:
                         note = (f"scores {weak[0].score:.0f}/100 here"
                                 + (f" ({weak[0].note})" if weak[0].note else "")
                                 + " -- from the rating, not a measured frequency")
-            rows.append({
+            rows.append(roster_row(profile) | {
                 "player_id": int(player["id"]),
                 "name": profile.name or player["display_name"],
                 "aliases": player["aliases"],
-                "regime": profile.regime,
-                "regime_label": profile.regime_label,
-                "table_mix": profile.table_mix,
-                "hands": profile.hands,
-                "sample_quality": profile.sample_quality,
-                "archetype": profile.archetype,
-                "confidence": profile.archetype_confidence,
-                # Unmeasured rows carry no skill number so the default sort
-                # (high first) puts them last rather than in the middle at 50.
-                "skill": (None if not profile.skill.measured
-                          else profile.skill.base),
-                "skill_tier": profile.skill.tier,
-                "skill_confidence": profile.skill.confidence,
-                "skill_measured": profile.skill.measured,
-                "exploitability": profile.skill.exploitability,
                 "gto": _gto_rating(_gto_compare(profile)),
                 "top_leak": headline,
                 "top_leak_status": status,
                 "top_leak_note": note,
                 "top_leak_severity": round(top.severity, 2) if top else 0.0,
-                "leak_count": len(profile.tags),
                 "last_seen": profile.last_seen,
             })
     rows.sort(key=lambda r: (-r["hands"],))
