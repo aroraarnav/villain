@@ -1083,7 +1083,6 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
             if vs_cbet:
                 fold_keys.append(f"fold_to_cbet:{street}")
             fold_keys += [
-                f"fold_vs_bet:{street}:{hilo}",
                 f"fold_vs_bet:{street}:{mw}",
                 f"fold_vs_bet:{street}:{ipo}",
                 f"fold_vs_bet:{street}:stk:{depth}",

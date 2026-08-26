@@ -398,11 +398,10 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
             # Two-way, not the four-way split reads.texture returns: four
             # ways runs out of sample, and "did the board connect" is the part
             # that moves the decision.
-            paired, suited, connected, high = texture(hand.board_at(street))
+            paired, suited, connected, _high = texture(hand.board_at(street))
             tex = "wet" if (suited or connected or paired) else "dry"
             # Two ways, not four, for the same sample reason. High-vs-low is
             # the split that changes which ranges connect.
-            hilo = "hi" if high else "lo"
             faced_bet_from = {}
             for seat in view.saw[street]:
                 _book(hand, books, seat, reg).count(f"saw:{street.label}", True)
@@ -515,8 +514,6 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
                 # so the stack slice lives under ``stk:``; mixed, a 40bb
                 # player's fold rate reads as a fold-to-half-pot rate.
                 book.count(f"fold_vs_bet:{s}:stk:{depth}", folded)
-                # An ace-high board and a low one are different bluffs.
-                book.count(f"fold_vs_bet:{s}:{hilo}", folded)
                 # Facing a raise is not facing a bet, and fold_vs_bet pools
                 # them.
                 if d.aggression_level >= 2:
