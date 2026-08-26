@@ -1419,9 +1419,10 @@ def test_sim_paces_every_auto_action_the_same():
     same paint as the bet it was answering. One 3s beat, shared by bots and
     the auto-act, is what makes the action readable.
     """
-    from pathlib import Path
-    app = (Path(__file__).resolve().parent.parent
-           / "villain" / "webapp" / "assets" / "app.js").read_text()
+    # The assembled asset, not a source file: /static/app.js is concatenated
+    # from villain/webapp/assets/app/*.js, and what ships is what to assert on.
+    from villain.webapp.assets import static
+    app = static("app.js")[0].decode()
     assert "const SIM_DELAY = 3000" in app
     clock = app[app.index("function armSimClock"):app.index("function renderTable")]
     assert "think_ms" not in clock

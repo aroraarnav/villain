@@ -118,7 +118,11 @@ def run(*args: str) -> None:
 WHEEL_MUST_CARRY = (
     "villain/webapp/assets/index.html",
     "villain/webapp/assets/app.css",
-    "villain/webapp/assets/app.js",
+    # /static/app.js is assembled from these at request time, so it is the
+    # parts that have to be in the wheel; a missing one is a UI that half
+    # loads, in the browser only, with nowhere to show the traceback.
+    "villain/webapp/assets/app/00-base.js",
+    "villain/webapp/assets/app/90-shell.js",
     "villain/copy/glossary.toml",
     "villain/copy/playbook.toml",
 )

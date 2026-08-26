@@ -246,7 +246,10 @@ def test_work_does_not_wait_on_frames_in_a_hidden_tab():
     worker = WORKER.read_text()
     assert "pageHidden" in worker
     assert 'msg.type === "visibility"' in worker
-    app = (ROOT / "villain" / "webapp" / "assets" / "app.js").read_text()
+    # The assembled asset, not a source file: /static/app.js is concatenated
+    # from villain/webapp/assets/app/*.js, and what ships is what to assert on.
+    from villain.webapp.assets import static
+    app = static("app.js")[0].decode()
     assert "nextFrame" in app
     assert 'visibilityState === "hidden"' in app
 
