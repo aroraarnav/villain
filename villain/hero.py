@@ -4,6 +4,23 @@ Villains' cards show at showdown; the exporter's hole cards are visible on
 almost every hand. That makes a counted preflop range, graded folds, missed
 value, and sizing/timing tells possible -- none of which a villain profile
 can honestly claim. :func:`find_hero` picks the seat; the rest hangs off it.
+
+Four conventions hold throughout, so the functions below do not each restate
+them:
+
+* ``hands`` is hero's own hands, e.g. ``store.player_hands(hero_id)``. Taking
+  a list rather than a store means a caller needing several of these fetches
+  once instead of once per measurement, and each fetch decompresses the whole
+  database.
+* Preflop is excluded from everything strength-based, because
+  :func:`villain.reads.strength_by_street` needs a board. Preflop strength is
+  a different question -- equity against a range -- and lives in
+  :func:`preflop_range`.
+* ``model`` is passed in rather than fitted here. Fitting needs *every*
+  player's hands, not just hero's, and costs enough that a caller grading more
+  than once (a web request per page load) has to reuse one.
+* ``progress(done, total)`` is reported from :func:`_hero_spots`, the only
+  place that knows how far along the work is, rather than by each caller.
 """
 
 from __future__ import annotations
@@ -40,12 +57,11 @@ POSITION_ORDER = {p: i for i, p in enumerate(
 
 def find_hero(store, min_hands: int = MIN_HERO_HANDS, progress=None,
               hands=None) -> int | None:
-    """Which internal player id is hero, judged by whose cards are visible
-    almost regardless of outcome rather than almost only at showdown.
+    """Which internal player id is hero, by whose cards are visible almost
+    regardless of outcome rather than almost only at showdown.
 
-    ``min_hands`` is overridable for testing against small fixtures; real
-    callers should leave it at the default, which exists so a villain who
-    happened to show a few hands in a short sample cannot look like hero.
+    ``min_hands`` is overridable for testing against small fixtures; it exists so
+    a villain who showed a few hands in a short sample cannot look like hero.
     """
     seen: dict[int, int] = {}
     total: dict[int, int] = {}
@@ -106,24 +122,15 @@ MARGIN_UNBIASED = 3.0
 def hero_of(hands) -> str | None:
     """Which player id in ``hands`` is hero, or ``None`` if it is not clear.
 
-    The hand-list counterpart of :func:`find_hero`, for the callers that have
-    no store to search: statistics are extracted from a list of hands, and so
-    is the evidence behind them, both before anything has been saved.
+    The hand-list counterpart of :func:`find_hero`, for callers with no store to
+    search. Two signals, best first: a site that names the exporter is believed
+    outright (:attr:`Hand.hero_seat`, which PokerNow gives), otherwise the same
+    visibility reasoning :func:`find_hero` uses.
 
-    Two signals, best first. Sites that name the exporter in the export are
-    believed outright -- the parser records that as :attr:`Hand.hero_seat`,
-    and PokerNow gives it. Failing that, and for hands stored before the field
-    existed, it falls back to the same reasoning :func:`find_hero` uses: an
-    export shows you your own cards on every hand you were dealt and shows you
-    everybody else's only when they were turned face up at the end.
-
-    Resolved from the seat rather than from a stored account id, so the answer
-    follows a player through renames and merges: ``rebuild`` re-keys every
-    seat onto an internal player id and this returns whatever that seat holds
-    now.
-
-    Returns ``None`` rather than guessing. A wrong answer here does not fail
-    loudly -- it quietly relabels one opponent's decisions as your own.
+    Resolved from the seat rather than a stored account id, so the answer follows
+    a player through renames and merges. Returns ``None`` rather than guessing: a
+    wrong answer here does not fail loudly, it quietly relabels one opponent's
+    decisions as your own.
     """
     hands = list(hands)
     stated = Counter(
@@ -161,9 +168,10 @@ def hand_class(hole_cards: tuple[str, ...]) -> str:
 
 def texture_label(board: list[str]) -> str:
     """"wet" or "dry" -- a chosen two-way split of :func:`villain.reads.texture`,
-    not a derived one. Suited or connected boards carry live draws and are
-    called wet; everything else is dry. Coarse on purpose: a finer split
-    would need more hands per bucket than most players have to spend."""
+    not a derived one. Suited or connected boards carry live draws and are wet.
+    Coarse on purpose: a finer split needs more hands per bucket than most
+    players have to spend.
+    """
     _paired, suited, connected, _high = texture(board)
     return "wet" if (suited or connected) else "dry"
 
@@ -189,13 +197,7 @@ class PositionRange:
 
 
 def hero_visibility(hands: list, hero_id: int) -> tuple[int, int]:
-    """(hands with known cards, hands dealt into) for hero within ``hands``.
-
-    Takes an already-fetched hand list rather than a store, so a caller who
-    needs both this and :func:`preflop_range`/:func:`fold_grades` fetches
-    ``store.player_hands(hero_id)`` once instead of three times -- each fetch
-    re-reads and decompresses every hand in the database.
-    """
+    """(hands with known cards, hands dealt into) for hero within ``hands``."""
     seen = total = 0
     for hand in hands:
         seat = next((s for s in hand.seats if s.player_id == str(hero_id)), None)
@@ -209,13 +211,10 @@ def hero_visibility(hands: list, hero_id: int) -> tuple[int, int]:
 def preflop_range(hands: list, hero_id: int) -> dict[str, PositionRange]:
     """What hero actually held and did preflop, by position.
 
-    ``hands`` is hero's own hands, e.g. ``store.player_hands(hero_id)``.
-
-    Simplified on purpose: this is "what did you do with this hand from this
-    seat," not split by whether you were opening or responding to a raise --
-    an open-raise chart and a vs-raise chart are genuinely different objects,
-    and collapsing them here is a real limitation, not an oversight to fix
-    blindly later without deciding it is worth the added complexity.
+    Simplified on purpose: "what did you do with this hand from this seat", not
+    split by whether you were opening or responding to a raise. An open-raise
+    chart and a vs-raise chart are genuinely different objects, and collapsing
+    them is a real limitation rather than an oversight.
     """
     by_position: dict[str, PositionRange] = {}
     for hand in hands:
@@ -249,9 +248,7 @@ def preflop_range(hands: list, hero_id: int) -> dict[str, PositionRange]:
 def combined_grid(ranges: dict[str, PositionRange]) -> dict[str, tuple[int, int]]:
     """Every hand class summed across position: (times played, times dealt).
 
-    For the chart, which shows "how often do you play this hand" rather than
-    a position-by-position breakdown -- a real range chart is 13 of these,
-    one per position, and this is the one-chart summary of it.
+    The one-chart summary; a real range chart is 13 of these, one per position.
     """
     dealt: dict[str, int] = {}
     played: dict[str, int] = {}
@@ -267,32 +264,20 @@ def combined_grid(ranges: dict[str, PositionRange]) -> dict[str, tuple[int, int]
 # fold grades: was this specific fold right, given the hand you actually had
 # ---------------------------------------------------------------------------
 #
-# The naive version of this compares hero's raw percentile-vs-every-possible-
-# holding to the pot-odds breakeven equity, as if the bet came from a random
-# hand. It does not: somebody chose to bet, and a range that bets is stronger
-# than random by construction, more so the bigger the bet. Measured that way,
-# hero's folds came back 68% "mistakes," including laying down top pair to a
-# river shove into a stack-sized pot -- a fold that is very unlikely to
-# actually be wrong. The naive number is not conservative, it is just wrong,
-# in the direction that makes hero look worse than the data supports.
-#
-# The fix already exists in this project: :mod:`villain.reads` fits a
-# population model of what hand strength a bet of a given size, street,
-# position and board typically represents, trained on the database's own
-# revealed hands. Grading a fold against *that* -- did hero's hand outrank
-# what a bet like this one usually is -- is the same standard the rest of
-# the tool holds itself to: measure against a fitted baseline, not a
-# textbook assumption.
+# Graded against what a bet like this usually represents, not against a
+# random hand. Somebody chose to bet, and a betting range is stronger than
+# random by construction -- grading against random returned 68% "mistakes",
+# including folding top pair to a river shove into a stack-sized pot.
+# :mod:`villain.reads` fits the baseline from the database's own revealed
+# hands, which is the standard the rest of the tool holds itself to.
 
 
 def fit_population_model(store, progress=None, hands=None) -> StrengthModel:
-    """The same population hand-strength model :mod:`villain.reads` fits,
-    for grading hero's folds against what the bet actually represents.
+    """The population hand-strength model :mod:`villain.reads` fits, for grading
+    hero's folds against what the bet actually represents.
 
-    ``progress(done, total, phase)`` is passed through so a caller with a
-    progress bar has something true to put in it. The walk over hands is
-    counted per hand; fitting is counted per cross-validation fold plus the
-    final fit -- those are the steps that actually take the time.
+    The walk over hands can be counted; fitting the trees cannot, and says so by
+    reporting no total.
     """
     if hands is None:
         loading = (lambda done, total: progress(done, total, "loading")) if progress else None
@@ -306,20 +291,12 @@ def fit_population_model(store, progress=None, hands=None) -> StrengthModel:
 def _hero_spots(hands: list, hero_id: int, progress=None):
     """Yield ``(hand, seat, strengths)`` for every hand hero's cards are known in.
 
-    Every measurement in this module below this line starts the same way, and
-    for the same reason: hero analysis is only possible at all because hero's
-    hole cards are in the history, so each one first has to find hero's seat,
-    refuse the hands where the cards are missing, and price the holding on
-    every street. Written out five times, that preamble drifted -- the board
-    check, the two-card check and the ``str(hero_id)`` comparison are load
-    bearing together, and a fix applied to folds but missed on checks is the
-    class of bug that silently changes a denominator rather than raising.
-
-    ``progress(done, total)`` is reported here rather than by each caller for
-    the same reason: :func:`~villain.reads.strength_by_street` is the expensive
-    call and it happens in this loop, so this is the only place that knows how
-    far along the work actually is. Reported after the hand, not before it --
-    a tick that lands while that batch is still to run is a bar that lies.
+    Every measurement below this line starts the same way: find hero's seat,
+    refuse the hands where the cards are missing, price the holding on every
+    street. Written out five times that preamble drifted -- the board check, the
+    two-card check and the ``str(hero_id)`` comparison are load bearing together,
+    and a fix applied to folds but missed on checks silently changes a
+    denominator rather than raising.
     """
     total = len(hands)
     every = 200
@@ -349,13 +326,9 @@ class GradeKind:
     this holds, on the precedent :class:`TellKind` already sets below.
 
     ``margin`` is not shared. Folds have a strongly negative mean edge, so a
-    tight bar rarely fires on noise. Checks do not: measured on the live
-    database, mean edge is -0.03 with a stdev of 0.24 -- close to zero and
-    wide, because most hands checking back are only mildly weaker than a
-    typical check, not dramatically so the way a folded hand is dramatically
-    weaker than a bet. At MARGIN (0.05), 40% of checks cross it -- noise
-    dominating signal. 0.20, roughly the 80th percentile of the real
-    distribution, brings that to 19%.
+    tight bar rarely fires on noise; checks measure -0.03 mean against a 0.24
+    stdev, and at 0.05 fully 40% of them cross. 0.20 is roughly the 80th
+    percentile of the real distribution and brings that to 19%.
     """
     margin: float
     line: str                 # "a bet like that one" / "a check on that line"
@@ -420,8 +393,8 @@ class Grade:
     @property
     def in_words(self) -> str:
         """One sentence with the numbers in it, matching the precedent
-        villain.exploits.Leak.in_words sets for a villain leak -- three raw
-        percentiles with no verb was exactly why it read as noise."""
+        villain.exploits.Leak.in_words sets. Three raw percentiles with no
+        verb read as noise."""
         said = (f"Beat {self.strength:.0%} of the hands you could have held there; "
                 f"{self.kind.line} usually comes from a hand beating only "
                 f"{self.faced_strength:.0%}")
@@ -465,20 +438,7 @@ class GradeReport:
 
 def fold_grades(hands: list, hero_id: int, model: StrengthModel,
                 progress=None) -> GradeReport:
-    """Grade every postflop fold hero made against the hand hero actually held.
-
-    ``hands`` is hero's own hands, e.g. ``store.player_hands(hero_id)``.
-    ``model`` is a fitted :class:`~villain.reads.StrengthModel` -- required
-    rather than fitted internally, both because fitting it needs *every*
-    player's hands, not just hero's, and because fitting costs real time and
-    a caller grading folds more than once (a web request per page load) has
-    to be able to fit it once and reuse it.
-
-    Preflop is deliberately excluded: :func:`villain.reads.strength_by_street`
-    needs a board, and preflop hand strength is a different question (equity
-    against a *range*, not against every possible holding) -- that belongs
-    with :func:`preflop_range`, not here.
-    """
+    """Grade every postflop fold hero made against the hand hero actually held."""
     grades: list[Grade] = []
     for hand, seat, strengths in _hero_spots(hands, hero_id, progress):
         view = HandView(hand)
@@ -511,20 +471,14 @@ def fold_grades(hands: list, hero_id: int, model: StrengthModel,
 def _predict_strength(model: StrengthModel, hand, decision: Decision) -> float:
     """What the population model expects a line like this one to represent.
 
-    Used both for a bet hero folded to (:func:`fold_grades`) and a check
-    hero made (:func:`missed_value`) -- the feature vector states its own
-    action type (``is_bet``/``is_raise``/``is_call``/``is_check``), so the
-    same call answers both "what does a bet like this usually mean" and
-    "what does a check like this usually mean."
+    Used for both a bet hero folded to and a check hero made -- the feature
+    vector states its own action type, so one call answers both.
 
-    ``unbiased`` is fixed at 0: this player's identity and card visibility
-    are unknown, so the honest question is what the *typical*, mostly
-    showdown-selected training row looks like on this line -- and that
-    sample skews toward calling ranges and away from bluffs that took the
-    pot down uncontested (see :mod:`villain.reads`'s module note), so the
-    model's estimate here runs a little strong if anything. That is the safe
-    direction for it to be wrong in: it under-flags hero's folds and missed
-    value rather than over-flags them.
+    ``unbiased`` is fixed at 0: this player's identity and card visibility are
+    unknown, so the honest question is what the typical, mostly showdown-selected
+    training row looks like. That sample skews toward calling ranges, so the
+    estimate runs a little strong -- the safe direction, since it under-flags
+    hero's folds and missed value rather than over-flagging them.
     """
     act = decision.action.act
     features = [
@@ -543,13 +497,7 @@ def _predict_strength(model: StrengthModel, hand, decision: Decision) -> float:
 
 def missed_value(hands: list, hero_id: int, model: StrengthModel,
                  progress=None) -> GradeReport:
-    """Grade every postflop check hero made against the hand hero actually held.
-
-    ``hands`` is hero's own hands, ``model`` a fitted
-    :class:`~villain.reads.StrengthModel` -- see :func:`fold_grades` for why
-    it is required rather than fitted here. Preflop excluded for the same
-    reason it is everywhere else in this module.
-    """
+    """Grade every postflop check hero made against the hand hero actually held."""
     grades: list[Grade] = []
     for hand, seat, strengths in _hero_spots(hands, hero_id, progress):
         for decision in HandView(hand).decisions():
@@ -618,11 +566,10 @@ class Bucket:
 class TellKind:
     """The whole difference between the sizing tell and the timing tell.
 
-    ``phrase`` renders the two averages into the middle of the sentence and
-    ``warning`` the clause after it, because those are the only parts that
-    cannot be shared: a size reads as a percentage of pot and a think time as
-    seconds, and only timing has a direction worth naming (tanking with bluffs
-    is a different tell from taking longer with value).
+    ``phrase`` renders the two averages into the sentence and ``warning`` the
+    clause after it -- the only parts that cannot be shared, since a size reads as
+    a percentage of pot and a think time as seconds, and only timing has a
+    direction worth naming.
     """
     gap_bar: float
     verb: str
@@ -656,12 +603,12 @@ class Tell:
     kind: TellKind
 
     def gap(self, street: int) -> float | None:
-        """Strong-hand average minus weak-hand average, or None when either
-        side is too thin to compare.
+        """Strong-hand average minus weak-hand average, or None when either side is
+        too thin to compare.
 
-        Sign is meaningful and differs by kind: a positive size gap means hero
-        bets bigger with the better half, a negative timing gap means hero
-        thinks longer with the worse half -- the classic tank-as-bluff tell.
+        Sign is meaningful and differs by kind: a positive size gap means hero bets
+        bigger with the better half; a negative timing gap means hero thinks longer
+        with the worse half, the classic tank-as-bluff tell.
         """
         pair = self.by_street.get(street)
         if not pair:
@@ -685,10 +632,8 @@ class Tell:
     def describe(self, street: int, lead: bool = True) -> str | None:
         """One sentence for a street with enough data to compare, or None.
 
-        ``lead=False`` drops the "On the {street}, " opener -- for a caller
-        that already shows the street as its own label next to the sentence
-        (the web dashboard does; the CLI, with no separate street column,
-        wants the sentence to carry it).
+        ``lead=False`` drops the "On the {street}, " opener, for a caller that already
+        shows the street as its own label beside the sentence.
         """
         pair = self.by_street.get(street)
         if not pair:
@@ -711,11 +656,10 @@ def _aggression_tell(hands: list, hero_id: int, kind: TellKind,
                      measure, progress=None) -> Tell:
     """Split hero's own bets and raises by the strength behind them.
 
-    Scoped to bets and raises for both kinds: they are read together as "does
-    hero's aggression carry a tell," which is a narrower and more answerable
-    question than grading every action type. It is only answerable at all
-    because hero's hand strength is known on every action, not just the ones
-    that reached showdown -- no villain's is.
+    Scoped to bets and raises for both kinds: "does hero's aggression carry a
+    tell" is narrower and more answerable than grading every action type. It is
+    answerable at all only because hero's strength is known on every action, not
+    just the ones that reached showdown.
     """
     by_street: dict[int, tuple[Bucket, Bucket]] = {
         int(s): (Bucket("top half"), Bucket("bottom half"))
@@ -737,28 +681,18 @@ def _aggression_tell(hands: list, hero_id: int, kind: TellKind,
 
 
 def sizing_tell(hands: list, hero_id: int, progress=None) -> Tell:
-    """Does hero bet bigger with better hands? The mirror of fold grading,
-    asked of hero's aggression instead of hero's folds. A real gap means an
-    observant opponent could read hand strength off bet size alone, without
-    ever seeing a card.
-
-    ``hands`` is hero's own hands, e.g. ``store.player_hands(hero_id)``.
-    Preflop is excluded for the same reason it is in :func:`fold_grades`:
-    :func:`villain.reads.strength_by_street` needs a board.
-
-    ``progress(done, total)`` is the same callback :func:`build_dataset` takes:
-    this walk calls ``strength_by_street`` per hand, and on a cold cache that
-    is a long silence after the histories have already been read.
+    """Does hero bet bigger with better hands? The mirror of fold grading, asked
+    of hero's aggression. A real gap means an observant opponent could read hand
+    strength off bet size alone, without ever seeing a card.
     """
     return _aggression_tell(hands, hero_id, SIZING,
                             lambda d: d.bet_fraction, progress)
 
 
 def timing_tell(hands: list, hero_id: int, progress=None) -> Tell:
-    """Does hero take longer to act with one half of the strength range than
-    the other? A snap bet and a tanked one are different information if they
-    correlate with hand strength, and nobody else's strength is known well
-    enough to ask a villain this either.
+    """Does hero take longer to act with one half of the strength range than the
+    other? A snap bet and a tanked one are different information if they
+    correlate with strength.
     """
     return _aggression_tell(
         hands, hero_id, TIMING,
@@ -782,13 +716,13 @@ class StreetStrength:
 
 
 def range_narrowing(hands: list, hero_id: int, progress=None) -> list[StreetStrength]:
-    """Average hand strength among hero's hands still live at each street,
-    flop through river. ``hands`` is hero's own hands.
+    """Average hand strength among hero's hands still live at each street, flop
+    through river.
 
-    "Still live" uses HandView.saw, which already answers exactly this
-    (reconstructed from who folded when, not from who happened to act) --
-    the same building block the rest of the stats engine uses to avoid
-    double-counting a player who folded before a street was ever dealt.
+    "Still live" uses HandView.saw, reconstructed from who folded when rather
+    than from who happened to act -- the same building block the rest of the
+    stats engine uses to avoid counting a player who folded before a street was
+    dealt.
     """
     totals: dict[int, list[float]] = {int(s): [] for s in (Street.FLOP, Street.TURN, Street.RIVER)}
     for hand, seat, strengths in _hero_spots(hands, hero_id, progress):

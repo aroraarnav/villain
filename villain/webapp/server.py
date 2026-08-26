@@ -53,14 +53,10 @@ MAX_BODY_BYTES = 256 * 1024 * 1024
 #: handler, so a route and its "does this change the database" answer are one
 #: statement and cannot be added separately.
 #:
-#: That question is not bookkeeping. The hosted app runs this same handler in a
-#: Pyodide worker over a database it has to upload after a change, and it
-#: decides whether to upload by asking here (through ``/api/meta``). When the
-#: answer lived in a frozenset beside the handler, a new writing route worked
-#: perfectly on a laptop and was silently never saved to the account -- the
-#: user's import surviving until they opened the app on another device. A test
-#: used to re-read ``do_POST``'s own source with a regex to catch that; the
-#: registry makes the case unrepresentable instead.
+#: The hosted app reads it through ``/api/meta``: a Pyodide worker decides
+#: whether to upload the database by asking here. Kept beside the handler by
+#: hand, a new writing route worked on a laptop and was silently never saved
+#: to the account.
 #:
 #: ``<token>`` stands for one path segment; see :func:`writes_to_disk`.
 POST_ROUTES: dict[str, Route] = {}

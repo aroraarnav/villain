@@ -490,13 +490,11 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
                 # Continuation bet: they took the betting lead last street and
                 # the action is on them with nothing wagered yet.
                 #
-                # ``has_initiative`` walks back through every earlier street, so
-                # a preflop raiser who checked the flop still holds the lead on
-                # the turn. Betting there is a *delayed* c-bet, not a second
-                # barrel, and pooling the two made "having bet the flop, how
-                # often they fire again on the turn" -- the sentence the
-                # glossary shows and the model is given -- describe a number
-                # that was counting something else.
+                # ``has_initiative`` walks back through every earlier street,
+                # so a preflop raiser who checked the flop still leads on the
+                # turn. Betting there is a *delayed* c-bet, not a second
+                # barrel; pooling them made the glossary's sentence describe a
+                # different number.
                 if d.seat in declined_initiative:
                     book.count(f"delayed_cbet:{s}", bet)
                     if bet:

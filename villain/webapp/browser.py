@@ -94,15 +94,10 @@ def dispatch_json(method: str, path: str, body: str = "") -> dict:
     # The API is JSON throughout; decode as text so the JS side can hand it
     # straight to a Response without a copy through the pyodide buffer proxy.
     #
-    # `wrote` is how the hosted page knows to upload the database to the
-    # account. It is answered here, by the module that owns the routes, because
-    # the page used to answer it with a regex of its own -- and a regex that
-    # does not know about a route added later says "nothing changed" for it,
-    # which is a silent failure to save somebody's import.
-    #
-    # A definitions rebuild is a write that no route asked for, so the path
-    # alone cannot see it. Without this, a GET that migrated reported false,
-    # the stamp never left the worker, and the next visit rebuilt every hand.
+    # `wrote` tells the hosted page to upload the database. Answered here, by
+    # the module that owns the routes: anything deciding it from the path
+    # alone says "nothing changed" for a route added later, and misses a
+    # definitions rebuild entirely -- a write no route asked for.
     from .. import db
     from .heroview import consume_hero_dirty
     return {"status": code, "body": out.decode("utf-8"), "content_type": content_type,

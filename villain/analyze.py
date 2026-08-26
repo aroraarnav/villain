@@ -158,18 +158,10 @@ def as_dict(profile: Profile) -> dict:
              # once did opens an empty panel.
              "stats": [st for st in component_stats(c.name)
                        if profile.opps(st) and not st.startswith("aggression:")
-                       # At least a handful of actual instances: PlayerG limps
-                       # 4 times in 1841 hands, which is nonzero and is not
-                       # evidence of anything.
-                       # Between a handful and a reviewable list. VPIP has
-                       # thousands of instances and no single hand tells you
-                       # anything: "here are 1,053 hands where they played" is
-                       # not evidence, it is the denominator.
-                       # At least one real instance. The bar used to be five,
-                       # which hid exactly the informative cases -- 4 limps in
-                       # 2,945 hands is a read ("essentially never"), and the
-                       # panel now says so in words. The upper cap stays: a
-                       # list of 2,000 hands is a denominator, not evidence.
+                       # One real instance, up to a reviewable list. Below one
+                       # there is nothing to show; above the cap it is a
+                       # denominator, not evidence -- 1,053 hands where they
+                       # played proves nothing.
                        and 1 <= (profile.stats[st].raw or 0) * profile.opps(st) <= 150],
              "weak": c.score < WEAK_COMPONENT and c.name != "Resistance to exploitation"}
             for c in profile.skill.components

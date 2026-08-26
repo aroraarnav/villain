@@ -168,16 +168,12 @@ CONTINUOUS[FULL] = dict(CONTINUOUS[SHORT])
 #: exists. They are online-pool figures and they disagree with what a home game
 #: actually fits by up to 2x in both directions.
 #:
-#: Substituting the fitted numbers here was tried and reverted, and the reason
-#: is worth keeping: this table and ``POPULATION`` are one model, not two
-#: knobs. The prototype deviations are measured *from* a mean *in units of* a
-#: spread, so a fitted spread against an online mean is a mixture of two pools
-#: and describes neither -- it made ``tag`` imply a 19.9% PFR against a 15.8%
-#: VPIP, a player who raises more hands than they play, and broke six tests
-#: that had nothing to do with archetypes. Either replace both with home-game
-#: measurements or leave both alone. Leaving both alone is what the fitted
-#: path makes safe: ``villain fit`` overrides mean and spread together, so a
-#: database with its own players never reads either of these.
+#: Do not substitute the fitted numbers here. This table and ``POPULATION``
+#: are one model: deviations are measured *from* a mean *in units of* a
+#: spread, so a fitted spread against an online mean describes neither pool
+#: -- it made ``tag`` imply a 19.9% PFR against a 15.8% VPIP. Replace both
+#: with home-game measurements or leave both alone; the fitted path overrides
+#: mean and spread together, so a real database never reads either.
 SPREAD = {
     "vpip": 0.50, "pfr": 0.55, "raise_share": 0.55, "three_bet": 0.55, "fold_to_three_bet": 0.45,
     "cbet:flop": 0.50, "cbet:turn": 0.50, "cbet:river": 0.52,
@@ -210,52 +206,10 @@ def spread_of(feature: str, table_regime: str = "",
 
     An archetype is a deviation from the field, and this is the unit that
     deviation is measured in -- so getting it wrong moves every prototype's
-    target without moving any player. It was a global constant while the
-    population *mean* was fitted per regime, and the two disagree by up to 2x
-    in *both* directions on a real pool:
-
-        fold_vs_bet:turn   assumed 0.48   fitted 0.20   ratio 0.42
-        fold_vs_bet:river  assumed 0.50   fitted 0.20   ratio 0.40
-        wwsf               assumed 0.32   fitted 0.15   ratio 0.47
-        raise_share        assumed 0.55   fitted 0.82   ratio 1.50
-        limp               assumed 1.00   fitted 1.60   ratio 1.60
-
-    Both directions matter, and they compound into the same failure. Where the
-    constant is too *large* -- every postflop feature -- a trait of -2.0
-    spreads asks for a frequency four or five real spreads out, which nobody
-    posts, so ``station``, ``maniac`` and ``nit`` could not be anybody's
-    label. Where it is too *small* -- ``raise_share``, ``limp``,
-    ``fold_to_three_bet`` -- the same trait lands barely one spread out, so
-    those features separated everybody cheaply and the preflop block decided
-    the archetype on its own. Fitting the spread narrows the postflop targets
-    into reachable territory and widens the preflop ones back to what the
-    field really is; the vocabulary becomes usable in one step because the
-    unit finally means the same thing everywhere.
-
-    Fitted from the *observed scatter between players with the sampling noise
-    subtracted*, not from a Beta strength -- see
-    :meth:`Store._spread_samples` for both halves of that. The Beta route is
-    the one that inverts: where the pool cannot be separated it returns a
-    large strength, implying a tiny spread, and a tiny spread amplifies every
-    deviation measured against it. Observed scatter has no such inversion, and
-    it is held inside ``Store.SPREAD_BOUNDS`` besides.
-
-    The built-in constants stay as the fallback, for the case this tool is
-    built for: a database too small to have fitted anything yet. They are
-    online-pool numbers, and a home game is not an online pool -- but a rough
-    unit everywhere beats no unit at all, and the fitted value replaces it
-    per feature as soon as ``villain fit`` has seen twelve players post it.
-
-    An earlier attempt at this was measured as a regression (log loss 1.295 ->
-    1.362) and reverted. Two things were wrong with that reading. The harness
-    could not judge it -- ``validate._best_supported`` built its ground truth
-    by calling ``target_frequency``, so the label and the thing predicting it
-    moved together -- and the traits were left at values authored for the old
-    unit, where the whole postflop block had been unreachable and was never
-    calibrated against anything. Changing the unit without re-authoring the
-    vectors written in it is not the same change. Judge it on
-    ``validate.predictive_loss``, which scores held-out *counts* and does not
-    consult ``target_frequency`` for its target.
+    target without moving any player. Fitted per regime, from the observed
+    scatter between players with sampling noise subtracted; a global constant
+    was wrong by up to 2x in both directions. See docs/decisions.md for the
+    measured gap and why the Beta route inverts.
     """
     if priors:
         fitted = priors.get(f"spread:{feature}")
@@ -272,9 +226,9 @@ def spread_of(feature: str, table_regime: str = "",
 class Estimate:
     """A shrunk frequency with the interval that honesty requires.
 
-    ``alpha``/``beta`` are the full Beta posterior, kept so downstream code can
-    ask probability questions -- "how sure are we they fold *more* than the
-    field?" -- instead of being stuck with a point estimate and an interval.
+    ``alpha``/``beta`` are the full Beta posterior, kept so downstream code can ask
+    probability questions -- "how sure are we they fold *more* than the field?" --
+    rather than being stuck with a point estimate and an interval.
     """
 
     value: float
@@ -295,11 +249,8 @@ class Estimate:
     strength: float = 0.0  # prior weight in pseudo-opportunities
 
     def _beta_prob(self, threshold: float, above: bool, *, prior: bool = False) -> float:
-        """A finite probability. scipy's Beta is undefined at α/β = 0.
-
-        A 0-hit book (or a fitted prior of 0) would otherwise yield NaN, which
-        ``json.dumps`` writes as the token NaN and the browser cannot parse —
-        Database and Simulate both died that way on the demo roster.
+        """A finite probability. scipy's Beta is undefined at alpha/beta = 0, and the
+        NaN that produces is not JSON. docs/decisions.md.
         """
         from scipy.stats import beta as _beta
         if prior:
@@ -321,8 +272,8 @@ class Estimate:
     def prior_prob_above(self, threshold: float) -> float:
         """What we would have believed with no hands on this player at all.
 
-        Compared against :meth:`prob_above`, this is how much the *data* moved
-        the answer -- the only part of a read that was actually earned.
+        Against :meth:`prob_above`, this is how much the *data* moved the answer --
+        the only part of a read that was earned.
         """
         return self._beta_prob(threshold, True, prior=True)
 
@@ -376,10 +327,9 @@ def fit_empirical(samples: dict[str, list[tuple[float, float]]],
                   min_players: int = 8) -> dict[str, tuple[float, float]]:
     """Beta-Binomial moments fit: (hits, opps) per player -> (mean, strength).
 
-    The between-player spread is what sets the strength. If every player in the
-    database folds to c-bets at roughly the same rate, a new player's three
-    observations should barely move their estimate; if the spread is wide, the
-    same three observations mean more.
+    The between-player spread sets the strength. If everyone folds to c-bets at
+    roughly the same rate, three observations should barely move a new player's
+    estimate; if the spread is wide, the same three mean more.
     """
     out: dict[str, tuple[float, float]] = {}
     for stat, rows in samples.items():
