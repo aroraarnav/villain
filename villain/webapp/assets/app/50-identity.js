@@ -448,10 +448,7 @@ function isExactName(q) {
 /* When both sides show the same screen name the name tells you nothing, so
    the account id has to be on screen to make the question answerable. */
 async function askIdentity(token, questions, onDone, linked, conflicts) {
-  const modal = $("#modal");
-  modal.innerHTML = `
-    <div class="veil"><div class="sheet">
-      <h2 style="margin-top:0">Same player?</h2>
+  const modal = sheet("Same player?", {bare: true, body: `
       <p class="small muted" style="margin-top:0">
         Same-id accounts were merged already. These are different ids.</p>
       <label class="bulk" id="bulk-wrap" hidden>
@@ -463,9 +460,8 @@ async function askIdentity(token, questions, onDone, linked, conflicts) {
       <div class="row" style="justify-content:flex-end;margin-top:18px">
         <button class="act" id="cancel">Keep them separate</button>
         <button class="act primary" id="confirm">Apply</button>
-      </div>
-    </div></div>`;
-  const box = $("#questions");
+      </div>`});
+  const box = $("#questions", modal);
   const groups = groupQuestions(questions, linked);
 
   for (const g of groups.filter(x => x.questions.length > 1)) {
@@ -649,14 +645,11 @@ function showResult(result) {
          ${result.merged} merge(s) applied.</p>
        ${(result.blocked || []).map(b => `<p class="err small">${esc(b)}</p>`).join("")}`;
   const heading = result.error ? "Could not save" : result.reset ? "Database reset" : "Saved";
-  modal.innerHTML = `<div class="veil"><div class="sheet">
-    <h2 style="margin-top:0">${heading}</h2>
-    ${body}
+  const card = sheet(heading, {bare: true, body: `${body}
     <div class="row" style="justify-content:flex-end;margin-top:16px">
-      <button class="act" id="close">Close</button>
+      <button class="act" data-close>Close</button>
       ${result.error || result.reset ? "" : '<button class="act primary" id="godb">Open players</button>'}
-    </div></div></div>`;
-  $("#close").onclick = () => { modal.innerHTML = ""; };
-  const go = $("#godb");
-  if (go) go.onclick = () => { modal.innerHTML = ""; switchTab("players"); };
+    </div>`});
+  const go = $("#godb", card);
+  if (go) go.onclick = () => { $("#modal").innerHTML = ""; switchTab("players"); };
 }

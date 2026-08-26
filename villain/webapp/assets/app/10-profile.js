@@ -148,8 +148,7 @@ function gtoExplainer() {
 }
 
 function openGtoModal(gto) {
-  const modal = openSheet("vs GTO — every stat");
-  $(".sheet", modal).appendChild(gtoRows(gto.rows));
+  sheet("vs GTO — every stat").appendChild(gtoRows(gto.rows));
 }
 
 /* A compact rating badge, `you N/100 GTO`, plus a link to the full row list --
@@ -201,9 +200,8 @@ function profileHead(p, isHero, hero) {
     const planLink = h("button", "linkbtn how-link");
     planLink.textContent = "How to play them";
     planLink.onclick = () => {
-      openSheet(`How to play ${esc(p.name || p.archetype)}`);
-      $(".sheet").insertAdjacentHTML("beforeend",
-        `<div class="how-body">${esc(p.plan)}</div>`);
+      sheet(`How to play ${esc(p.name || p.archetype)}`,
+            {body: `<div class="how-body">${esc(p.plan)}</div>`});
     };
     $(".read-copy", head).appendChild(planLink);
   }
@@ -371,8 +369,7 @@ function whatToDoTile(p, hero, leaks) {
       const link = h("button", "linkbtn how-link");
       link.textContent = "Why, and what not to do";
       link.onclick = () => {
-        const modal = openSheet(esc(l.headline));
-        $(".sheet", modal).insertAdjacentHTML("beforeend", `<div class="how-body"></div>`);
+        const modal = sheet(esc(l.headline), {body: `<div class="how-body"></div>`});
         const how = $(".how-body", modal);
         for (const [label, text] of whydont) {
           const block = h("div", "howblock", `<div class="howlabel">${esc(label)}</div>
@@ -630,8 +627,7 @@ function keyNumbersTile(p, hero) {
     link.textContent = `See all ${ordered.length} numbers`;
     link.onclick = () => {
       _heroVoice = hero;
-      const modal = openSheet("Key numbers");
-      $(".sheet", modal).insertAdjacentHTML("beforeend", `<div class="modal-numbers"></div>`);
+      const modal = sheet("Key numbers", {body: `<div class="modal-numbers"></div>`});
       const full = makeTable();
       fill(full, ordered);
       $(".modal-numbers", modal).appendChild(full);

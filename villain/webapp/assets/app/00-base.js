@@ -131,14 +131,24 @@ function h(tag, cls, html) {
   if (html != null) node.innerHTML = html;
   return node;
 }
-function openSheet(title, extraClass) {
-  const modal = $("#modal");
-  const sc = extraClass ? " " + extraClass : "";
-  modal.innerHTML = `<div class="veil"><div class="sheet${sc}">
-    <div class="spread"><h2 style="margin:0">${title}</h2>
-      <button class="act" id="close">Close</button></div></div></div>`;
-  $("#close").onclick = () => { modal.innerHTML = ""; };
-  return modal;
+/* Every dialog in this app is a veil over a sheet, and ten places built that
+   shell inline -- showEvidence built it three times, once per state, so its
+   close handler was written three times too. This returns the `.sheet` to
+   fill, and binds every `data-close` in it to dismiss the layer, so a dialog
+   whose buttons sit at the bottom gets the same handling as one with a header
+   button. `.sheet > .spread:first-child` is a real CSS hook, so the titled
+   header stays the first child; `bare` is for the dialogs that want a plain
+   heading and their own buttons underneath. */
+function sheet(title, opts) {
+  const {cls = "", host = "#modal", close = "Close", bare = false, body = ""} = opts || {};
+  const layer = $(host);
+  layer.innerHTML = `<div class="veil"><div class="sheet${cls ? " " + cls : ""}">${bare
+    ? `<h2 style="margin-top:0">${title}</h2>`
+    : `<div class="spread"><h2 style="margin:0">${title}</h2>
+         <button class="act" data-close>${close}</button></div>`}${body}</div></div>`;
+  for (const btn of layer.querySelectorAll("[data-close]"))
+    btn.onclick = () => { layer.innerHTML = ""; };
+  return $(".sheet", layer);
 }
 
 /* ---- the one mark this tool needs, over and over ----

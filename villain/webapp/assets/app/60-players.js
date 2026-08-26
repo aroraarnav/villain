@@ -186,16 +186,12 @@ function playerActions(data) {
    mistake happens at -- one stray account swept into somebody else, not a
    whole identity gone wrong. */
 function splitDialog(data) {
-  const modal = $("#modal");
-  modal.innerHTML = `<div class="veil"><div class="sheet">
-    <div class="spread"><h2 style="margin:0">Split ${esc(data.display_name)}</h2>
-      <button class="act" id="close">Close</button></div>
+  const modal = sheet(`Split ${esc(data.display_name)}`, {body: `
     <div class="panel-lead">These ${data.aliases.length} accounts are pooled as
       one person. Split one out if it is somebody else \u2014 the hands stay
       put, only who they belong to changes, and both profiles are rebuilt from
       them.</div>
-    <div id="split-rows"></div></div></div>`;
-  $("#close").onclick = () => { modal.innerHTML = ""; };
+    <div id="split-rows"></div>`});
   const rows = $("#split-rows", modal);
   for (const a of data.aliases) {
     const row = h("div", "alias-row", `<span><b>${esc(a.name || a.account)}</b>
@@ -209,7 +205,7 @@ function splitDialog(data) {
       try {
         const r = await post("/api/unlink",
           {player_id: data.player_id, site: a.site, account: a.account});
-        modal.innerHTML = "";
+        $("#modal").innerHTML = "";
         // Straight to whoever this just became: the point of splitting is to
         // look at them on their own.
         state.roster = null;
@@ -236,18 +232,14 @@ function splitDialog(data) {
    behind. The veil stays up through the delete *and* the roster rebuild --
    dismissing first left the profile on screen looking frozen. */
 function deleteDialog(data) {
-  const modal = $("#modal");
   const draw = (err) => {
-    modal.innerHTML = `<div class="veil"><div class="sheet">
-      <h2 style="margin-top:0">Delete ${esc(data.display_name)}?</h2>
+    sheet(`Delete ${esc(data.display_name)}?`, {bare: true, body: `
       <p>The profile goes. The hands stay.</p>
       <div class="row" style="justify-content:flex-end;margin-top:16px">
-        <button class="act" id="cancel-del">Cancel</button>
+        <button class="act" data-close>Cancel</button>
         <button class="act danger" id="do-del">Delete</button>
       </div>
-      ${err ? `<div class="small err" style="margin-top:10px">${esc(err)}</div>` : ""}
-    </div></div>`;
-    $("#cancel-del").onclick = () => { modal.innerHTML = ""; };
+      ${err ? `<div class="small err" style="margin-top:10px">${esc(err)}</div>` : ""}`});
     $("#do-del").onclick = async () => {
       const setBusy = showBusy("Deleting\u2026");
       try {
@@ -256,7 +248,7 @@ function deleteDialog(data) {
         state.player = null;
         state.roster = null;
         await viewPlayers();
-        modal.innerHTML = "";
+        $("#modal").innerHTML = "";
       } catch (e) {
         draw(e.message || "could not delete");
       }
@@ -268,9 +260,7 @@ function deleteDialog(data) {
 /* Destructive and irreversible, so it asks for the words rather than a click:
    a stray Enter on a normal dialog should not cost a season of hands. */
 function confirmReset(data) {
-  const modal = $("#modal");
-  modal.innerHTML = `<div class="veil"><div class="sheet">
-    <h2 style="margin-top:0">Reset the database?</h2>
+  const modal = sheet("Reset the database?", {bare: true, body: `
     <p>This deletes <b>${data.hands} hands</b> and
        <b>${data.players.length} profiles</b>, along with every merge and rename
        decision you have made.</p>
@@ -280,18 +270,17 @@ function confirmReset(data) {
     <input id="confirm-text" style="width:100%;padding:8px 10px;border-radius:8px;
       border:1px solid var(--line);background:transparent;color:var(--ink);font:inherit">
     <div class="row" style="justify-content:flex-end;margin-top:16px">
-      <button class="act" id="cancel">Cancel</button>
+      <button class="act" data-close>Cancel</button>
       <button class="act danger" id="go" disabled>Reset</button>
-    </div></div></div>`;
-  const text = $("#confirm-text"), go = $("#go");
+    </div>`});
+  const text = $("#confirm-text", modal), go = $("#go", modal);
   text.focus();
   text.oninput = () => { go.disabled = text.value.trim().toLowerCase() !== "delete everything"; };
-  $("#cancel").onclick = () => { modal.innerHTML = ""; };
   go.onclick = async () => {
     go.disabled = true; go.textContent = "resetting\u2026";
     try {
       const result = await post("/api/reset", {confirm: "delete everything"});
-      modal.innerHTML = "";
+      $("#modal").innerHTML = "";
       state.player = null; state.session = null; state.roster = null;
       viewPlayers();
       paintTabs();               // an emptied database closes tabs again
@@ -302,34 +291,25 @@ function confirmReset(data) {
 
 /* ---- evidence: the hands behind a number ---- */
 async function showEvidence(playerId, stat, headline) {
-  const modal = $("#modal");
-  const sc = String(stat).startsWith("vs:") ? " hero-scope" : "";
-  // Same spinner as the rest of the tool. A muted "finding the hands…"
-  // with no motion looked like a hung page on a large sample, which is
-  // exactly when this call is slow.
-  modal.innerHTML = `<div class="veil"><div class="sheet${sc}">
-    <div class="spread"><h2 style="margin:0">${esc(headline)}</h2>
-      <button class="act" id="close">Close</button></div>
-    <div class="loading"><span class="spinner" aria-hidden="true"></span>
-      <span>Finding the hands\u2026</span></div></div></div>`;
-  $("#close").onclick = () => { modal.innerHTML = ""; };
+  // One dialog, three states. The shell was written out for each of them,
+  // which is how the close handler ended up wired three times.
+  const cls = String(stat).startsWith("vs:") ? "hero-scope" : "";
+  const draw = (body) => sheet(esc(headline), {cls, body});
+  const open = () => $("#modal").querySelector(".sheet");   // still on screen?
+  // Same spinner as the rest of the tool. A muted "finding the hands…" with no
+  // motion looked like a hung page on a large sample, which is exactly when
+  // this call is slow.
+  draw(`<div class="loading"><span class="spinner" aria-hidden="true"></span>
+      <span>Finding the hands\u2026</span></div>`);
   let data;
   try {
     data = await get(`/api/evidence?player=${playerId}&stat=${encodeURIComponent(stat)}`);
   } catch (err) {
-    if (!modal.querySelector(".sheet")) return;   // closed while it was working
-    modal.innerHTML = `<div class="veil"><div class="sheet${sc}">
-      <div class="spread"><h2 style="margin:0">${esc(headline)}</h2>
-        <button class="act" id="close">Close</button></div>
-      <p class="err">${esc(err.message)}</p>
-      </div></div>`;
-    $("#close").onclick = () => { modal.innerHTML = ""; };
+    if (open()) draw(`<p class="err">${esc(err.message)}</p>`);
     return;
   }
-  if (!modal.querySelector(".sheet")) return;     // closed while it was working
-  modal.innerHTML = `<div class="veil"><div class="sheet${sc}">
-    <div class="spread"><h2 style="margin:0">${esc(headline)}</h2>
-      <button class="act" id="close">Close</button></div>
+  if (!open()) return;                            // closed while it was working
+  const modal = draw(`
     <p class="ev-verdict">${esc(evidenceVerdict(data))}</p>
     <p class="small muted">${data.hits
       ? `Showing the most recent \u2014 click one to replay it.`
@@ -337,11 +317,9 @@ async function showEvidence(playerId, stat, headline) {
       ${data.count > data.hits
       ? `<label class="onlyhits"><input type="checkbox" id="show-all">
            show the ones where it did not</label>` : ""}</p>
-    <div id="evlist"></div>
-    </div></div>`;
-  $("#close").onclick = () => { modal.innerHTML = ""; };
+    <div id="evlist"></div>`);
 
-  const list = $("#evlist");
+  const list = $("#evlist", modal);
   // The hands that moved the number are what you opened this to check; the
   // denominator is one click away, because 19 of 60 and 19 of 20 are different
   // players and hiding that would misrepresent the rate.
@@ -385,14 +363,9 @@ async function showEvidence(playerId, stat, headline) {
 async function showReplay(handId, playerId, headline) {
   // Its own layer: the replay used to append under a list you had scrolled
   // through, so the hand you clicked ended up off screen.
-  const layer = $("#modal2");
-  layer.innerHTML = `<div class="veil"><div class="sheet">
-    <div class="spread"><h2 style="margin:0">Hand replay</h2>
-      <button class="act" id="close-replay">Back</button></div>
+  const layer = sheet("Hand replay", {host: "#modal2", close: "Back", body: `
     ${headline ? `<p class="small muted" style="margin:4px 0 0">${esc(headline)}</p>` : ""}
-    <div id="replay"></div>
-  </div></div>`;
-  $("#close-replay").onclick = () => { layer.innerHTML = ""; };
+    <div id="replay"></div>`});
   const box = $("#replay", layer);
   box.appendChild(loadingBlock("Loading the hand\u2026"));
   const r = await get(`/api/hand/${handId}?focus=${playerId}`);
