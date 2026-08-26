@@ -204,13 +204,19 @@ def session_brief(token: str) -> dict:
             session.get("questions") or [])],
         # Pairs already settled as the same person. Not asked about, but sent
         # anyway: they are the edges that join two clusters of accounts, and
-        # without them the dialog showed "tin/tintin" and "Tins white gf/Tin"
+        # without them the dialog showed "ghost/ghostly" and "Ghosts partner/Ghost"
         # as two unrelated questions when the four are one knot.
         "linked": [question_payload(q) for q in (session.get("questions") or [])
                    if q.auto],
         # Pairs that can never be one person, so the dialog can keep them apart
         # rather than accepting a merge the database will refuse.
         "conflicts": _conflicting_pairs(session),
+        # Whether a *person* has answered, not whether the session carries
+        # answers at all. Auto-applied merges live in the same dict, so the
+        # plain truthiness test made every upload look already-answered the
+        # moment reconnect runs started being applied -- and the UI, which
+        # only opens the dialog when a session is unanswered, silently
+        # skipped every question that still needed a human.
         "answered": bool(set(session.get("answers") or {})
                          - {q.id for q in (session.get("questions") or []) if q.auto}),
         "auto_merged": len(auto_answers(session.get("questions") or [])),
@@ -319,36 +325,10 @@ def session_payload(token: str, store: Store | None = None) -> dict:
         if is_hero:                       # blue identity + second-person voice
             pp = _to_you(pp)
         profile_payloads.append(pp)
-    return {
-        "token": token,
-        "files": session["files"],
-        "hands": len(session["hands"]),
-        "players": rows,
-        "profiles": profile_payloads,
-        "saved": session.get("saved", False),
-        "questions": [question_payload(q) for q in askable_questions(
-            session.get("questions") or [])],
-        # Pairs already settled as the same person. Not asked about, but sent
-        # anyway: they are the edges that join two clusters of accounts, and
-        # without them the dialog showed "tin/tintin" and "Tins white gf/Tin"
-        # as two unrelated questions when the four are one knot.
-        "linked": [question_payload(q) for q in (session.get("questions") or [])
-                   if q.auto],
-        # Pairs that can never be one person, so the dialog can keep them apart
-        # rather than accepting a merge the database will refuse.
-        "conflicts": _conflicting_pairs(session),
-        # Whether a *person* has answered, not whether the session carries
-        # answers at all. Auto-applied merges live in the same dict, so the
-        # plain truthiness test made every upload look already-answered the
-        # moment reconnect runs started being applied -- and the UI, which
-        # only opens the dialog when a session is unanswered, silently
-        # skipped every question that still needed a human.
-        "answered": bool(set(session.get("answers") or {})
-                         - {q.id for q in (session.get("questions") or []) if q.auto}),
-        "auto_merged": len(auto_answers(session.get("questions") or [])),
-        "merges": [{"from": k[1], "to": v["name"]}
-                   for k, v in (session.get("merges") or {}).items()],
-    }
+    # The brief is the whole answer bar the two keys profiling adds, and it was
+    # copied out here in full -- so the note explaining `answered` existed
+    # twice, and had already been corrected in only one of them.
+    return session_brief(token) | {"players": rows, "profiles": profile_payloads}
 
 
 def question_payload(question) -> dict:

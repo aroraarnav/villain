@@ -2643,7 +2643,7 @@ function groupQuestions(questions, linked) {
   // Settled pairs join clusters even though nobody is asked about them. Two
   // accounts whose names normalise the same are merged without a question, and
   // leaving that edge out split one knot of accounts into two unrelated
-  // dialogs -- "tin"/"tintin" over here, "Tins white gf"/"Tin" over there.
+  // dialogs -- "ghost"/"ghostly" over here, "Ghosts partner"/"Ghost" over there.
   for (const q of [...questions, ...(linked || [])]) {
     const a = sideKey(q.left), b = sideKey(q.right);
     parent[a] = parent[a] ?? a; parent[b] = parent[b] ?? b;
