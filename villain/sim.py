@@ -324,7 +324,5 @@ def _made_name(hole, board) -> str | None:
 
 
 def _stat(profile, key: str, min_opps: float = 20.0) -> float | None:
-    est = getattr(profile, "stats", {}).get(key) if profile is not None else None
-    if est is None or getattr(est, "opps", 0) < min_opps:
-        return None
-    return float(est.value)
+    value = None if profile is None else profile.rate(key, None, min_opps)
+    return None if value is None else float(value)

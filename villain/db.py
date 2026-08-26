@@ -843,36 +843,56 @@ class Store:
                 book.meters[row["stat"]] = Meter(row["n"], row["total"], row["sumsq"])
         return out
 
-    def population_samples(self, stat_filter=None) -> dict[str, dict[str, list[tuple[float, float]]]]:
-        """Every player's (hits, opps) per stat, per regime -- input to a prior fit."""
+    #: Counters that describe a seat or a raw action rather than a decision,
+    #: plus the against-you slices. A ``vs:`` counter is one player's behavior
+    #: against one opponent, so its spread across players measures the
+    #: opponent as much as the pool.
+    POOL_SKIP = ("seat:", "saw:", "act:", VS_HERO)
+
+    def _ratio_samples(self, min_opps: float = 0.0, skip: tuple[str, ...] = (),
+                       stat_filter=None):
+        """``(regime, stat, hits, opps)`` for every player-stat in the pool.
+
+        Three reducers read this table -- a prior fit, a between-player spread
+        and a normal-range band -- and each used to open its own scan and
+        re-assemble the derived features for itself, staying level with the
+        others by a comment naming them. They had already drifted on which
+        stats they skip. The reducers genuinely differ; the traversal does not.
+
+        Derived features are assembled from raw action counters and never
+        stored as ratio rows, so a scan of this table alone never sees them --
+        which left aggression:* (importance 4.0, the matcher's heaviest block)
+        on the built-in defaults however much pool there was to fit.
+        """
         from .profile import DERIVED
-        out: dict[str, dict[str, list[tuple[float, float]]]] = defaultdict(lambda: defaultdict(list))
         raw: dict[tuple[str, int], dict[str, tuple[float, float]]] = defaultdict(dict)
-        for row in self.conn.execute(
-                "SELECT regime, player_id, stat, hits, opps FROM ratios"):
+        sql = "SELECT regime, player_id, stat, hits, opps FROM ratios"
+        args: tuple = ()
+        if min_opps:
+            sql += " WHERE opps >= ?"
+            args = (min_opps,)
+        for row in self.conn.execute(sql, args):
             raw[(row["regime"], row["player_id"])][row["stat"]] = (row["hits"], row["opps"])
-            # A vs: counter is one player's behavior against one opponent, so
-            # the spread across players measures the opponent as much as the
-            # pool. Fitting a population from it would feed that back into
-            # everyone's shrinkage.
-            if row["stat"].startswith(VS_HERO):
+            if row["stat"].startswith(skip):
                 continue
             if stat_filter and not stat_filter(row["stat"]):
                 continue
-            out[row["regime"]][row["stat"]].append((row["hits"], row["opps"]))
-        # Derived features are assembled from raw action counters and never
-        # stored as ratio rows, so a fit over that table alone never sees them
-        # -- leaving aggression:* (importance 4.0, the matcher's heaviest
-        # block) on the built-in defaults however much pool there was to fit.
+            yield row["regime"], row["stat"], row["hits"], row["opps"]
         for (regime, _pid), stats in raw.items():
             for stat, (num_keys, den_keys) in DERIVED.items():
                 if stat_filter and not stat_filter(stat):
                     continue
                 den = sum(stats.get(k, (0.0, 0.0))[0] for k in den_keys)
-                if den <= 0:
+                if den <= 0 or den < min_opps:
                     continue
-                num = sum(stats.get(k, (0.0, 0.0))[0] for k in num_keys)
-                out[regime][stat].append((num, den))
+                yield regime, stat, sum(stats.get(k, (0.0, 0.0))[0] for k in num_keys), den
+
+    def population_samples(self, stat_filter=None) -> dict[str, dict[str, list[tuple[float, float]]]]:
+        """Every player's (hits, opps) per stat, per regime -- input to a prior fit."""
+        out: dict[str, dict[str, list[tuple[float, float]]]] = defaultdict(lambda: defaultdict(list))
+        for regime, stat, hits, opps in self._ratio_samples(
+                skip=(VS_HERO,), stat_filter=stat_filter):
+            out[regime][stat].append((hits, opps))
         return {r: dict(v) for r, v in out.items()}
 
     # -- sessions ---------------------------------------------------------
@@ -1078,34 +1098,13 @@ class Store:
         import statistics
 
         from .priors import logit
-        from .profile import DERIVED
         lo, hi = self.SPREAD_BOUNDS
         by: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
         noise: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
-        raw: dict[tuple[str, int], dict[str, tuple[float, float]]] = {}
-        for row in self.conn.execute(
-                "SELECT regime, player_id, stat, hits, opps FROM ratios WHERE opps >= 40"):
-            raw.setdefault((row["regime"], row["player_id"]), {})[row["stat"]] = (
-                row["hits"], row["opps"])
-            if row["stat"].startswith(("seat:", "saw:", "act:", VS_HERO)):
-                continue
-            rate = row["hits"] / row["opps"]
-            by[row["regime"]][row["stat"]].append(logit(min(max(rate, 0.005), 0.995)))
-            noise[row["regime"]][row["stat"]].append(
-                self._logit_noise(rate, row["opps"]))
-        # aggression:* is assembled from raw action counters and never stored
-        # as a ratio row, so scanning this table alone left the matcher's
-        # heaviest block on the built-in constant -- roughly twice the scatter
-        # this pool shows, which `maniac` paid for. Same assembly as
-        # :meth:`_observed_ranges` and :meth:`population_samples`.
-        for (regime, _pid), stats in raw.items():
-            for stat, (num_keys, den_keys) in DERIVED.items():
-                den = sum(stats.get(k, (0.0, 0.0))[0] for k in den_keys)
-                if den < 40:
-                    continue
-                num = sum(stats.get(k, (0.0, 0.0))[0] for k in num_keys)
-                by[regime][stat].append(logit(min(max(num / den, 0.005), 0.995)))
-                noise[regime][stat].append(self._logit_noise(num / den, den))
+        for regime, stat, hits, opps in self._ratio_samples(40, self.POOL_SKIP):
+            rate = hits / opps
+            by[regime][stat].append(logit(min(max(rate, 0.005), 0.995)))
+            noise[regime][stat].append(self._logit_noise(rate, opps))
         out: dict[str, dict[str, float]] = {}
         for regime, stats in by.items():
             for stat, vals in stats.items():
@@ -1124,29 +1123,9 @@ class Store:
         sample should not be able to stretch the band, and the point of the
         band is to say what is *normal* here, not what is possible.
         """
-        from .profile import DERIVED
-
-        by: dict[str, dict[str, list[float]]] = {}
-        raw: dict[tuple[str, int], dict[str, tuple[float, float]]] = {}
-        for row in self.conn.execute(
-                "SELECT regime, player_id, stat, hits, opps FROM ratios WHERE opps >= 40"):
-            raw.setdefault((row["regime"], row["player_id"]), {})[row["stat"]] = (
-                row["hits"], row["opps"])
-            if row["stat"].startswith(("seat:", "saw:", "act:", VS_HERO)):
-                continue
-            by.setdefault(row["regime"], {}).setdefault(row["stat"], []).append(
-                row["hits"] / row["opps"])
-        # aggression:* is assembled from raw action counters and never stored
-        # as a ratio of its own, so a band read off this table alone had no
-        # entry for it -- and `maniac`, whose whole identity is aggression,
-        # was the archetype that needed one most.
-        for (regime, _pid), stats in raw.items():
-            for stat, (num_keys, den_keys) in DERIVED.items():
-                den = sum(stats.get(k, (0.0, 0.0))[0] for k in den_keys)
-                if den < 40:
-                    continue
-                num = sum(stats.get(k, (0.0, 0.0))[0] for k in num_keys)
-                by.setdefault(regime, {}).setdefault(stat, []).append(num / den)
+        by: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+        for regime, stat, hits, opps in self._ratio_samples(40, self.POOL_SKIP):
+            by[regime][stat].append(hits / opps)
         out: dict[str, dict[str, tuple[float, float]]] = {}
         for regime, stats in by.items():
             for stat, vals in stats.items():

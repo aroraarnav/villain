@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from . import profile as _p
 from .cards import FULL_HOUSE, RANKS, card_text, evaluate
 from .holdem import STREETS
 from .model import positions_for
@@ -267,77 +268,51 @@ def hand_strength(hole: tuple[int, ...], board: list[int]) -> float:
     return float(np.searchsorted(universe, mine, side="left") / len(universe))
 
 
-def _est(profile, stat: str):
-    """A frequency estimate from ``profile.stats``."""
-    if profile is None:
-        return None
-    stats = getattr(profile, "stats", None) or {}
-    return stats.get(stat)
-
-
+# Reading a profile is villain.profile's job -- see its "reading a
+# measurement" block. What stays here is the *bar*: how much sample the bot
+# insists on before it will let a measured number override a default. That is
+# a policy choice, and it is botplay's, so it lives with the policy. Twenty
+# call sites below take these defaults rather than naming a bar.
 def _freq(profile, stat: str, default: float) -> float:
-    est = _est(profile, stat)
-    return est.value if est is not None else default
-
-
-def _raise_to(hand, legal, target: int) -> tuple[str, int]:
-    to = int(min(max(target, legal.min_raise_to), legal.max_raise_to))
-    return ("raise", to)
-
-
-def _size(profile, key, default, min_n=5.0):
-    """A measured size from ``profile.means`` -- used only when it has sample."""
-    means = getattr(profile, "means", None)
-    if not means:
-        return default
-    v = means.get(key)
-    return v if (v is not None and means.get(key + "#n", 0.0) >= min_n) else default
-
-
-def _size_chain(profile, keys, default, min_n=5.0):
-    """First size key that has enough sample, else ``default``."""
-    for key in keys:
-        if not key:
-            continue
-        hit = _size(profile, key, None, min_n)
-        if hit is not None:
-            return hit
-    return default
+    return _p.rate(profile, stat, default)
 
 
 def _freq_n(profile, stat, default, min_opps=15.0):
-    est = _est(profile, stat)
-    return est.value if (est is not None and est.opps >= min_opps) else default
+    return _p.rate(profile, stat, default, min_opps)
+
+
+def _freq_chain(profile, keys, default, min_opps=15.0):
+    return _p.rate_chain(profile, keys, default, min_opps)
+
+
+#: Read at enough call sites that the long name was the noisiest thing on the
+#: line.
+_chain = _freq_chain
 
 
 def _sampled(profile, stat, min_opps=15.0) -> bool:
-    """Whether this key is a real number, not a prior we would be overriding."""
-    est = _est(profile, stat)
-    return est is not None and est.opps >= min_opps
+    return _p.sampled(profile, stat, min_opps)
 
 
 def _any_sampled(profile, keys, min_opps=15.0) -> bool:
     return any(_sampled(profile, k, min_opps) for k in keys if k)
 
 
-def _freq_chain(profile, keys, default, min_opps=15.0):
-    """First key that has enough sample, else ``default``.
-
-    Position and stack splits are real and measured, but they are thin. A
-    missing or 4-hand ``three_bet:UTG`` must not become the policy -- that is
-    how a pooled 8% turned into a 50% 3-bet off one hand. Walk the more
-    specific keys first and fall back.
-    """
-    for key in keys:
-        if not key:
-            continue
-        value = _freq_n(profile, key, None, min_opps)
-        if value is not None:
-            return value
-    return default
+def _size(profile, key, default, min_n=5.0):
+    return _p.size(profile, key, default, min_n)
 
 
-_chain = _freq_chain
+def _size_chain(profile, keys, default, min_n=5.0):
+    return _p.size_chain(profile, keys, default, min_n)
+
+
+def _size_sd(profile, key, min_n=5.0):
+    return _p.size_sd(profile, key, min_n)
+
+
+def _raise_to(hand, legal, target: int) -> tuple[str, int]:
+    to = int(min(max(target, legal.min_raise_to), legal.max_raise_to))
+    return ("raise", to)
 
 
 def _board_ctx(hand) -> tuple[str, str, str, str]:
@@ -352,14 +327,6 @@ def _board_ctx(hand) -> tuple[str, str, str, str]:
     if pot == "pre":
         pot = "srp"
     return tex, hilo, mw, pot
-
-
-def _size_sd(profile, key, min_n=5.0):
-    """Measured spread of a size key, or None when the sample is a point."""
-    means = getattr(profile, "means", None) or {}
-    if means.get(key + "#n", 0.0) < min_n:
-        return None
-    return means.get(key + "#sd")
 
 
 def _bet_frac(profile, street: str, rng, default: float = 0.6,
