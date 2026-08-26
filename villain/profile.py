@@ -91,21 +91,15 @@ class Profile:
     def fold_accuracy(self) -> float | None:
         """Mean distance from the breakeven fold frequency, across streets.
 
-        Two-sided on purpose, and that is the whole point of it. Every trait in
-        :mod:`villain.archetypes` is a *signed* deviation -- folds more than the
-        field, or less -- so a player who folds far too much and one who folds
-        far too little sit at opposite ends of every axis the matcher has, while
-        both are making the same kind of mistake. There was no way to say "folds
-        about right", which is exactly what separates a good regular from
+        Two-sided on purpose, and that is the point of it. Every trait in
+        :mod:`villain.archetypes` is a *signed* deviation, so a player who folds far
+        too much and one who folds far too little sit at opposite ends of every axis
+        the matcher has while making the same kind of mistake. There was no way to
+        say "folds about right", which is exactly what separates a good regular from
         somebody whose frequencies merely look tight.
 
-        Measured against one fixed reference rather than each player's own
-        faced sizes. That is deliberate: pricing it per-player inverts the
-        signal, because somebody who calls too much gets shown smaller bets,
-        which lowers his own breakeven until he clears it. On real players the
-        personalised version rated two known-weak opponents as *more*
-        disciplined than two known-strong ones. The fixed bar is the frequency
-        a competent player defends at, and distance from it is the measure.
+        Measured against one fixed bar rather than each player's own faced sizes;
+        pricing it per-player inverts the signal. docs/decisions.md.
         """
         errors = []
         for street in ("flop", "turn", "river"):
@@ -238,10 +232,8 @@ def build_profiles(by_regime: dict[str, StatBook], min_hands: int = 1,
                    populations: dict[str, dict] | None = None) -> list[Profile]:
     """One profile per regime the player has been seen in, busiest first.
 
-    Each book is shrunk toward *that* table's fitted prior. Handing every
-    slice the busiest-regime blob is how a heads-up book of a 6-max regular
-    got measured against 6-max VPIP -- 55% is a nit heads-up and a maniac
-    at that prior.
+    Each book is shrunk toward *that* table's fitted prior, never the busiest
+    regime's. docs/decisions.md.
     """
     profiles = []
     for reg, book in by_regime.items():
@@ -379,12 +371,8 @@ def _translate_rate(stat: str, ratio: Ratio, source: str, target: str,
                     populations: dict[str, dict] | None = None) -> float:
     """Re-express a rate measured in one regime on another regime's scale.
 
-    Shrunk first, because an unshrunk 0% or 100% has no finite log-odds and a
-    tiny sample would translate into an extreme claim. Source and target
-    populations must be the *same* field the rest of the pipeline uses --
-    fitted, once ``villain fit`` has run. Translating a home-game 6-max
-    observation against the online 24% VPIP table made it look like a huge
-    heads-up deviation, and shrinkage after the merge cannot undo that.
+    Shrunk first, and against the fitted field rather than the built-in one --
+    both of which are load bearing. docs/decisions.md.
     """
     mean, strength = _pop_mean_strength(stat, source, populations)
     shrunk = shrink(ratio.hits, ratio.opps, mean, strength).value
