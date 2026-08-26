@@ -8,31 +8,26 @@
 [stats.vpip]
 what = """\
     How often they voluntarily put money in before the flop — any call or \
-    raise, but not a blind they were forced to post.\
-    """
+    raise, but not a blind they were forced to post."""
 high = """\
     Playing too many hands. Their range is full of weak holdings, so they will \
-    miss most flops.\
-    """
+    miss most flops."""
 low = """\
     Very selective. When they enter a pot, respect it — but their blinds are \
-    free money.\
-    """
+    free money."""
 
 [stats.pfr]
 what = "How often they raise before the flop."
 high = "Aggressive preflop. Expect to be raised, and defend wider."
 low = """\
     Passive entry — they call more than they raise, which caps how strong \
-    their range can be.\
-    """
+    their range can be."""
 
 [stats.three_bet]
 what = "When someone raises in front of them, how often they re-raise."
 high = """\
     Re-raising more often than a value range allows, so many are bluffs. Fight \
-    back wider.\
-    """
+    back wider."""
 low = "Their re-raises are the top of their range. Fold anything marginal to one."
 
 [stats.fold_to_three_bet]
@@ -44,18 +39,15 @@ low = "They defend their raises. Re-raise for value, not as a bluff."
 what = "Facing a three-bet, how often they raise again rather than call or fold."
 high = """\
     They four-bet often, so a three-bet from you is not the end of the hand. \
-    Three-bet a tighter range and be ready to play for stacks.\
-    """
+    Three-bet a tighter range and be ready to play for stacks."""
 low = """\
     They almost never four-bet. Your three-bets can be wide, and when they do \
-    raise again, believe it.\
-    """
+    raise again, believe it."""
 
 [stats.five_bet]
 what = """\
     Facing a four-bet, how often they raise again. Rare enough that it takes a \
-    lot of hands to mean anything.\
-    """
+    lot of hands to mean anything."""
 high = "They five-bet light, so four-betting as a bluff is expensive against them."
 low = "They fold or call four-bets. Four-bet bluffs get through."
 
@@ -63,34 +55,28 @@ low = "They fold or call four-bets. Four-bet bluffs get through."
 what = "After a raise and at least one caller, how often they re-raise."
 high = """\
     They punish limped-along pots. Do not flat behind a raiser with a hand you \
-    cannot continue with.\
-    """
+    cannot continue with."""
 low = """\
     They let multiway pots go to the flop, so cold-calling behind a raiser is \
-    cheap.\
-    """
+    cheap."""
 
 [stats.cold_call]
 what = "How often they call a raise having not yet put money in."
 high = """\
     They call raises with hands that should fold or re-raise, so their calling \
-    range is capped and full of second-best hands.\
-    """
+    range is capped and full of second-best hands."""
 low = """\
     They three-bet or fold rather than call, so a flat call from them is a \
-    narrow, deliberate range.\
-    """
+    narrow, deliberate range."""
 
 [stats.rfi]
 what = "How often they open the pot with a raise when it is folded to them."
 high = """\
     They open a lot, so their opening range is weak on average. Three-bet and \
-    defend wider against it.\
-    """
+    defend wider against it."""
 low = """\
     They open rarely, so an open is a real hand. Give their raises more \
-    respect and steal their blinds more often.\
-    """
+    respect and steal their blinds more often."""
 
 [stats.bb_defend]
 what = "In the big blind facing a raise, how often they play rather than fold."
@@ -100,12 +86,10 @@ low = "Giving up their blind. Raise every button — the folds alone pay."
 [stats.limp]
 what = """\
     How often they enter the pot by calling the big blind instead of raising, \
-    when first to act.\
-    """
+    when first to act."""
 high = """\
     A limping range is capped and passive. Raise over the top and bet the \
-    flop.\
-    """
+    flop."""
 low = "Normal — good players rarely limp."
 
 [stats.fold_to_steal]
@@ -117,8 +101,7 @@ low = "They defend. Steal with hands that can play after the flop."
 what = "Having raised before the flop, how often they bet the flop."
 high = """\
     They bet their whole range, so most of it is air. Check-raise and float \
-    wide.\
-    """
+    wide."""
 low = "A checked flop means they missed. Take the pot away."
 
 [stats."cbet:turn"]
@@ -130,12 +113,10 @@ low = "They give up on the turn. Float the flop and take it next street."
 what = """\
     Having raised before the flop and then checked the flop, how often they \
     bet a later street. Not a second barrel — they declined to c-bet and are \
-    taking a delayed stab.\
-    """
+    taking a delayed stab."""
 high = """\
     A flop check from the raiser is not a give-up. Do not auto-bet when they \
-    check to you.\
-    """
+    check to you."""
 low = "When they check the flop they are done. Take the pot away."
 
 [stats."fold_vs_bet:flop"]
@@ -147,8 +128,7 @@ low = "They will not fold flops. Bet for value, not as a bluff."
 what = "Facing a bet on the turn, how often they fold."
 high = """\
     The most profitable leak there is — turn pots are big. Fire a second \
-    barrel with anything.\
-    """
+    barrel with anything."""
 low = "Sticky on the turn. Value bet thinner and abandon bluffs."
 
 [stats."fold_vs_bet:river"]
@@ -164,8 +144,7 @@ low = "They call raises down. Only raise for value."
 [stats."fold_to_cbet:flop"]
 what = """\
     Facing a bet from the player who raised before the flop, how often they \
-    fold.\
-    """
+    fold."""
 high = "They surrender the flop. Raise more hands and bet every one."
 low = "They stick around. Continue with real equity, not automatically."
 
@@ -183,27 +162,23 @@ low = "They call the river down. Only bet the third barrel for value."
 what = "Having bet the turn, how often they fire the river as well."
 high = """\
     They triple-barrel too often, so the last bet is frequently air. Call down \
-    with any hand that beats a bluff.\
-    """
+    with any hand that beats a bluff."""
 low = """\
     They shut down on the river. Their bet there is the real thing — fold \
-    marginal hands and take the free showdown when they check.\
-    """
+    marginal hands and take the free showdown when they check."""
 
 [stats."raise_vs_bet:turn"]
 what = "Facing a bet on the turn, how often they raise."
 high = """\
     Turn raises are rarely bluffs at most frequencies; at this one they are. \
-    Do not fold the top of your range to them.\
-    """
+    Do not fold the top of your range to them."""
 low = "They never raise turns, so a second barrel is close to risk-free."
 
 [stats."raise_vs_bet:river"]
 what = "Facing a bet on the river, how often they raise."
 high = """\
     Raising rivers this often cannot be all value. Call with hands that beat a \
-    bluff.\
-    """
+    bluff."""
 low = "A river raise from them is the nuts. Fold everything else to it."
 
 [stats."check_raise:flop"]
@@ -214,8 +189,7 @@ low = "Their check is a surrender. Bet every flop they check to you."
 [stats.after_call]
 what = """\
     Having called a bet on the previous street, how often they fold the next \
-    one. The float-or-give-up number.\
-    """
+    one. The float-or-give-up number."""
 high = "They call one street and dump the next. Barrel."
 low = "A call is sticky. Stop firing the second barrel as a bluff."
 
@@ -278,8 +252,7 @@ low = "They defend. Open hands that can play after the flop."
 what = "Facing a bet on the flop, how often they call rather than fold or raise."
 high = """\
     They float wide. Keep betting the turn -- most of that calling range \
-    missed.\
-    """
+    missed."""
 low = "They fold or raise instead of calling; their flop calls mean something."
 
 [stats."call_vs_bet:turn"]
@@ -295,8 +268,7 @@ low = "They fold rivers. Bluff the last street relentlessly."
 [stats."call_cbet:flop"]
 what = """\
     Facing a continuation bet from the preflop raiser, how often they call \
-    rather than fold or raise.\
-    """
+    rather than fold or raise."""
 high = "They call the flop wide and give up later. Fire again."
 low = "They fold or raise the flop rather than calling along."
 
@@ -304,8 +276,7 @@ low = "They fold or raise the flop rather than calling along."
 what = "Facing a bet on the flop, how often they raise."
 high = """\
     Aggressive with their flop range. Bet thinner and be ready to fold to the \
-    raise.\
-    """
+    raise."""
 low = "They never raise flops, so your bets face no real risk."
 
 [stats."check_raise:turn"]
@@ -327,32 +298,28 @@ low = "They check rivers back. Value bet thinner against them."
 what = "How often a fold came after a long pause."
 high = """\
     Long pauses mean they are looking for a fold. Their quick actions are the \
-    strong ones.\
-    """
+    strong ones."""
 low = "They act at a steady speed — less timing information available."
 
 [stats."tank_fold:flop"]
 what = "How often a flop fold came after a long pause."
 high = """\
     Flop tanks that end in a fold mean the bet already worked. Respect a flop \
-    tank-call.\
-    """
+    tank-call."""
 low = "Steady flop timing — less to read on the first street."
 
 [stats."tank_fold:turn"]
 what = "How often a turn fold came after a long pause."
 high = """\
     Turn tanks are expensive tells. A pause-then-fold means pressure worked; a \
-    pause-then-call means give up.\
-    """
+    pause-then-call means give up."""
 low = "Steady turn timing — lean on frequencies instead."
 
 [stats."tank_fold:river"]
 what = "How often a river fold came after a long pause."
 high = """\
     River tanks that fold mean the bluff was always getting there. Size up \
-    next time.\
-    """
+    next time."""
 low = "Steady river timing — less clock information on the end."
 
 [stats.snap_call]
@@ -379,89 +346,72 @@ low = "They deliberate on rivers — less to read from speed."
 [terms]
 guesswork = """\
     Under 50 hands. Not enough to read anyone — treat everything here as a \
-    placeholder.\
-    """
+    placeholder."""
 thin = """\
     50 to 150 hands. Preflop numbers are becoming real; anything about turns \
-    and rivers is still mostly guesswork.\
-    """
+    and rivers is still mostly guesswork."""
 usable = """\
     150 to 500 hands. Preflop reads are reliable and the bigger postflop leaks \
-    will show.\
-    """
+    will show."""
 solid = "Over 500 hands. Trust it, including the finer postflop numbers."
 watch = """\
     Seen, but not confirmed. Probably real and not yet worth acting on -- no \
     price is given because the tool is not confident enough to tell you what \
-    it is worth. Keep playing them and it will either firm up or disappear.\
-    """
+    it is worth. Keep playing them and it will either firm up or disappear."""
 tentative = """\
     The evidence leans this way but could still be luck. Worth knowing, not \
-    worth changing your whole game for.\
-    """
+    worth changing your whole game for."""
 likely = "Probably real. Act on it, and keep watching."
 strong = "The sample supports this. Attack it."
 "bb/100" = """\
     Big blinds won per 100 hands — the standard unit of poker winrate. At \
-    5c/10c stakes, 1 bb/100 is 10 cents per 100 hands.\
-    """
+    5c/10c stakes, 1 bb/100 is 10 cents per 100 hands."""
 breakeven = """\
     The frequency at which the exploit stops making money. Bluffing a \
     two-thirds pot bet needs them to fold 40% of the time to break even, so \
-    anything above that is profit.\
-    """
+    anything above that is profit."""
 field = """\
     What a typical player at this table size does — context for whether a \
     number is unusual, not a target to aim at. After the pool has been fit, \
-    this is that pool, not a generic online table.\
-    """
+    this is that pool, not a generic online table."""
 "against you" = """\
     The same statistic counted only on the decisions where you were the one \
     they were facing. Read against their own game rather than the field: the \
     interesting thing is not that they fold 70% to your rivers, it is that \
-    they fold 45% to everybody else's.\
-    """
+    they fold 45% to everybody else's."""
 otherwise = """\
     The same statistic on every decision that was not against you. Your own \
     hands are taken out of it, because a number compared with a total that \
-    contains it can only ever understate the difference.\
-    """
+    contains it can only ever understate the difference."""
 adjustment = """\
     A statistic where they treat you differently from everyone else, by enough \
     to change what you should do and with enough hands behind it to believe. \
     Most players, most of the time, have none — that is the normal result, not \
-    a missing feature.\
-    """
+    a missing feature."""
 estimate = """\
     The frequency after accounting for sample size. A player who folded 3 of 3 \
-    is not a 100% folder, and this pulls that back toward reality.\
-    """
+    is not a 100% folder, and this pulls that back toward reality."""
 "95% range" = """\
     Where their true frequency probably sits. A wide range means not enough \
-    hands yet.\
-    """
+    hands yet."""
 available = """\
     A ranking of which leaks to attack first, in big blinds per 100 hands, \
     scaled by a capture fraction (you cannot bluff every river you reach with \
     the nuts). Ordering is the signal; do not bank the number as a live \
-    winrate.\
-    """
+    winrate."""
 confidence = """\
     How much of this read comes from their actual hands rather than from \
     assumptions about players in general. Archetype confidence is a 10-way \
     posterior; skill confidence is coverage plus volume — same word, two \
-    formulas.\
-    """
+    formulas."""
 unknown = """\
     Not enough hands for a skill comparison. The number would mostly measure \
-    sample size, so it is withheld.\
-    """
+    sample size, so it is withheld."""
 percentile = """\
     The share of every possible hole-card combination on that board your hand \
     beats -- not your chance to win the pot, which depends on what the other \
     hand actually is. \"Usually X%\" is what a model fit on this database's \
-    own revealed hands says a line like that typically represents.\
-    """
+    own revealed hands says a line like that typically represents."""
 
 # What each rating component measures, and what a good or bad score means.
 # Split by direction: a single blurb written as a weakness told a player
@@ -473,29 +423,24 @@ percentile = """\
 [components."Hand selection"]
 measures = """\
     Which hands they enter pots with, and whether they enter by raising or by \
-    calling.\
-    """
+    calling."""
 low = """\
     They play the wrong hands -- too many, too few, or entering pots by \
     calling. Punish it before the flop by raising more of your own hands \
-    against them.\
-    """
+    against them."""
 high = """\
     Their starting hands are sensible for the table size. No cheap edge before \
-    the flop.\
-    """
+    the flop."""
 stats = ["vpip", "limp", "cold_call", "rfi"]
 
 [components."Preflop aggression"]
 measures = "How often they raise rather than call the hands they choose to play."
 low = """\
     They call where they should raise. Their calling range is capped, so bet \
-    at them after the flop and believe them when they finally raise.\
-    """
+    at them after the flop and believe them when they finally raise."""
 high = """\
     They raise the hands they play, so their range is not capped when they \
-    call. Do not read a flat call as weakness.\
-    """
+    call. Do not read a flat call as weakness."""
 stats = ["vpip", "pfr", "three_bet", "four_bet", "five_bet", "squeeze"]
 
 [components."Postflop aggression"]
@@ -503,64 +448,53 @@ measures = "How often they bet and raise after the flop, street by street."
 low = """\
     Their betting after the flop is off -- too passive to protect their good \
     hands, or too busy to have them. Either way their bets and checks say more \
-    than they should.\
-    """
+    than they should."""
 high = """\
     Their betting frequency is in a normal band, so a bet from them carries \
-    the usual information and no more.\
-    """
+    the usual information and no more."""
 stats = ["aggression:flop", "aggression:turn", "aggression:river"]
 
 [components."Discipline vs bets"]
 measures = """\
     How often they fold when facing a bet, against the frequency the pot odds \
-    call for.\
-    """
+    call for."""
 low = """\
     They fold at the wrong frequencies when facing bets. Whichever way they \
-    err, the answer is to bet more or bluff less accordingly.\
-    """
+    err, the answer is to bet more or bluff less accordingly."""
 high = """\
     They fold about as often as the price demands, so neither bluffing nor \
-    value betting thin is free against them.\
-    """
+    value betting thin is free against them."""
 stats = ["fold_vs_bet:flop", "fold_vs_bet:turn", "fold_vs_bet:river"]
 
 [components."Showdown judgment"]
 measures = "How often they reach showdown, and how often they win when they do."
 low = """\
     They arrive at showdown with the wrong hands -- paying off too often, or \
-    folding hands that were good. Value bet thinner against them.\
-    """
+    folding hands that were good. Value bet thinner against them."""
 high = """\
     The hands they take to showdown are the right ones. Thin value bets will \
-    not get paid as often as usual.\
-    """
+    not get paid as often as usual."""
 stats = ["wtsd", "wsd"]
 
 [components."Bet sizing"]
 measures = """\
     Whether their bet sizes vary with the situation or stay the same \
-    regardless.\
-    """
+    regardless."""
 low = """\
     Their sizes are readable or badly chosen. One size for every situation \
     means the size tells you nothing they meant it to, and often a lot they \
-    did not.\
-    """
+    did not."""
 high = "Their sizing does not give them away."
 stats = []
 
 [components."Resistance to exploitation"]
 measures = """\
     How much money the leaks found against them are worth in total, weighted \
-    by how much evidence there is.\
-    """
+    by how much evidence there is."""
 low = "There is real money available against them -- see the leaks listed above."
 high = """\
     No leak found so far is worth much. On a thin sample that means 'not yet \
-    found', not 'not there'.\
-    """
+    found', not 'not there'."""
 stats = []
 
 # How the table-size split is explained.
