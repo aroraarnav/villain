@@ -226,9 +226,7 @@ def postflop_rank(table_size: int) -> dict[str, int]:
     return {p: i for i, p in enumerate(order)}
 
 
-# ---------------------------------------------------------------------------
-# serialisation
-# ---------------------------------------------------------------------------
+# -- serialisation -------------------------------------------------------------
 # Hands are stored, not just the statistics derived from them. Stat definitions
 # change -- a c-bet gets redefined, a new leak rule needs a counter nobody was
 # recording -- and when they do, every profile can be rebuilt from source

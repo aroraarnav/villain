@@ -55,13 +55,9 @@ def _default_workers() -> int:
 
 
 def _can_spawn() -> bool:
-    """Whether worker processes can re-import ``__main__``.
-
-    A spawned worker re-imports the parent's ``__main__``, which does not
-    exist when the caller is a REPL or a ``python -`` heredoc. The pool then
-    fails *after* each child has printed its own traceback, so the fallback
-    worked but buried the real output in noise. Cheaper to ask first.
-    """
+    """Whether workers can re-import ``__main__`` -- false under a REPL or a
+    heredoc, where the pool fails only after every child has printed a
+    traceback over the real output."""
     import sys
     return bool(getattr(sys.modules.get("__main__"), "__file__", None))
 
@@ -91,16 +87,11 @@ def record_hands(hands: Iterable[Hand], books: Books | None = None,
                  workers: int | None = None, progress=None) -> Books:
     """Extract stats for every hand.
 
-    Timing uses a two-pass read: first accumulate each player's think times,
-    then freeze snap/tank cutoffs from those means and tag every hand with the
-    same thresholds. A one-pass relative mean would tag early hands differently
-    from late ones in the same import.
-
-    The second pass is the expensive one -- it evaluates every holding a board
-    allows, for every hand -- and each hand is independent of every other once
-    the cutoffs are frozen, so it is split across processes on a large import.
-    The books are counters, and counters merge, so the result does not depend
-    on how the batch was divided; a test asserts that.
+    Two passes: accumulate think times, then freeze snap/tank cutoffs from
+    those means so every hand in the import is tagged against the same ones.
+    The second pass evaluates every holding each board allows and each hand is
+    independent once the cutoffs are frozen, so a large import splits across
+    processes; counters merge, so the division cannot change the result.
     """
     hands = list(hands)
     books = books if books is not None else {}
@@ -132,10 +123,8 @@ def record_hands(hands: Iterable[Hand], books: Books | None = None,
                         progress(done, len(hands), "reading players")
             return books
         except Exception:
-            # A sandbox with no process spawning, a pickling failure, a worker
-            # killed for memory: fall back rather than fail an import over an
-            # optimization. Books are empty on this path or partially filled,
-            # so start clean.
+            # No spawning, a pickling failure, a worker killed for memory:
+            # fall back rather than fail an import over an optimization.
             books.clear()
 
     for done, hand in enumerate(hands, 1):
@@ -155,12 +144,10 @@ def record_hand(hand: Hand, books: Books,
     ``pace_locks`` freezes snap/tank cutoffs (from :func:`record_hands`).
     Without locks, thresholds follow the running mean (streaming / evidence).
 
-    ``hero`` is the player id of whoever exported the hands, from
-    :func:`villain.hero.hero_of`. Given one, the decisions with that player on
-    the other side are counted a second time under :data:`VS_HERO`. Without
-    one, nothing changes and no ``vs:`` counter is written -- a database whose
-    hands came from somebody else's export has no against-you slice to record,
-    and inventing one from an arbitrary seat would be worse than having none.
+    ``hero`` is whoever exported the hands. Given one, decisions with that
+    player on the other side are counted again under :data:`VS_HERO`; without
+    one no ``vs:`` counter is written, since an against-you slice keyed on an
+    arbitrary seat is worse than none.
     """
     if "pot_mismatch" in hand.flags or hand.big_blind <= 0:
         return
@@ -178,10 +165,9 @@ def record_hand(hand: Hand, books: Books,
         book.measure("table_size", len(hand.seats))
         book.measure("stack_bb", seat.stack / hand.big_blind)
 
-    # A bomb pot has no preflop betting round -- everyone is dealt in for a
-    # forced ante and the action starts on the flop. Counting it credits every
-    # player with a VPIP, RFI and limp *opportunity* they were never given, and
-    # home games run them. The postflop streets are real and still counted.
+    # A bomb pot has no preflop round -- forced ante, action starts on the
+    # flop -- so counting it credits VPIP, RFI and limp opportunities nobody
+    # was given. The postflop streets are real and still counted.
     if "bomb_pot" not in hand.flags:
         _preflop(hand, view, books, reg, pace_locks=pace_locks, hero_seat=hero_seat)
     pace_events = _postflop(hand, view, books, reg, pace_locks=pace_locks,
@@ -216,9 +202,7 @@ def _think_pass(hand: Hand, books: Books) -> None:
         book.measure("think:all", ms)
 
 
-# ---------------------------------------------------------------------------
-# preflop
-# ---------------------------------------------------------------------------
+# -- preflop -------------------------------------------------------------------
 
 def _preflop(hand: Hand, view: HandView, books: Books, reg: str,
              pace_locks: PaceLocks | None = None,
@@ -265,10 +249,8 @@ def _preflop(hand: Hand, view: HandView, books: Books, reg: str,
                 book.measure(f"open_bb:{pos}", a.to_amount / bb)
 
         elif d.aggression_level == 0:
-            # Limpers are in and nobody has raised: an isolation spot, and a
-            # different decision from opening a folded pot. Pooling the two
-            # under rfi hid the gap -- a player who opens the button 40% first
-            # in attacks limps far wider, and nothing recorded it.
+            # Limpers in, nobody raised: an isolation spot, and a wider one
+            # than opening a folded pot. Pooled under rfi the gap is invisible.
             book.count("iso", raised)
             book.count(f"iso:{pos}", raised)
             book.count(f"iso:{pos}:{depth}", raised)
@@ -308,10 +290,8 @@ def _preflop(hand: Hand, view: HandView, books: Books, reg: str,
                 book.measure("three_bet_ratio", a.to_amount / open_size)
                 book.measure(f"three_bet_ratio:{'ip' if d.in_position else 'oop'}",
                              a.to_amount / open_size)
-            # The same decisions, sliced to the ones where the raise was yours.
-            # Recorded alongside the pooled counter, never instead of it: the
-            # pooled rate is the baseline this slice only means anything
-            # against.
+            # The same decisions, sliced to raises that were yours. Alongside
+            # the pooled counter, never instead: that is its baseline.
             if opener is not None and opener == hero_seat:
                 book.count(f"{VS_HERO}three_bet", raised)
                 if pos == "BB":
@@ -355,18 +335,14 @@ def _preflop(hand: Hand, view: HandView, books: Books, reg: str,
         book = _book(hand, books, seat, reg)
         book.count("vpip", seen["vpip"])
         book.count("pfr", seen["pfr"])
-        # Of the hands they chose to play, how many did they raise. VPIP and
-        # PFR as separate marginals cannot see this: a player at 25/13 and one
-        # at 25/22 have similar-looking numbers and completely different plans,
-        # and the rating already treats the ratio as decisive while the
-        # archetype matcher was blind to it.
+        # Of the hands they chose to play, how many they raised. VPIP and PFR
+        # as separate marginals cannot see it: 25/13 and 25/22 look alike and
+        # are completely different plans.
         if seen["vpip"]:
             book.count("raise_share", seen["pfr"])
 
 
-# ---------------------------------------------------------------------------
-# postflop
-# ---------------------------------------------------------------------------
+# -- postflop ------------------------------------------------------------------
 
 def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
               pace_locks: PaceLocks | None = None,
@@ -389,12 +365,10 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
     first_bettor: int | None = None
     bettor_had_initiative = False
     checked: set[int] = set()
-    # Aggressors who checked while holding the lead, and have not bet since.
-    # Membership is what separates a delayed c-bet from a second barrel, so it
-    # has to be released the moment they take the lead back: having checked the
-    # flop and bet the turn, a river bet is "having bet the turn, how often
-    # they fire the river as well" -- which is cbet:river, and is already what
-    # the other seat's fold_to_cbet:river is being counted against.
+    # Aggressors who checked while holding the lead and have not bet since.
+    # Membership separates a delayed c-bet from a second barrel, so it is
+    # released the moment they take the lead back -- after checking the flop
+    # and betting the turn, a river bet is cbet:river.
     declined_initiative: set[int] = set()
     faced_bet_size: dict[int, float] = {}
     # Who put in the bet each seat is facing. The size was already tracked; the
@@ -408,10 +382,8 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
     # Tags waiting for a later bet faced (fold-next opportunity).
     pending_fold: dict[int, list[tuple[str, str, str]]] = {}
     # Who called a bet on the street just gone, and who was in position doing
-    # it. Every other counter in this module asks "at this decision, what did
-    # they do"; nothing asked what happened *next*, so the whole family of
-    # reads that live in a sequence -- called the flop and folded the turn,
-    # called the flop and took it away -- was unmeasurable.
+    # it. Every other counter here asks what they did at a decision; these are
+    # what makes a sequence -- called the flop, folded the turn -- measurable.
     called_prev: set[int] = set()
     called_prev_ip: set[int] = set()
     called_here: set[int] = set()
@@ -428,16 +400,13 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
             called_prev, called_prev_ip = called_here, called_here_ip
             called_here, called_here_ip = set(), set()
             resolved_after_call = set()
-            # Two-way, not the four-way split reads.texture returns: a c-bet
-            # rate split four ways runs out of sample on all but a handful of
-            # players, and "did the board connect with anything" is the part
-            # that actually moves the decision.
+            # Two-way, not the four-way split reads.texture returns: four
+            # ways runs out of sample, and "did the board connect" is the part
+            # that moves the decision.
             paired, suited, connected, high = texture(hand.board_at(street))
             tex = "wet" if (suited or connected or paired) else "dry"
-            # Two ways, not four. A four-way split runs out of sample on all
-            # but a couple of players; high-vs-low is the one that changes
-            # which ranges connect, and it clears the opportunity floor for
-            # most of the pool.
+            # Two ways, not four, for the same sample reason. High-vs-low is
+            # the split that changes which ranges connect.
             hilo = "hi" if high else "lo"
             faced_bet_from = {}
             for seat in view.saw[street]:
@@ -456,8 +425,7 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
         initiative = view.initiative_at(street)
 
         # What they did on the street after calling a bet. Once per seat per
-        # street: a raise war would otherwise book several follow-ups to one
-        # call, the same way the fold counters are guarded.
+        # street, or a raise war books several follow-ups to one call.
         if d.seat in called_prev and d.seat not in resolved_after_call:
             resolved_after_call.add(d.seat)
             if d.facing_bet:
@@ -487,14 +455,11 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
 
         if not d.facing_bet:
             if d.has_initiative:
-                # Continuation bet: they took the betting lead last street and
-                # the action is on them with nothing wagered yet.
-                #
-                # ``has_initiative`` walks back through every earlier street,
-                # so a preflop raiser who checked the flop still leads on the
-                # turn. Betting there is a *delayed* c-bet, not a second
-                # barrel; pooling them made the glossary's sentence describe a
-                # different number.
+                # Continuation bet: they took the lead last street and the
+                # action is on them with nothing wagered. ``has_initiative``
+                # walks back through every earlier street, so a preflop raiser
+                # who checked the flop still leads on the turn -- betting there
+                # is a delayed c-bet, not a second barrel.
                 if d.seat in declined_initiative:
                     book.count(f"delayed_cbet:{s}", bet)
                     if bet:
@@ -503,19 +468,15 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
                     book.count(f"cbet:{s}", bet)
                     if bet:
                         book.measure(f"cbet_size:{s}", d.bet_fraction)
-                    # Heads-up and multiway are different decisions, and so are
-                    # wet and dry boards. Pooling them averages a player's two
-                    # different plans into one number describing neither: the
-                    # same player c-bets small and often heads-up on a dry
-                    # board and rarely into three people on a wet one.
+                    # Heads-up and multiway are different decisions, as are
+                    # wet and dry boards. Pooled, one number describes neither
+                    # plan.
                     for slice_ in ("hu" if d.players_in <= 2 else "mw", tex, ipo, pot_type, depth):
                         book.count(f"cbet:{s}:{slice_}", bet)
                         if bet:
                             book.measure(f"cbet_size:{s}:{slice_}", d.bet_fraction)
-                    # Only heads-up against you. In a multiway pot a c-bet is
-                    # aimed at the field, so crediting it as a decision made
-                    # against you would read three opponents' pressure as one
-                    # player's adjustment.
+                    # Heads-up only: a multiway c-bet is aimed at the field,
+                    # not at you.
                     if (d.players_in <= 2 and hero_seat is not None
                             and d.seat != hero_seat
                             and hero_seat in view.saw[street]):
@@ -555,16 +516,14 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
                 book.count(f"fold_vs_bet:{s}:{pot_kind}", folded)
                 pos_kind = "ip" if d.in_position else "oop"
                 book.count(f"fold_vs_bet:{s}:{pos_kind}", folded)
-                # Starting-stack depth. ``:mid`` is already the size bucket
-                # (a third-to-two-thirds pot bet), so the stack slice lives
-                # under ``stk:`` -- mixing them would make a 40bb player's
-                # fold rate look like their fold-to-a-half-pot-bet rate.
+                # Starting-stack depth. ``:mid`` is already the size bucket,
+                # so the stack slice lives under ``stk:``; mixed, a 40bb
+                # player's fold rate reads as a fold-to-half-pot rate.
                 book.count(f"fold_vs_bet:{s}:stk:{depth}", folded)
                 # An ace-high board and a low one are different bluffs.
                 book.count(f"fold_vs_bet:{s}:{hilo}", folded)
-                # Facing a raise is not facing a bet. fold_vs_bet pools them,
-                # so a player who folds 40% to flop raises was still defending
-                # at the MDF-scaled theory number.
+                # Facing a raise is not facing a bet, and fold_vs_bet pools
+                # them.
                 if d.aggression_level >= 2:
                     book.count(f"fold_vs_raise:{s}", folded)
                     book.count(f"fold_vs_raise:{s}:{pos_kind}", folded)
@@ -579,11 +538,9 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
                     book.count(f"fold_to_cbet:{s}", folded)
                     book.count(f"raise_cbet:{s}", raised)
                     book.count(f"call_cbet:{s}", called)
-                # The same decisions again, sliced to the bets that were yours.
-                # Under first_face for the reason the pooled counters are: a
-                # raise war must not manufacture extra opportunities, and this
-                # slice is the thinnest sample in the tool -- it can least
-                # afford a denominator that flatters itself.
+                # The same decisions, sliced to bets that were yours. Under
+                # first_face for the reason the pooled counters are, and this
+                # is the thinnest sample in the tool.
                 if faced_bet_from.get(d.seat) == hero_seat and hero_seat is not None:
                     book.count(f"{VS_HERO}fold_vs_bet:{s}", folded)
                     book.count(f"{VS_HERO}call_vs_bet:{s}", called)
@@ -591,12 +548,9 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
                     if first_bettor is not None and bettor_had_initiative:
                         book.count(f"{VS_HERO}fold_to_cbet:{s}", folded)
                 if d.seat in checked:
-                    # Guarded by first_face for the same reason the fold
-                    # counters above are: in a raise war a player faces a bet,
-                    # check-raises, faces the re-raise and folds. Counting the
-                    # second decision too recorded one check-raise out of *two*
-                    # opportunities, and booked the player who check-*raised*
-                    # as having check-folded.
+                    # first_face again: in a raise war a player faces a bet,
+                    # check-raises, faces the re-raise and folds. Counting both
+                    # books the check-raiser as having check-folded.
                     book.count(f"check_raise:{s}", raised)
                     book.count(f"check_fold:{s}", folded)
             if raised:
@@ -693,9 +647,7 @@ def _timing(book: StatBook, d, street_label: str,
     return pace, kind
 
 
-# ---------------------------------------------------------------------------
-# results and showdown truth
-# ---------------------------------------------------------------------------
+# -- results and showdown truth ------------------------------------------------
 
 def _results(hand: Hand, view: HandView, books: Books, reg: str,
              pace_events: dict[tuple[int, str], tuple[str, str]] | None = None
@@ -761,19 +713,15 @@ def _all_in_ev(hand: Hand, view: HandView, books: Books, reg: str,
                showdown: set[int]) -> None:
     """Score all-in pots by equity as well as by outcome.
 
-    Over a few hundred hands a chip graph is mostly variance: getting it in as
-    an 80% favorite and losing costs exactly as much as punting, and a rating
-    that cannot tell those apart is rating luck. So when the money goes in with
-    cards face up, the pot is also credited by equity at that moment.
+    Over a few hundred hands a chip graph is mostly variance -- getting it in
+    at 80% and losing costs what punting costs -- so a pot that went in face up
+    is also credited by equity at that moment.
 
-    A player can only win what they matched. Each seat's eligible pot is
-    therefore capped at ``sum(min(other.invested, mine))`` over the table --
-    without that cap a short all-in was credited with equity in money it could
-    never have won, so an aces-in-for-10 against two 100bb stacks scored +75bb
-    of "equity" in a hand whose main pot capped it at +10bb.
-
-    Where a genuine side pot forms (three or more all-in players at different
-    depths) the split is still approximate, so the hand is flagged.
+    A player can only win what they matched, so each seat's eligible pot is
+    capped at ``sum(min(other.invested, mine))``; uncapped, aces in for 10
+    against two 100bb stacks score +75bb of equity in a +10bb pot. A genuine
+    side pot (three-plus all-in at different depths) is still approximate, and
+    flagged.
     """
     all_in_actions = [a for a in hand.actions if a.all_in]
     if not all_in_actions or len(showdown) < 2:
@@ -807,12 +755,10 @@ def _all_in_ev(hand: Hand, view: HandView, books: Books, reg: str,
 
 
 def _showdown_strengths(board: list[str], known: dict[int, tuple[str, ...]]) -> dict[int, float]:
-    """Percentile of each shown hand among every holding possible on that board.
+    """Percentile of each shown hand among every holding the board allows.
 
-    Reporting "two pair" says nothing without the board -- two pair on a paired
-    four-flush board is a bluff-catcher. The percentile is against the full set
-    of combos the board allows, which is what actually decides whether a
-    showdown was strong.
+    "Two pair" says nothing without the board -- two pair on a paired
+    four-flush board is a bluff-catcher.
     """
     board5 = board[:5]
     board_ids = card_ids(board5).astype(np.int64)

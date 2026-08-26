@@ -161,9 +161,7 @@ class StatBook:
         return m.mean if m else None
 
 
-# ---------------------------------------------------------------------------
-# Hand view: the derived context every statistic needs
-# ---------------------------------------------------------------------------
+# -- Hand view: the derived context every statistic needs ----------------------
 
 
 @dataclass

@@ -271,9 +271,7 @@ def _baseline(stat: str, book: StatBook | None, regime: str,
     return shrink(hits, opps, mean, strength)
 
 
-# ---------------------------------------------------------------------------
-# The same read, taken only on the hands they played against you
-# ---------------------------------------------------------------------------
+# -- The same read, taken only on the hands they played against you ------------
 
 #: Against-you decisions needed before an archetype is worth naming. An
 #: archetype is a claim about a whole strategy, so it needs more than a single

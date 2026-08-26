@@ -113,9 +113,7 @@ def rate(profile: Profile) -> Skill:
     )
 
 
-# ---------------------------------------------------------------------------
-# components
-# ---------------------------------------------------------------------------
+# -- components ----------------------------------------------------------------
 
 def _solid(profile: Profile, feature: str) -> float:
     """What a competent player does with this stat at this table size.
@@ -305,9 +303,7 @@ def _exploitability_component(exploitability: float, profile: Profile) -> Compon
     return Component("Resistance to exploitation", score, round(weight, 2), note)
 
 
-# ---------------------------------------------------------------------------
-# results and confidence
-# ---------------------------------------------------------------------------
+# -- results and confidence ----------------------------------------------------
 
 def _adjusted_winrate(profile: Profile) -> float | None:
     """Winrate in bb/100 with all-in pots scored by equity, heavily shrunk."""

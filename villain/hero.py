@@ -176,9 +176,7 @@ def texture_label(board: list[str]) -> str:
     return "wet" if (suited or connected) else "dry"
 
 
-# ---------------------------------------------------------------------------
-# preflop range: counted, not modeled
-# ---------------------------------------------------------------------------
+# -- preflop range: counted, not modeled ---------------------------------------
 
 @dataclass
 class PositionRange:
@@ -260,9 +258,7 @@ def combined_grid(ranges: dict[str, PositionRange]) -> dict[str, tuple[int, int]
     return {cls: (played.get(cls, 0), n) for cls, n in dealt.items()}
 
 
-# ---------------------------------------------------------------------------
-# fold grades: was this specific fold right, given the hand you actually had
-# ---------------------------------------------------------------------------
+# -- fold grades: was this specific fold right, given the hand you actually had ---
 #
 # Graded against what a bet like this usually represents, not against a
 # random hand. Somebody chose to bet, and a betting range is stronger than
@@ -517,9 +513,7 @@ def missed_value(hands: list, hero_id: int, model: StrengthModel,
     return GradeReport(grades=grades)
 
 
-# ---------------------------------------------------------------------------
-# tells: does something visible about hero's bet change with the hand behind it
-# ---------------------------------------------------------------------------
+# -- tells: does something visible about hero's bet change with the hand behind it ---
 # Two of these, asked the same way of the same decisions -- bet size, and think
 # time. They were written as two parallel class pairs, which meant `gap` and
 # `tells` existed twice character-for-character and the web layer needed a
@@ -699,9 +693,7 @@ def timing_tell(hands: list, hero_id: int, progress=None) -> Tell:
         lambda d: min((d.action.think_ms or 0) / 1000.0, THINK_CAP_S), progress)
 
 
-# ---------------------------------------------------------------------------
-# range narrowing: does hero's continuing range actually get stronger
-# ---------------------------------------------------------------------------
+# -- range narrowing: does hero's continuing range actually get stronger -------
 # Purely descriptive -- no model, no comparison to a bar. A continuing range
 # is supposed to narrow to the hands that held up, so average hand strength
 # among hands still live should trend upward street by street. Whether it

@@ -237,17 +237,13 @@ def _build_roster(store: Store) -> list[dict]:
     return rows
 
 
-# ---------------------------------------------------------------------------
-# uploaded sessions, held in memory until saved
-# ---------------------------------------------------------------------------
+# -- uploaded sessions, held in memory until saved -----------------------------
 # A session is deliberately not written anywhere. You can drop a file in, read
 # the table, and close the tab without the database gaining a single hand.
 
 
 
-# ---------------------------------------------------------------------------
-# which tabs can be opened yet
-# ---------------------------------------------------------------------------
+# -- which tabs can be opened yet ----------------------------------------------
 
 #: A player needs this many hands before the simulator can act from a measured
 #: profile rather than from the prior alone -- below it, every villain plays the

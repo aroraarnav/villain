@@ -267,9 +267,7 @@ def build_profiles(by_regime: dict[str, StatBook], min_hands: int = 1,
     return profiles
 
 
-# ---------------------------------------------------------------------------
-# reading a measurement, with the sample bar that makes it a read
-# ---------------------------------------------------------------------------
+# -- reading a measurement, with the sample bar that makes it a read -----------
 # Every consumer of a profile asks the same question -- "this rate, but only
 # if enough of it was actually observed" -- and each had written its own
 # answer: nine helpers in botplay, one in sim, and an inline
@@ -348,9 +346,7 @@ def evidence(profile: Profile) -> list[float]:
     return [profile.stats[f].weight if f in profile.stats else 0.0 for f in PROFILE_FEATURES]
 
 
-# ---------------------------------------------------------------------------
-# one player, one profile
-# ---------------------------------------------------------------------------
+# -- one player, one profile ---------------------------------------------------
 # Splitting statistics by table size is a statistical necessity and a
 # presentational disaster. It is necessary because 55% VPIP is tight heads-up
 # and reckless at a full ring, so pooling the raw counts produces a number that
