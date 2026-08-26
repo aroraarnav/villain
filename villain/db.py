@@ -139,22 +139,19 @@ SPURIOUS_OVERLAP = 10
 #: Feature / display-stat definition stamp. Bump when existing databases need
 #: a rebuild to grow new counters or fix wrong ones.
 #:
-#: The rebuild runs inline inside ``Store()``, and the web layer opens a
-#: ``Store`` per request, so on a real database (71k hands, about a minute)
-#: the next page waits for the whole thing. That is only acceptable once: the
-#: stamp has to survive the request that wrote it, or every later open does
-#: the minute again. See :data:`PROGRESS_HOOK` and :func:`consume_cache_dirty`.
+#: The rebuild runs inline inside ``Store()`` and the web layer opens one per
+#: request, so a real database (71k hands, about a minute) makes the next page
+#: wait. Acceptable once: the stamp has to survive the request that wrote it.
+#: See :data:`PROGRESS_HOOK` and :func:`consume_cache_dirty`.
 DEFINITIONS_VERSION = "2026-08-24.sim-plays-the-rest-of-the-book"
 
 #: Set by a host that can show a progress bar. Called as
 #: ``hook(done, total, phase)`` while a rebuild works; ``total`` of zero means
 #: the phase cannot be counted, only reported as still going.
 #:
-#: A module-level hook rather than a parameter because the rebuild that needs
-#: it is the one nobody asked for: the migration inside ``Store()``, reached
-#: from any of seventeen request handlers. Threading an argument through all
-#: of them to reach one automatic call is how that migration would stay the
-#: single path with no feedback.
+#: Module-level rather than a parameter because the rebuild that needs it is
+#: the one nobody asked for -- the migration inside ``Store()``, reached from
+#: seventeen request handlers, none of which would thread an argument to it.
 PROGRESS_HOOK = None
 
 #: True after ``_ensure_definitions`` rebuilt books and the host has not yet
@@ -234,11 +231,9 @@ class Store:
         self.conn = sqlite3.connect(self.path, timeout=30)
         self.conn.row_factory = sqlite3.Row
         # WAL lets the CLI and UI read while the other writes; without it a
-        # concurrent open surfaces as a bare "database is locked" 500. Skip it
-        # in the browser: the hosted app copies one file (``villain.db``), and
-        # a WAL left beside it is a second file nobody uploads -- so the
-        # definitions stamp from a GET never reached IndexedDB and the next
-        # visit rebuilt every hand again.
+        # concurrent open is a bare "database is locked" 500. Skipped in the
+        # browser, which copies one file: a WAL beside it is a second file
+        # nobody uploads, so the stamp never lands and every visit rebuilds.
         if sys.platform != "emscripten":
             self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA busy_timeout=5000")
@@ -306,15 +301,12 @@ class Store:
             self.conn.commit()
             if rebuilt:
                 _CACHE_DIRTY = True
-                # The fitted population is a cache too, and it was not covered
-                # here. A definitions bump that adds a feature refreshed the
-                # stat books but left the priors without it, so the new feature
-                # silently fell back to the built-in online default -- measuring
-                # a home game against a field it does not play in. Adding
-                # raise_share this way changed 26 of 68 real labels before
-                # anyone ran `villain fit`. Refitting alone is enough: the
-                # prior is applied when a profile is read, not stored in the
-                # books, so no second rebuild is needed.
+                # The fitted population is a cache too. A definitions bump
+                # that refreshed the books but not the priors left the new
+                # feature on the built-in online default -- a home game
+                # measured against a field it does not play in, which moved 26
+                # of 68 real labels. Refitting alone is enough: the prior is
+                # applied when a profile is read, not stored in the books.
                 try:
                     self.fit_priors()
                 except Exception:
@@ -451,15 +443,13 @@ class Store:
             self.conn.execute(f"DELETE FROM {table} WHERE player_id IN (?, ?)",
                               (keep, absorb))
         self.conn.execute("DELETE FROM players WHERE id = ?", (absorb,))
-        # Inherit the absorbed player's distinctness constraints.
         # Re-point every constraint the absorbed player carried onto ``keep``.
-        # A bare UPDATE cannot do this: the table's whole contract is that ``a
-        # < b`` (mark_distinct inserts sorted, shared_hands looks up sorted),
-        # and renaming one column of a sorted pair can invert it. An inverted
-        # row is invisible to shared_hands, which silently drops the constraint
-        # -- and that is exactly how two accounts dealt into the same hand
-        # became mergeable. UPDATE OR IGNORE also discarded, rather than
-        # summed, the overlap when both players already had a row.
+        # A bare UPDATE cannot: the table's contract is ``a < b`` (inserted
+        # sorted, looked up sorted), and renaming one column of a sorted pair
+        # can invert it. An inverted row is invisible to shared_hands, which
+        # silently drops the constraint -- two accounts dealt into the same
+        # hand become mergeable. UPDATE OR IGNORE also discards, rather than
+        # sums, the overlap when both players already had a row.
         rows = self.conn.execute(
             "SELECT a, b, hands FROM distinct_pairs WHERE a = ? OR b = ?",
             (absorb, absorb)).fetchall()
@@ -611,12 +601,9 @@ class Store:
         # the difference of two counts gives exactly.
         before_all = self.conn.execute("SELECT COUNT(*) c FROM players").fetchone()["c"]
 
-        # Accumulate in memory and write once. Per-seat and per-hand statements
-        # meant roughly two million writes for an 80k-hand import -- an alias
-        # UPDATE for every seat of every hand, and a distinct_pairs upsert for
-        # every *pair* of seats -- each one walking an index that grows as it
-        # goes. The totals are the same either way; only the number of round
-        # trips to SQLite changes, and that was the entire cost.
+        # Accumulate in memory and write once. Per-seat statements meant ~2M
+        # writes for an 80k-hand import, each walking a growing index. Same
+        # totals either way; only the round trips to SQLite change.
         known: dict[tuple[str, str], int] = {}
         alias_seen: dict[tuple[str, str], tuple[int, int, str]] = {}
         pair_counts: dict[tuple[int, int], int] = {}
@@ -733,11 +720,10 @@ class Store:
             }
             if not wanted_ids:
                 return 0
-            # Via a temp table, not an IN clause. A bulk import touches every
-            # player, so the id list is the whole hands table -- and SQLite
-            # caps how many variables one statement may bind, so the IN form
-            # failed outright with "too many SQL variables" on exactly the
-            # large imports that most need the narrowing.
+            # Via a temp table, not an IN clause: a bulk import touches every
+            # player, and SQLite caps bound variables per statement, so IN
+            # fails with "too many SQL variables" on exactly the large imports
+            # that most need the narrowing.
             self.conn.execute("DROP TABLE IF EXISTS temp.rebuild_ids")
             self.conn.execute(
                 "CREATE TEMP TABLE rebuild_ids (hand_id TEXT PRIMARY KEY)")
@@ -747,12 +733,10 @@ class Store:
             query = ("SELECT h.site, h.payload FROM hands h"
                      " JOIN temp.rebuild_ids r ON r.hand_id = h.hand_id"
                      " ORDER BY h.started_at")
-        # Two phases worth reporting, because they are the two that take the
-        # time: decoding every stored hand, then walking them for features.
-        # Counted in hands rather than percent so the bar cannot claim a
-        # fraction the work does not have -- and counted against the narrowed
-        # set when ``only`` is given, or a single-player rebuild reports
-        # itself against the whole database.
+        # The two phases that take the time: decoding every stored hand, then
+        # walking them for features. Counted in hands rather than percent so
+        # the bar cannot claim a fraction the work does not have, and against
+        # the narrowed set when ``only`` is given.
         n_total = (len(wanted_ids) if wanted_keys is not None
                    else self.conn.execute(
                        "SELECT COUNT(*) AS c FROM hands").fetchone()["c"])
@@ -766,14 +750,12 @@ class Store:
             for seat in hand.seats:
                 pid = resolve(hand.site, seat.player_id, seat.name)
                 if pid is None:
-                    # A seat whose account maps to nobody -- the player it
-                    # belonged to was deleted. It has to stay in the hand:
-                    # everybody else's read depends on how many were dealt in
-                    # and what this seat did. It just gets booked to nobody, so
-                    # it is keyed with a prefix no player id can collide with
-                    # and dropped below. Leaving the raw account here instead
-                    # booked stats under a site account string and then blew up
-                    # on int() at the write.
+                    # A seat whose account maps to nobody: its player was
+                    # deleted. It stays in the hand -- everybody else's read
+                    # depends on how many were dealt in and what it did -- but
+                    # is booked to nobody, under a prefix no player id can
+                    # collide with, and dropped below. The raw account instead
+                    # books stats under a site string and fails int() on write.
                     seat.player_id = UNATTRIBUTED + str(seat.player_id)
                     continue
                 names[str(pid)] = seat.name or names.get(str(pid), "")
@@ -879,10 +861,9 @@ class Store:
                 continue
             out[row["regime"]][row["stat"]].append((row["hits"], row["opps"]))
         # Derived features are assembled from raw action counters and never
-        # stored as their own ratio rows, so a prior fit over the ratios table
-        # never saw them -- leaving aggression:* (combined importance 4.0, the
-        # heaviest block in the matcher) measured against the built-in online
-        # defaults no matter how much of your own pool there was to fit.
+        # stored as ratio rows, so a fit over that table alone never sees them
+        # -- leaving aggression:* (importance 4.0, the matcher's heaviest
+        # block) on the built-in defaults however much pool there was to fit.
         for (regime, _pid), stats in raw.items():
             for stat, (num_keys, den_keys) in DERIVED.items():
                 if stat_filter and not stat_filter(stat):
@@ -957,13 +938,11 @@ class Store:
             for seat in hand.seats:
                 pid = alias_map.get((hand.site, split_key(seat.player_id, seat.name))) \
                     or alias_map.get((hand.site, seat.player_id))
-                # Marked, not left as the raw account -- the same convention
-                # :meth:`rebuild` uses, and for the same reason. Deleting a
-                # player leaves their seats resolving to nobody (the hands
-                # stay; only the aliases go), and a site account string is
-                # indistinguishable from a player id to anything downstream:
-                # ``session_detail`` called int() on one and took the whole
-                # sitting down with it.
+                # Marked, not left as the raw account -- :meth:`rebuild`'s
+                # convention, for its reason. Deleting a player leaves their
+                # seats resolving to nobody, and a site account string is
+                # indistinguishable from a player id downstream, where an
+                # int() on one takes the whole sitting down.
                 seat.player_id = (str(pid) if pid is not None
                                   else UNATTRIBUTED + str(seat.player_id))
             hands.append(hand)
@@ -1114,12 +1093,10 @@ class Store:
             by[row["regime"]][row["stat"]].append(logit(min(max(rate, 0.005), 0.995)))
             noise[row["regime"]][row["stat"]].append(
                 self._logit_noise(rate, row["opps"]))
-        # aggression:* is assembled from the raw action counters and never
-        # stored as a ratio row of its own, so scanning this table alone left
-        # it the one feature block with no fitted spread -- and therefore the
-        # one block still measured in the built-in constant, roughly twice the
-        # scatter this pool actually shows. `maniac`, whose entire identity is
-        # aggression, is the archetype that paid for it. Same assembly as
+        # aggression:* is assembled from raw action counters and never stored
+        # as a ratio row, so scanning this table alone left the matcher's
+        # heaviest block on the built-in constant -- roughly twice the scatter
+        # this pool shows, which `maniac` paid for. Same assembly as
         # :meth:`_observed_ranges` and :meth:`population_samples`.
         for (regime, _pid), stats in raw.items():
             for stat, (num_keys, den_keys) in DERIVED.items():
@@ -1292,11 +1269,10 @@ class Store:
         query = "SELECT site, payload FROM hands ORDER BY started_at"
         if player_id is not None:
             # Pick the hand ids out of the seat index first. Asking for one
-            # player used to decompress and parse every hand in the database
-            # and throw almost all of them away -- and `villain validate` does
-            # that once per player, which on this database was eight million
-            # hand parses and eleven minutes. The seat table is small and
-            # uncompressed; `rebuild` has always narrowed this way.
+            # player otherwise decompresses every hand in the database and
+            # throws almost all away -- once per player under `villain
+            # validate`, which was 8M parses and eleven minutes. The seat
+            # table is small and uncompressed; `rebuild` narrows this way.
             mine = {key for key, pid in accounts.items() if pid == player_id}
             wanted = {
                 row["hand_id"]
@@ -1324,11 +1300,9 @@ class Store:
         total = (len(wanted) if player_id is not None else
                  self.conn.execute("SELECT COUNT(*) c FROM hands").fetchone()["c"])
         out = []
-        # Report after the work, not before it. Calling progress at at=0 and
-        # then again at total once the loop returns made a bar that jumped to
-        # full the moment the last row was fetched, while gzip+parse of that
-        # last batch -- and everything the caller does next -- still had to
-        # run. Every 200, after decompressing, tracks the wait itself.
+        # Report after the work, not before it: reporting at 0 and again at
+        # total jumps the bar to full while the last batch's gzip+parse still
+        # has to run. Every 200, after decompressing, tracks the real wait.
         if progress is not None:
             progress(0, total)
         for at, row in enumerate(self.conn.execute(query)):

@@ -440,13 +440,9 @@ POLAR_FACE_BUCKETS = frozenset({"big", "over"})
 
 #: Half-width of the mixed-strategy band around a frequency cut. Inside it the
 #: call is randomised so the same hand is not always played the same way;
-#: outside it the cut is hard.
-#:
-#: This replaces additive noise on the percentile itself. The 3-bet, 4-bet and
-#: 5-bet gates can sit 0.02 apart, and the old ``N(0, 0.05)`` term was wider
-#: than the gaps between them -- so the noise, not the hand, chose the action,
-#: and KQo 5-bet jammed because a draw from the tail carried it two gates up.
-#: Noise belongs on the decision at the boundary, never on the ranking.
+#: outside it the cut is hard. Noise belongs on the decision at the boundary,
+#: never on the ranking: the 3-, 4- and 5-bet gates can sit 0.02 apart, so a
+#: term on the percentile wide enough to matter chooses the action itself.
 MIX_BAND = 0.015
 
 #: Wider fade around polar value/bluff gates, so the same combo is not always
@@ -907,13 +903,7 @@ def _decide_preflop(hand, seat: int, profile, rng, lg, bb: int) -> tuple[str, in
         # In and out of position facing a 3-bet are different decisions;
         # prefer the side we are actually on when it has sample.
         ipo = _ipo(hand, seat)
-        # `fold_to_three_bet` is counted only for the player who *opened*
-        # (features.py gates it on ``d.seat == opener``). Someone who cold
-        # called the open and now faces a 3-bet never posted that number,
-        # and handing them the opener's continue rate is how a blind ends
-        # up cold-calling a 3-bet with a hand nobody cold-calls -- there is
-        # no measured rate for that spot at all, so it takes the tight
-        # default it deserves.
+        # No measured rate exists for this seat -- see COLD_CALL_VS_3BET.
         if getattr(hand, "opener", None) == seat:
             f3 = _chain(profile, [f"fold_to_three_bet:{ipo}", "fold_to_three_bet"],
                         0.55, 20)
@@ -960,14 +950,11 @@ def _decide_preflop(hand, seat: int, profile, rng, lg, bb: int) -> tuple[str, in
         cont = _continue_vs_size(cont, mdf)
         cont_why = "continue vs this size"
     rr_freq = 1 - rr_gate
-    # The raise gate is read on the open ordering, the continue gate on the
-    # defend ordering, so each is staged against the ordering it was
-    # measured on -- mixing them would narrow the range by the wrong key.
-    #
-    # Short: there is no flat. The continue range shoves; calling a raise
-    # with 15bb behind to play a 3bb pot is the line the stack knob is
-    # supposed to kill. 20-30bb only does the same when we do *not* have
-    # their continue number -- if they flatted 3-bets at 28bb, they flat.
+    # Each gate is staged against the ordering it was measured on -- raise on
+    # open, continue on defend; mixing them narrows by the wrong key.
+    # Short: no flat. Calling a raise with 15bb behind to play a 3bb pot is
+    # what the stack knob exists to kill. 20-30bb only does the same when we
+    # lack their continue number -- if they flatted 3-bets at 28bb, they flat.
     no_flat = short
     if (not short and _remain_bb(hand, seat) <= THREEBET_OR_FOLD_BB
             and lg.can_raise):
@@ -1039,15 +1026,12 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
         return _decide_preflop(hand, seat, profile, rng, lg, bb)
 
     street = STREETS[hand.street]
-    # Two measures, because postflop asks two different questions and the old
-    # code answered both with one number.
-    #
-    #   * `strength` -- where this hand sits inside the range that got here,
-    #     ranked by playability (made hand plus draws). Frequency cuts belong
-    #     on this: "check-raises 9%" is 9% of the hands they still hold, and
-    #     the bottom of that 9% is draws, not 72o.
-    #   * `absolute` -- made-hand percentile against every holding an opponent
-    #     could have. Prices belong on this: pot odds are a claim about equity.
+    # Two measures, because postflop asks two questions:
+    #   * `strength` -- place inside the range that got here, by playability.
+    #     Frequency cuts belong on it: "check-raises 9%" is 9% of the hands
+    #     they still hold, and the bottom of that 9% is draws, not 72o.
+    #   * `absolute` -- made-hand percentile against every possible holding.
+    #     Prices belong on it: pot odds are a claim about equity.
     rs = _ranges(hand)
     cache = rs.board_cache(hand.board)
     board_order = cache.play
@@ -1170,14 +1154,11 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
             # Every key above except the size bucket pools the sizes it was
             # counted against, so it says nothing about *this* bet. Shift it by
             # the change in breakeven between the size they usually face and
-            # the one in front of them -- exactly the difference MDF predicts.
-            #
-            # Their own average when we have it, the pool's when we do not.
-            # Skipping the shift on a missing `faced_size` is how a 175%-pot
-            # overbet got the same continue threshold as a third-pot stab: a
-            # fifth of the books have a pooled fold rate and no faced_size, and
-            # for those the price stopped binding entirely once a measured
-            # number began overriding the pot-odds gate.
+            # the one in front of them -- the difference MDF predicts. Their
+            # own average when we have it, the pool's when we do not: a fifth
+            # of books have a pooled fold rate and no `faced_size`, and
+            # skipping the shift there prices a 175% overbet as a third-pot
+            # stab.
             usual = _size(profile, f"faced_size:{street}", None, 20) \
                 or POOL_FACED_SIZE.get(street, 0.75)
             be_usual = usual / (1.0 + usual)
@@ -1205,13 +1186,10 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
             polar = "value" if lg.can_raise else polar
         if lg.can_raise and polar:
             _keep(hand, seat, board_order, _polar_bands(raise_f, raise_cap, spr), hand.board)
-            # `raise_ratio` is measured as to_amount / to_call, a ratio whose
-            # denominator is the increment still owed. A re-raise over a big
-            # bet owes little and books an enormous ratio, and the stat is a
-            # plain mean, so one such hand drags the average past anything a
-            # person would do. Every other size in this file is clamped to
-            # what the action can actually be; this one was not, and a 9x
-            # check-raise of a c-bet is how a top pair got all in.
+            # `raise_ratio` is to_amount / to_call, and the denominator is
+            # the increment still owed -- a re-raise over a big bet owes little
+            # and books an enormous ratio into a plain mean. Clamped like every
+            # other size here; unclamped it produces a 9x check-raise.
             rr = _size(profile, f"raise_ratio:{street}", None, 6)
             target = (int(round(_clamp(rr, 2.0, RAISE_RATIO_CAP) * B)) if rr
                       else hand.bet + int(round(0.9 * hand.pot)))
@@ -1228,12 +1206,10 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
             strength = 1.0 if monster else _rank_hi(hand, seat, board_order, hand.board)
         continue_frac = _clamp(1 - fold_f, 0.02, 0.98)
         clears = monster or _over(strength, 1 - continue_frac, rng, CONTINUE_MIX)
-        # A sampled fold rate is an average across the sizes they faced. Even
-        # after the MDF shift, a station's 15% fold-vs-bet called A-high off a
-        # jam: the frequency cut said "top 40%" and pot odds never got a vote.
-        # Overbets and all-ins always need the price. Small bets keep
-        # playability so a flush draw still continues; polar sizes already
-        # re-ranked onto made hands above.
+        # A sampled fold rate averages the sizes they faced, so even after
+        # the MDF shift a station's 15% calls A-high off a jam -- the frequency
+        # cut says "top 40%" and pot odds never get a vote. Overbets and
+        # all-ins always need the price; small bets keep playability.
         priced = monster or (not steep) or strength >= req_eq
         if clears and priced and (monster or fold_measured or absolute >= req_eq):
             # A call does not deny the nuts. Keep the whole continue slice,
