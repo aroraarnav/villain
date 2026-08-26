@@ -19,8 +19,7 @@ const GUEST_WHY = `<span class="hl">demo is read-only</span><br>
 function guestLock(el) {
   if (!el) return null;
   el.disabled = true;
-  const wrap = document.createElement("span");
-  wrap.className = "guest-lock";
+  const wrap = h("span", "guest-lock");
   if (el.parentNode) el.replaceWith(wrap);
   wrap.appendChild(el);
   bindTip(wrap, GUEST_WHY);
@@ -46,13 +45,6 @@ function termTip(term) {
   const g = state.glossary;
   const text = g && g.terms[term];
   return text ? `<span class="hl">${esc(term)}</span><br>${esc(text)}` : esc(term);
-}
-function withInfo(node, html) {
-  const wrap = document.createElement("span");
-  wrap.style.cssText = "display:inline-flex;align-items:baseline";
-  wrap.appendChild(node);
-  wrap.appendChild(info(html));
-  return wrap;
 }
 /* Full explanation of a statistic: what it counts, and whether *this* player
    is over or under the field -- with the matching play implication. */
@@ -127,6 +119,16 @@ function el(tag, attrs, parent) {
   const node = document.createElementNS(SVG, tag);
   for (const k in attrs) node.setAttribute(k, attrs[k]);
   if (parent) parent.appendChild(node);
+  return node;
+}
+/* The HTML counterpart of `el`. Nearly every node this file builds is
+   create-then-set-className-then-set-innerHTML, which was three statements and
+   a repeated variable name at each of a hundred sites -- long enough to bury
+   the markup that is the actual content of the line. */
+function h(tag, cls, html) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (html != null) node.innerHTML = html;
   return node;
 }
 function openSheet(title, extraClass) {
@@ -254,17 +256,14 @@ async function post(url, body) {
    the tab switch used a spinner, so whether the tool looked busy or looked
    broken depended on which corner of it you were in. */
 function loadingBlock(label) {
-  const div = document.createElement("div");
-  div.className = "loading";
-  div.innerHTML = `<span class="spinner" aria-hidden="true"></span>
-    <span>${esc(label)}</span>`;
+  const div = h("div", "loading", `<span class="spinner" aria-hidden="true"></span>
+    <span>${esc(label)}</span>`);
   return div;
 }
 
 /* ---- shared renderers ---- */
 function rosterTable(players, opts) {
-  const wrap = document.createElement("div");
-  wrap.className = "scroller";
+  const wrap = h("div", "scroller");
   // GTO dropped as a default column: a bare 0-100 integer beside the skill
   // bar reads as a second, differently-encoded skill score. It is still one
   // click away, on the profile it links to.
@@ -352,8 +351,7 @@ function rosterTable(players, opts) {
          bar" left the weakest player at the table looking like the safest.
          The marker says which kind of claim it is. */
       if (p.top_leak && p.top_leak_status !== "confirmed") {
-        const flag = document.createElement("span");
-        flag.className = "flag";
+        const flag = h("span", "flag");
         flag.textContent = "!";
         bindTip(flag, `<span class="hl">${p.top_leak_status === "watch"
           ? "not confirmed" : "from the rating, not a frequency"}</span><br>
@@ -389,18 +387,15 @@ function rosterTable(players, opts) {
    frequency next to a baseline) with less certainty drawn, taking a whole
    peer tile on the one screen meant to be read mid-hand. */
 function gtoRows(rows) {
-  const host = document.createElement("div");
-  host.className = "gto-rows";
+  const host = h("div", "gto-rows");
   for (const r of rows) {
     const dir = r.deviation > 0 ? "+" : "−";
-    const row = document.createElement("div");
-    row.className = "gto-row";
-    row.innerHTML = `
+    const row = h("div", "gto-row", `
       <span class="gto-name">${esc(statLabel(r.stat, null))}<span
         class="gto-fid ${r.fidelity === "solver" ? "solver" : ""}">${
         r.fidelity === "solver" ? "solver" : "bench"}</span></span>
       <span class="gto-nums small muted">you ${fmtPct(r.player)} · gto ${fmtPct(r.target)}</span>
-      <span class="gto-dev">${dir}${Math.round(Math.abs(r.deviation) * 100)}</span>`;
+      <span class="gto-dev">${dir}${Math.round(Math.abs(r.deviation) * 100)}</span>`);
     host.appendChild(row);
   }
   return host;
@@ -424,15 +419,11 @@ function openGtoModal(gto) {
    for a panel header, not a panel of its own. */
 function renderGtoBadge(gto) {
   if (!gto || gto.rating == null || !(gto.rows || []).length) return null;
-  const wrap = document.createElement("span");
-  wrap.className = "small muted";
+  const wrap = h("span", "small muted");
   wrap.style.cssText = "display:inline-flex;align-items:center;gap:6px";
-  const badge = document.createElement("span");
-  badge.className = "gto-badge";
-  badge.innerHTML = `<b>${Math.round(gto.rating)}</b><span class="of">/100 GTO</span>`;
+  const badge = h("span", "gto-badge", `<b>${Math.round(gto.rating)}</b><span class="of">/100 GTO</span>`);
   badge.appendChild(info(gtoExplainer()));
-  const link = document.createElement("button");
-  link.className = "linkbtn";
+  const link = h("button", "linkbtn");
   link.textContent = "See vs GTO";
   link.onclick = () => openGtoModal(gto);
   wrap.append(badge, link);
@@ -442,9 +433,7 @@ function renderGtoBadge(gto) {
 /* Profile: one function per tile. `hero` changes the wording, not the shape. */
 
 function profileHead(p, isHero, hero) {
-  const head = document.createElement("div");
-  head.className = "panel wide";
-  head.innerHTML = `
+  const head = h("div", "panel wide", `
     <div class="profile-head">
       <div class="profile-id">
         <div class="hero">${esc(p.name || p.archetype)}${
@@ -466,14 +455,13 @@ function profileHead(p, isHero, hero) {
           <span class="k">bb/100 available</span>
         </div>
       </div>
-    </div>`;
+    </div>`);
   if (p.skill.measured !== false) {
     $("#skill-ring", head).prepend(skillGauge(p.skill.score));
   }
   $("#worth-stat .k", head).appendChild(info(termTip("available")));
   if (!hero && p.plan) {
-    const planLink = document.createElement("button");
-    planLink.className = "linkbtn how-link";
+    const planLink = h("button", "linkbtn how-link");
     planLink.textContent = "How to play them";
     planLink.onclick = () => {
       openSheet(`How to play ${esc(p.name || p.archetype)}`);
@@ -497,8 +485,7 @@ function profileHead(p, isHero, hero) {
   // The archetype now lives here as a pill, not as a subtitle under the name
   // plus a second sentence repeating it -- dashed means the read hasn't
   // cleared 50%, solid means it has, same convention the roster already uses.
-  const archPill = document.createElement("span");
-  archPill.className = "tag arch" + (p.archetype_confidence >= 0.5 ? " on" : "");
+  const archPill = h("span", "tag arch" + (p.archetype_confidence >= 0.5 ? " on" : ""));
   archPill.textContent = p.archetype;
   archPill.appendChild(info(`${termTip("confidence")}<br><br>
     ${fmtPct(p.archetype_confidence)} sure<br><br>
@@ -512,8 +499,7 @@ function profileHead(p, isHero, hero) {
   // the roster: the roster is how everybody plays the field, and two
   // references in one list is how "tag" stopped meaning anything.
   if (p.versus) {
-    const vs = document.createElement("span");
-    vs.innerHTML = `<span class="tag arch on">vs you: ${esc(p.versus.archetype)}</span>`;
+    const vs = h("span", "", `<span class="tag arch on">vs you: ${esc(p.versus.archetype)}</span>`);
     vs.appendChild(info(`<span class="hl">against you</span><br>
       On the ${p.versus.decisions.toLocaleString()} decisions they made with you
       on the other side, ${esc(p.versus.regime_label)}, they play like
@@ -542,8 +528,7 @@ function profileHead(p, isHero, hero) {
 
 
 function skillPanel(p) {
-  const skillBox = document.createElement("div");
-  skillBox.className = "panel wide p-skill";
+  const skillBox = h("div", "panel wide p-skill");
   skillBox.innerHTML =
     `<div class="spread"><h2>Skill breakdown <span class="muted" style="font-weight:400">\u00b7 ` +
     `${esc(p.skill.tier)}</span></h2></div>` +
@@ -554,11 +539,9 @@ function skillPanel(p) {
   skillSide.innerHTML = "";
   const comps = p.skill_components || p.skill.components;
   for (const c of [...comps].sort((a, b) => a.score - b.score)) {
-    const row = document.createElement("div");
-    row.className = "comp" + (c.weak ? " weak" : "");
-    row.innerHTML = `<span class="comp-name">${esc(c.name)}</span>
+    const row = h("div", "comp" + (c.weak ? " weak" : ""), `<span class="comp-name">${esc(c.name)}</span>
       <span class="comp-bar"></span>
-      <span class="comp-score">${c.score.toFixed(0)}</span>`;
+      <span class="comp-score">${c.score.toFixed(0)}</span>`);
     // Stretched to the cell rather than scaled into it: with the aspect ratio
     // preserved a 999-wide bar in a 250px column drew a 3px hairline.
     const compBar = bar(c.score, 100, c.weak ? "var(--warn)" : "var(--mark-1)", 999);
@@ -582,10 +565,8 @@ function skillPanel(p) {
 function whatToDoTile(p, hero, leaks) {
   /* The tile the screen exists for, and the only one on the primary surface:
      priced leaks, then the unconfirmed watchlist, then the synthesis row. */
-  const doBox = document.createElement("div");
-  doBox.className = "panel wide primary p-do";
-  doBox.innerHTML = `<h2>${hero ? "Your biggest leaks" : "What to do"}</h2>
-    <div class="leaks"></div>`;
+  const doBox = h("div", "panel wide primary p-do", `<h2>${hero ? "Your biggest leaks" : "What to do"}</h2>
+    <div class="leaks"></div>`);
 
   const leakBox = $(".leaks", doBox);
   if (!leaks.length) {
@@ -597,8 +578,7 @@ function whatToDoTile(p, hero, leaks) {
     leakBox.innerHTML = nothing;
   }
   for (const l of leaks) {
-    const div = document.createElement("div");
-    div.className = `leak priced t-${esc(l.tier)}`;
+    const div = h("div", `leak priced t-${esc(l.tier)}`);
     // The glance view gets the first clause -- ranked by bb/100, this is the
     // column that should read as a scorecard, not a stack of essays. The full
     // sentence is never dropped, only moved into "Why, and what not to do".
@@ -629,8 +609,7 @@ function whatToDoTile(p, hero, leaks) {
     numbers.appendChild(document.createTextNode(
       `${fmtPct(l.value)} vs ${fmtPct(l.breakeven)} break-even \u00b7 `));
     if (p.player_id != null) {
-      const link = document.createElement("button");
-      link.className = "linkbtn";
+      const link = h("button", "linkbtn");
       link.textContent = `${Math.round(l.sample)} hands`;
       link.title = "show the hands behind this";
       link.onclick = () => showEvidence(p.player_id, l.stat, l.headline);
@@ -652,18 +631,15 @@ function whatToDoTile(p, hero, leaks) {
     // "where this came from" apparatus anyway.
     if (!hero && whydont.length) {
       numbers.appendChild(document.createTextNode(" · "));
-      const link = document.createElement("button");
-      link.className = "linkbtn how-link";
+      const link = h("button", "linkbtn how-link");
       link.textContent = "Why, and what not to do";
       link.onclick = () => {
         const modal = openSheet(esc(l.headline));
         $(".sheet", modal).insertAdjacentHTML("beforeend", `<div class="how-body"></div>`);
         const how = $(".how-body", modal);
         for (const [label, text] of whydont) {
-          const block = document.createElement("div");
-          block.className = "howblock";
-          block.innerHTML = `<div class="howlabel">${esc(label)}</div>
-            <div>${esc(text)}</div>`;
+          const block = h("div", "howblock", `<div class="howlabel">${esc(label)}</div>
+            <div>${esc(text)}</div>`);
           how.appendChild(block);
         }
       };
@@ -677,9 +653,7 @@ function whatToDoTile(p, hero, leaks) {
   // rather than a price, and the rail is dashed, so it never reads as another
   // number in the ranking.
   for (const w of (p.watchlist || [])) {
-    const div = document.createElement("div");
-    div.className = "leak priced watch";
-    div.innerHTML = `
+    const div = h("div", "leak priced watch", `
       <div class="leak-price thin">
         <span class="v">${fmtPct(w.confidence)}</span>
         <span class="u">sure</span>
@@ -687,7 +661,7 @@ function whatToDoTile(p, hero, leaks) {
       <div class="leak-body">
         <div class="headline"><b>${esc(w.headline)}</b>
           <span class="tag tier">watch</span></div>
-      </div>`;
+      </div>`);
     $(".tier", div).after(info(`${termTip("watch")}<br><br>${esc(w.in_words)}`));
     leakBox.appendChild(div);
   }
@@ -697,11 +671,9 @@ function whatToDoTile(p, hero, leaks) {
   // borrowing their shape: no price cell, a recessed ground, and it sits at
   // the foot of the list where a summary belongs.
   for (const c of (p.combinations || [])) {
-    const block = document.createElement("div");
-    block.className = "leak compound";
-    block.innerHTML = `<div class="headline"><b>${esc(c.headline)}</b>
+    const block = h("div", "leak compound", `<div class="headline"><b>${esc(c.headline)}</b>
       <span class="tag">these compound</span></div>
-      <div class="leak-advice">${esc(c.body)}</div>`;
+      <div class="leak-advice">${esc(c.body)}</div>`);
     leakBox.appendChild(block);
   }
 
@@ -727,28 +699,22 @@ function adjustmentsTile(p) {
     // The mark rides the title itself, like every other panel header (see the
     // hero dashboard): .info's own 5px offset places it, no wrapper needed.
     $("h2", adjBox).appendChild(info(termTip("adjustment")));
-    const adjGrid = document.createElement("div");
-    adjGrid.className = "adjust-grid";
+    const adjGrid = h("div", "adjust-grid");
     adjBox.appendChild(adjGrid);
     for (const a of adjustments) {
-      const div = document.createElement("div");
-      div.className = "leak";
-      div.innerHTML = `
+      const div = h("div", "leak", `
         <div class="leak-head">
           <div class="headline"><b>${esc(a.behavior)}</b>${
             a.regime_label ? ` <span class="tag">${esc(a.regime_label)}</span>` : ""}</div>
           <div class="num small muted">${fmtPct(Math.min(a.confidence, 0.99))} sure</div>
         </div>
-        <div class="small muted numbers"></div>`;
+        <div class="small muted numbers"></div>`);
       for (const [label, value, color, term] of [
             ["against you", a.versus, "var(--mark-3)", "against you"],
             ["otherwise", a.baseline, "var(--mark-1)", "otherwise"]]) {
-        const row = document.createElement("div");
-        row.className = "metric";
-        const name = document.createElement("span");
-        name.className = "small"; name.textContent = label;
-        const val = document.createElement("span");
-        val.className = "small muted"; val.style.textAlign = "right";
+        const row = h("div", "metric");
+        const name = h("span", "small"); name.textContent = label;
+        const val = h("span", "small muted"); val.style.textAlign = "right";
         val.textContent = fmtPct(value);
         row.append(name, bar(value, 1, color, 150), val);
         bindTip(row, termTip(term));
@@ -759,8 +725,7 @@ function adjustmentsTile(p) {
       if (p.player_id != null) {
         // Opens on the against-you slice rather than its parent, so the hands
         // shown are the ones the read is actually about.
-        const link = document.createElement("button");
-        link.className = "linkbtn";
+        const link = h("button", "linkbtn");
         link.textContent = seen;
         link.title = "show the hands behind this";
         link.onclick = () => showEvidence(p.player_id, a.evidence_stat, a.behavior);
@@ -786,17 +751,13 @@ function timingTellsTile(p) {
   // Render only when some cell actually has a tell -- a grid of "not enough
   // data" is noise wearing a panel's clothes.
   if (tells.some(c => c.n >= 5 && !/no clear tell|not enough/i.test(c.label || ""))) {
-    const timingBox = document.createElement("div");
-    timingBox.className = "panel wide";
-    const headRow = document.createElement("div");
-    headRow.className = "spread";
-    const title = document.createElement("div");
-    title.className = "headline";
+    const timingBox = h("div", "panel wide");
+    const headRow = h("div", "spread");
+    const title = h("div", "headline");
     const h2 = document.createElement("h2");
     h2.style.margin = "0";
     h2.textContent = "Timing tells";
-    const flag = document.createElement("span");
-    flag.className = "flag";
+    const flag = h("span", "flag");
     flag.textContent = "!";
     bindTip(flag, `<span class="hl">use with caution</span><br>
       Timing is noisy online. Each cell is the <em>share</em> of that action
@@ -805,8 +766,7 @@ function timingTellsTile(p) {
       to break ties \u2014 never as the whole basis of a decision.`);
     title.append(h2, flag);
     headRow.appendChild(title);
-    const note = document.createElement("span");
-    note.className = "small muted";
+    const note = h("span", "small muted");
     note.textContent = "share of action + outcome vs normal pace";
     headRow.appendChild(note);
     timingBox.appendChild(headRow);
@@ -814,18 +774,13 @@ function timingTellsTile(p) {
     const byKey = Object.fromEntries(
       tells.map(c => [`${c.pace}:${c.street}:${c.action}`, c]));
     for (const street of ["flop", "turn"]) {
-      const block = document.createElement("div");
-      block.className = "timing-street";
-      block.innerHTML = `<div class="street-label">${street}</div>`;
-      const grid = document.createElement("div");
-      grid.className = "timing-grid";
-      grid.innerHTML = `<div class="corner"></div>
+      const block = h("div", "timing-street", `<div class="street-label">${street}</div>`);
+      const grid = h("div", "timing-grid", `<div class="corner"></div>
         <div class="colhead">check</div>
         <div class="colhead">call</div>
-        <div class="colhead">raise</div>`;
+        <div class="colhead">raise</div>`);
       for (const pace of ["snap", "tank"]) {
-        const rowhead = document.createElement("div");
-        rowhead.className = "rowhead";
+        const rowhead = h("div", "rowhead");
         rowhead.textContent = pace;
         grid.appendChild(rowhead);
         for (const action of ["check", "call", "aggro"]) {
@@ -883,21 +838,18 @@ function keyNumbersTile(p, hero) {
     });
 
   const makeTable = () => {
-    const table = document.createElement("div");
-    table.className = "scroller";
-    table.innerHTML = `<table><thead><tr><th>stat</th>
+    const table = h("div", "scroller", `<table><thead><tr><th>stat</th>
         <th style="width:40%">0% \u2014 100%</th>
         <th class="num">estimate</th><th class="num">sample</th></tr></thead>
-      <tbody></tbody></table>`;
+      <tbody></tbody></table>`);
     return table;
   };
   const fill = (table, rows) => {
     const tbody = $("tbody", table);
     for (const row of rows) {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `<td class="label"></td><td></td>
+      const tr = h("tr", "", `<td class="label"></td><td></td>
                       <td class="num">${fmtPct(row.value)}</td>
-                      <td class="num small muted">${Math.round(row.opps)}</td>`;
+                      <td class="num small muted">${Math.round(row.opps)}</td>`);
       const label = $(".label", tr);
       label.appendChild(document.createTextNode(row.label));
       label.appendChild(info(statTip(row.stat, row.label, row)));
@@ -906,15 +858,12 @@ function keyNumbersTile(p, hero) {
     }
   };
 
-  const hudBox = document.createElement("div");
-  hudBox.className = "panel wide p-hud";
-  hudBox.innerHTML = `<div class="spread"><h2>Key numbers</h2>
-    <span class="small muted hud-actions"></span></div><div class="hud"></div>`;
+  const hudBox = h("div", "panel wide p-hud", `<div class="spread"><h2>Key numbers</h2>
+    <span class="small muted hud-actions"></span></div><div class="hud"></div>`);
   const hudHost = $(".hud", hudBox);
   for (const [stat, label] of HUD) {
     const row = byStat[stat];
-    const cell = document.createElement("div");
-    cell.className = "hud-cell" + (row ? "" : " thin");
+    const cell = h("div", "hud-cell" + (row ? "" : " thin"));
     // The percent sign is a unit, not a digit: at full weight beside a 21px
     // figure it competes with the number it is qualifying.
     cell.innerHTML = `<div class="k">${esc(label)}</div>
@@ -940,8 +889,7 @@ function keyNumbersTile(p, hero) {
   if (ordered.length) {
     // The rest open in the sheet popup rather than an inline <details>, so the
     // strip never changes height after it is drawn.
-    const link = document.createElement("button");
-    link.className = "linkbtn";
+    const link = h("button", "linkbtn");
     link.textContent = `See all ${ordered.length} numbers`;
     link.onclick = () => {
       _heroVoice = hero;
@@ -962,8 +910,7 @@ function profileCard(p, opts) {
   const isHero = p.is_hero || (opts.heroId != null && p.player_id === opts.heroId);
   const hero = opts.hero || isHero;
   _heroVoice = hero;                     // glossary tooltips read in your voice
-  const card = document.createElement("div");
-  card.className = isHero ? "dash hero-scope" : "dash";
+  const card = h("div", isHero ? "dash hero-scope" : "dash");
   const leaks = p.leaks;
   // Full-width tiles are placed last: dropped mid-grid they force a row break
   // and strand whatever tile precedes them alone on a line.
@@ -999,8 +946,7 @@ function playerTabs(profiles, container, opts) {
     container.appendChild(profileCard(profiles[0], opts));
     return;
   }
-  const strip = document.createElement("div");
-  strip.className = "ptabs";
+  const strip = h("div", "ptabs");
   const body = document.createElement("div");
   container.append(strip, body);
 
@@ -1012,8 +958,7 @@ function playerTabs(profiles, container, opts) {
     body.appendChild(profileCard(profiles[i], opts));
   }
   profiles.forEach((p, i) => {
-    const b = document.createElement("button");
-    b.className = "ptab";
+    const b = h("button", "ptab");
     const shown = (p.session_names && p.session_names.length && p.db_name)
       ? p.session_names.join(" / ") : p.name;
     const meta = [esc(p.regime_label), `${p.hands}h`];
@@ -1275,8 +1220,7 @@ async function viewSessions() {
     </div>`;
   const rows = $("#sess-rows");
   for (const sess of sessions) {
-    const item = document.createElement("button");
-    item.className = "sess-item" + (sess.id === state.sessionId ? " on" : "");
+    const item = h("button", "sess-item" + (sess.id === state.sessionId ? " on" : ""));
     const hrs = Math.floor(sess.minutes / 60), mins = sess.minutes % 60;
     item.innerHTML = `<span class="sess-when">${esc(whenLabel(sess.started_at, true))}</span>
       <span class="small muted">${hrs ? hrs + "h " : ""}${mins}m \u00b7 ${
@@ -1307,8 +1251,7 @@ async function drawSession(id) {
   const data = await get(`/api/session-detail?id=${id}`);
   body.innerHTML = "";
   for (const p of data.players) {
-    const div = document.createElement("div");
-    div.className = "sess-row" + (p.is_hero ? " hero-scope hero-sitting" : "");
+    const div = h("div", "sess-row" + (p.is_hero ? " hero-scope hero-sitting" : ""));
     const netTxt = p.net_bb > 0 ? `+${p.net_bb}` : `${p.net_bb}`;
     // Net bb and skill are the only measurements on this page, and they were
     // 12.5px muted text at the right margin. Same stat-pair the profile header
@@ -1377,8 +1320,7 @@ async function drawSession(id) {
         const set = byRegime.get(label);
         const max = Math.max(...set.flatMap(d => [d.session, d.usual]), 0.01);
         for (const d of set) {
-          const row = document.createElement("div");
-          row.className = "sess-delta";
+          const row = h("div", "sess-delta");
           const up = d.delta > 0;
           row.innerHTML = `<div class="sess-delta-head">
               <span class="sess-stat">${esc(statLabel(d.stat, null))}</span>
@@ -1387,12 +1329,9 @@ async function drawSession(id) {
             </div>`;
           for (const [name, v, color] of [["tonight", d.session, "var(--mark-3)"],
                                           ["usually", d.usual, "var(--mark-1)"]]) {
-            const line = document.createElement("div");
-            line.className = "metric";
-            const label2 = document.createElement("span");
-            label2.className = "small muted"; label2.textContent = name;
-            const val = document.createElement("span");
-            val.className = "small tellval"; val.textContent = fmtPct(v);
+            const line = h("div", "metric");
+            const label2 = h("span", "small muted"); label2.textContent = name;
+            const val = h("span", "small tellval"); val.textContent = fmtPct(v);
             const drawn = bar(v, max, color, 150);
             drawn.setAttribute("preserveAspectRatio", "none");
             line.append(label2, drawn, val);
@@ -1403,11 +1342,9 @@ async function drawSession(id) {
         }
       };
       if (regimes.length > 1) {
-        const tabs = document.createElement("div");
-        tabs.className = "sess-regime-tabs";
+        const tabs = h("div", "sess-regime-tabs");
         regimes.forEach((label, i) => {
-          const b = document.createElement("button");
-          b.className = "sess-regime-tab" + (i === 0 ? " on" : "");
+          const b = h("button", "sess-regime-tab" + (i === 0 ? " on" : ""));
           b.textContent = label;
           b.onclick = () => {
             tabs.querySelectorAll(".sess-regime-tab").forEach(x => x.classList.remove("on"));
@@ -1429,8 +1366,7 @@ async function drawSession(id) {
 const RANK_ORDER = "AKQJT98765432";
 
 function rangeGrid(grid) {
-  const wrap = document.createElement("div");
-  wrap.className = "range-grid";
+  const wrap = h("div", "range-grid");
   for (let i = 0; i < 13; i++) {
     for (let j = 0; j < 13; j++) {
       const hi = RANK_ORDER[i], lo = RANK_ORDER[j];
@@ -1438,8 +1374,7 @@ function rangeGrid(grid) {
       const g = (grid || {})[cls];
       const dealt = g ? g.dealt : 0, played = g ? g.played : 0;
       const pct = dealt ? played / dealt : 0;
-      const cell = document.createElement("div");
-      cell.className = "range-cell" + (pct > 0.5 ? " dark-text" : "");
+      const cell = h("div", "range-cell" + (pct > 0.5 ? " dark-text" : ""));
       cell.style.background =
         `color-mix(in oklab, var(--ink) ${Math.round(pct * 100)}%, var(--panel))`;
       cell.textContent = cls;
@@ -1521,9 +1456,7 @@ function renderGradedSection(el, section, opts) {
   // than a sentence with two bold numbers buried in it. How many were graded
   // and how many of those were wrong is the finding; the sentence made the
   // reader parse it out of prose every time.
-  const summary = document.createElement("div");
-  summary.className = "graded-head";
-  summary.innerHTML = `
+  const summary = h("div", "graded-head", `
     <div class="stat-pair"><span class="v">${section.graded}</span>
       <span class="k">graded</span></div>
     <div class="stat-pair"><span class="v${section.flagged ? " warnv" : ""}">${
@@ -1533,7 +1466,7 @@ function renderGradedSection(el, section, opts) {
       <div class="graded-bar"></div>
       <div class="small muted graded-pct">${fmtPct(section.rate)} of ${
         esc(opts.noun)} graded</div>
-    </div>`;
+    </div>`);
   const rateBar = bar(section.rate, 1, section.flagged ? "var(--warn)" : "var(--mark-1)", 999);
   rateBar.setAttribute("preserveAspectRatio", "none");
   $(".graded-bar", summary).appendChild(rateBar);
@@ -1548,8 +1481,7 @@ function renderGradedSection(el, section, opts) {
   el.appendChild(summary);
 
   for (const g of section.worst) {
-    const row = document.createElement("div");
-    row.className = "fold-row";
+    const row = h("div", "fold-row");
     // The same card chips the table and the replay draw. These were the one
     // place hole cards were rendered as mono text instead, so "9d Th" here and
     // a pair of cards everywhere else meant the same fact twice, two ways.
@@ -1594,20 +1526,15 @@ function renderTellSection(el, section, opts) {
   const max = Math.max(...rows.flatMap(([, v]) =>
     [v.strong && v.strong.avg, v.weak && v.weak.avg].filter(x => x != null)), 0) || 1;
   for (const [street, v] of rows) {
-    const block = document.createElement("div");
-    block.className = "tellblock" + (v.is_tell ? " on" : "");
-    block.innerHTML = `<div class="tellhead"><span class="street-label">${esc(street)}</span>${
-      v.is_tell ? '<span class="tag hero-tag">tell</span>' : ""}</div>`;
+    const block = h("div", "tellblock" + (v.is_tell ? " on" : ""), `<div class="tellhead"><span class="street-label">${esc(street)}</span>${
+      v.is_tell ? '<span class="tag hero-tag">tell</span>' : ""}</div>`);
     for (const [key, color] of [["strong", "var(--mark-3)"], ["weak", "var(--mark-1)"]]) {
       const b = v[key];
       if (!b || b.avg == null) continue;
-      const row = document.createElement("div");
-      row.className = "metric";
-      const name = document.createElement("span");
-      name.className = "small muted";
+      const row = h("div", "metric");
+      const name = h("span", "small muted");
       name.textContent = key === "strong" ? "top half" : "bottom half";
-      const val = document.createElement("span");
-      val.className = "small tellval";
+      const val = h("span", "small tellval");
       val.textContent = fmt(b.avg);
       const drawn = bar(b.avg, max, color, 150);
       drawn.setAttribute("preserveAspectRatio", "none");
@@ -1617,8 +1544,7 @@ function renderTellSection(el, section, opts) {
       block.appendChild(row);
     }
     if (v.in_words) {
-      const note = document.createElement("div");
-      note.className = "small muted tellnote";
+      const note = h("div", "small muted tellnote");
       note.textContent = v.in_words;
       block.appendChild(note);
     }
@@ -1686,8 +1612,7 @@ function cardHtml(txt, big) {
     class="r">${esc(txt[0] === "T" ? "10" : txt[0])}</span>${SUIT[txt[1]] || ""}</span>`;
 }
 function actbtn(label, on, cls) {
-  const b = document.createElement("button");
-  b.className = "act" + (cls ? " " + cls : "");
+  const b = h("button", "act" + (cls ? " " + cls : ""));
   b.textContent = label; b.onclick = on; return b;
 }
 
@@ -1725,11 +1650,9 @@ async function viewPlay() {
     enough hands yet — import some on the Database tab.</div>`; return; }
   const picked = new Set();
   for (const p of players) {
-    const b = document.createElement("button");
-    b.className = "pick";
-    b.innerHTML = `<span class="name">${esc(p.name)}</span>
+    const b = h("button", "pick", `<span class="name">${esc(p.name)}</span>
       <span class="small muted">${p.hands} hands · ${esc(p.archetype)} · GTO ${
-        p.gto != null ? Math.round(p.gto) : "—"}</span>`;
+        p.gto != null ? Math.round(p.gto) : "—"}</span>`);
     b.onclick = () => {
       if (picked.has(p.player_id)) { picked.delete(p.player_id); b.classList.remove("on"); }
       else if (picked.size < 5) { picked.add(p.player_id); b.classList.add("on"); }
@@ -2041,13 +1964,13 @@ function renderTable(view, data) {
     }
     table.appendChild(seat);
     if (s.is_button) {
-      const d = document.createElement("div"); d.className = "dealer-btn"; d.textContent = "D";
+      const d = h("div", "dealer-btn"); d.textContent = "D";
       d.style.left = (50 + (compact ? 24 : 29) * Math.cos(theta - 0.4)) + "%";
       d.style.top = (50 + (compact ? 20 : 24) * Math.sin(theta - 0.4)) + "%";
       table.appendChild(d);
     }
     if (s.committed > 0 && !st.over) {
-      const chip = document.createElement("div"); chip.className = "tbet";
+      const chip = h("div", "tbet");
       chip.style.left = (50 + (compact ? 19 : 23) * Math.cos(theta)) + "%";
       chip.style.top = (50 + (compact ? 16 : 19) * Math.sin(theta)) + "%";
       chip.innerHTML = `<span class="chip-dot"></span>${s.committed}`;
@@ -2169,8 +2092,7 @@ function cfToggle(st) {
   // Shown in every state of the table, including while the villains act,
   // which is exactly when you want to set it.
   const armed = cfArmed(st);
-  const b = document.createElement("button");
-  b.className = "act cf-toggle" + (armed ? " on" : "");
+  const b = h("button", "act cf-toggle" + (armed ? " on" : ""));
   b.textContent = "Check / Fold";
   b.setAttribute("aria-pressed", armed ? "true" : "false");
   b.title = armed
@@ -2208,15 +2130,14 @@ function renderControls(el, data) {
     el.appendChild(cfToggle(st));
     const won = st.seats.filter(s => s.won);
     if (won.length) {
-      const note = document.createElement("span"); note.className = "small muted";
+      const note = h("span", "small muted");
       note.textContent = won.map(s => `${s.name} +${s.won}`).join(" · ");
       el.appendChild(note);
     }
     return;
   }
   if (!st.your_turn) {
-    const note = document.createElement("span");
-    note.className = "small muted"; note.textContent = "villains acting…";
+    const note = h("span", "small muted"); note.textContent = "villains acting…";
     el.appendChild(note);
     el.appendChild(cfToggle(st));
     return;
@@ -2229,16 +2150,14 @@ function renderControls(el, data) {
   if (cfArmed(st)) {
     // Wait the same beat as a villain. Acting on this paint was a snap
     // fold — their bet and your muck landed in the same frame.
-    const note = document.createElement("span");
-    note.className = "small muted";
+    const note = h("span", "small muted");
     note.textContent = lg.can_check ? "checking…" : "folding…";
     el.appendChild(note);
     el.appendChild(cfToggle(st));
     return;
   }
   el.appendChild(cfToggle(st));
-  const leave = document.createElement("div");
-  leave.className = "controls-leave";
+  const leave = h("div", "controls-leave");
   if (lg.can_fold) leave.appendChild(actbtn("Fold", () => act("fold")));
   if (lg.can_check) leave.appendChild(actbtn("Check", () => act("check")));
   if (leave.childNodes.length) el.appendChild(leave);
@@ -2264,13 +2183,13 @@ function renderControls(el, data) {
       if (facing && v <= callTo) return `Call ${lg.call_amount}`;
       return lg.can_check ? `Bet ${v}` : `Raise to ${v}`;
     };
-    const wrap = document.createElement("div"); wrap.className = "raise-wrap";
+    const wrap = h("div", "raise-wrap");
     const slider = document.createElement("input");
     slider.type = "range";
     slider.min = facing ? callTo : lg.min_raise_to;
     slider.max = lg.max_raise_to;
     slider.value = facing ? callTo : sizeTo(0.66);
-    const amt = document.createElement("span"); amt.className = "raise-amt";
+    const amt = h("span", "raise-amt");
     const go = actbtn("", () => {
       const v = snap(+slider.value);
       if (facing && v <= callTo) act("call");
@@ -2283,7 +2202,7 @@ function renderControls(el, data) {
       go.textContent = labelFor(v);
     };
     slider.oninput = upd; upd();
-    const presets = document.createElement("div"); presets.className = "presets";
+    const presets = h("div", "presets");
     if (facing) {
       presets.appendChild(actbtn("call", () => { slider.value = callTo; upd(); }, "small"));
     }
@@ -2347,7 +2266,7 @@ function renderAnalysis(view, a) {
   </div>`;
   const vs = $(".a-vs", view);
   for (const v of a.vs) {
-    const row = document.createElement("div"); row.className = "a-vs-row";
+    const row = h("div", "a-vs-row");
     row.innerHTML = `<span>${esc(v.name)}</span>
       <span class="${v.net >= 0 ? "up" : "down"}" style="font-variant-numeric:tabular-nums">${
         v.net >= 0 ? "+" : ""}${v.net} <span class="muted">(${
@@ -2469,50 +2388,39 @@ async function viewHero() {
   // Grid and position breakdown side by side: two views of the same range,
   // one by hand the other by seat. dash-cols is the two-panel layout the
   // skill/read split already uses on a player's own page.
-  const rangeCols = document.createElement("div");
-  rangeCols.className = "dash-cols wide";
-  const gridCol = document.createElement("div");
-  gridCol.className = "col";
-  gridCol.innerHTML = `<div class="panel">
+  const rangeCols = h("div", "dash-cols wide");
+  const gridCol = h("div", "col", `<div class="panel">
     <h2 id="hero-range-head">preflop range</h2>
     <div class="small muted" style="margin:-6px 0 10px">Cards known on ${fmtPct(data.visibility)} of ${data.hands} hands \u2014 only your own export shows this.</div>
     <div id="hero-grid"></div>
     <div class="range-legend"><span>never</span><span class="ramp"></span><span>always</span></div>
-  </div>`;
-  const posCol = document.createElement("div");
-  posCol.className = "col";
-  posCol.innerHTML = `<div class="panel">
+  </div>`);
+  const posCol = h("div", "col", `<div class="panel">
     <h2>by position</h2>
     <div id="hero-positions"></div>
-  </div>`;
+  </div>`);
   rangeCols.append(gridCol, posCol);
 
-  const gradesPanel = document.createElement("div");
-  gradesPanel.className = "panel wide";
-  gradesPanel.innerHTML = `
+  const gradesPanel = h("div", "panel wide", `
     <h2 id="hero-grades-head">fold grades &amp; missed value</h2>
     <h3>fold grades</h3>
     <div id="hero-folds"></div>
     <h3>missed value</h3>
-    <div id="hero-missed"></div>`;
+    <div id="hero-missed"></div>`);
   dash.appendChild(gradesPanel);
   dash.appendChild(rangeCols);
 
-  const tellsPanel = document.createElement("div");
-  tellsPanel.className = "panel wide";
-  tellsPanel.innerHTML = `
+  const tellsPanel = h("div", "panel wide", `
     <h2 id="hero-tells-head">sizing &amp; timing tells</h2>
     <div class="tellcols">
       <div><h3>sizing</h3><div id="hero-sizing"></div></div>
       <div><h3>timing</h3><div id="hero-timing"></div></div>
-    </div>`;
+    </div>`);
   dash.appendChild(tellsPanel);
 
-  const narrowingPanel = document.createElement("div");
-  narrowingPanel.className = "panel wide";
-  narrowingPanel.innerHTML = `
+  const narrowingPanel = h("div", "panel wide", `
     <h2 id="hero-narrowing-head">range narrowing</h2>
-    <div id="hero-narrowing"></div>`;
+    <div id="hero-narrowing"></div>`);
   dash.appendChild(narrowingPanel);
 
   // Self machinery first. profileCard builds the same tiles it builds for a
@@ -2521,12 +2429,10 @@ async function viewHero() {
   // your hand histories could work out. Fold grades, your real range, and the
   // tells only your own export can see go above them, and the villain view of
   // you is relabelled as what it is and moved to the foot of the page.
-  const villainView = document.createElement("div");
-  villainView.className = "wide villain-view";
-  villainView.innerHTML = `<div class="villain-view-head">
+  const villainView = h("div", "wide villain-view", `<div class="villain-view-head">
     <span class="label-t">How you look as a villain</span>
     <span class="small muted">The same read the tool would give an opponent
-      studying you.</span></div>`;
+      studying you.</span></div>`);
   for (const sel of [".p-hud", ".p-do", ".p-skill"]) {
     const panel = $(sel, dash);
     if (panel) villainView.appendChild(panel);
@@ -2572,12 +2478,10 @@ async function viewHero() {
     for (const r of ranges) {
       if (!r.hands) continue;
       const played = (r.raised + r.called) / r.hands;
-      const row = document.createElement("div");
-      row.className = "pos-row";
-      row.innerHTML = `
+      const row = h("div", "pos-row", `
         <span class="pos-name">${esc(r.position)}<span class="small muted"> ${r.hands}h</span></span>
         <span class="pos-bar"></span>
-        <span class="pos-val small muted">${fmtPct(played)} played</span>`;
+        <span class="pos-val small muted">${fmtPct(played)} played</span>`);
       const b = bar(played, 1, "var(--mark-3)", 150);
       b.setAttribute("preserveAspectRatio", "none");
       $(".pos-bar", row).appendChild(b);
@@ -2612,15 +2516,13 @@ async function viewHero() {
     narrowing.innerHTML = `<div class="small muted">Not enough hands reaching
       each street yet.</div>`;
   } else {
-    const chart = document.createElement("div");
-    chart.className = "narrow-wrap";
+    const chart = h("div", "narrow-wrap");
     chart.appendChild(narrowingChart(data.narrowing));
     narrowing.appendChild(chart);
     const strengths = data.narrowing.map(s => s.avg_strength);
     if (strengths.length >= 2) {
       const monotone = strengths.every((v, i) => i === 0 || v >= strengths[i - 1]);
-      const note = document.createElement("p");
-      note.className = "small muted";
+      const note = h("p", "small muted");
       note.textContent = monotone
         ? "Narrows street by street, as a continuing range should."
         : "Does not narrow monotonically -- worth a look at which street gives it back.";
@@ -2868,8 +2770,7 @@ function buildPartition(card, members, together, conflicts) {
     const columns = [...new Set(assigned.values())];
     holder.innerHTML = "";
     columns.forEach((col, i) => {
-      const wrap = document.createElement("div");
-      wrap.className = "person";
+      const wrap = h("div", "person");
       const mine = members.filter(m => assigned.get(sideKey(m)) === col);
       const names = [...new Set(mine.map(m => m.name))];
       const hands = mine.reduce((n, m) => n + (m.hands || 0), 0);
@@ -2878,8 +2779,7 @@ function buildPartition(card, members, together, conflicts) {
 
       for (const m of mine) {
         const key = sideKey(m);
-        const chip = document.createElement("div");
-        chip.className = "member" + (picked === key ? " picked" : "");
+        const chip = h("div", "member" + (picked === key ? " picked" : ""));
         chip.draggable = true;
         chip.tabIndex = 0;
         chip.innerHTML = `<b>${esc(m.name)}</b>
@@ -2909,11 +2809,9 @@ function buildPartition(card, members, together, conflicts) {
       }
 
       if (names.length > 1) {
-        const pick = document.createElement("select");
-        pick.className = "keepname";
-        pick.innerHTML = names.map(n =>
+        const pick = h("select", "keepname", names.map(n =>
           `<option value="${esc(n)}" ${n === columnOf.get(col) ? "selected" : ""}>`
-          + `keep “${esc(n)}”</option>`).join("");
+          + `keep “${esc(n)}”</option>`).join(""));
         pick.onchange = () => columnOf.set(col, pick.value);
         pick.onclick = (e) => e.stopPropagation();
         wrap.appendChild(pick);
@@ -2936,10 +2834,8 @@ function buildPartition(card, members, together, conflicts) {
     });
 
     if (members.length > columns.length) {
-      const spare = document.createElement("div");
-      spare.className = "person spare";
-      spare.innerHTML = `<div class="person-head"><span>Someone else</span></div>
-        <div class="small muted">${picked ? "click to move here" : "drag here"}</div>`;
+      const spare = h("div", "person spare", `<div class="person-head"><span>Someone else</span></div>
+        <div class="small muted">${picked ? "click to move here" : "drag here"}</div>`);
       const put = (key) => { assigned.set(key, `solo:${key}`); say(""); };
       spare.onclick = () => { if (picked) { put(picked); picked = null; draw(); } };
       spare.ondragover = (e) => { e.preventDefault(); spare.classList.add("over"); };
@@ -3015,16 +2911,13 @@ const SUITS = {s: "\u2660", h: "\u2665", d: "\u2666", c: "\u2663"};
 /* A board is the one thing in this tool that is not a statistic, and reading
    "7s Jd 3c" as text is slower than seeing it. */
 function cardsEl(list, opts) {
-  const wrap = document.createElement("span");
-  wrap.className = "cards-row" + ((opts && opts.small) ? " small-cards" : "");
+  const wrap = h("span", "cards-row" + ((opts && opts.small) ? " small-cards" : ""));
   for (const raw of (list || [])) {
     const text = String(raw);
     const rank = text.slice(0, -1).replace("T", "10");
     const suit = text.slice(-1).toLowerCase();
-    const card = document.createElement("span");
-    card.className = "card " + (suit === "h" || suit === "d" ? "red" : "black");
-    card.innerHTML = `<span class="r">${esc(rank)}</span><span class="s">${
-      SUITS[suit] || esc(suit)}</span>`;
+    const card = h("span", "card " + (suit === "h" || suit === "d" ? "red" : "black"), `<span class="r">${esc(rank)}</span><span class="s">${
+      SUITS[suit] || esc(suit)}</span>`);
     wrap.appendChild(card);
   }
   return wrap;
@@ -3087,13 +2980,6 @@ function isExactName(q) {
 
 /* When both sides show the same screen name the name tells you nothing, so
    the account id has to be on screen to make the question answerable. */
-function sideAccount(side) {
-  if (!side || !side.account) return "";
-  const id = String(side.account);
-  const short = id.length <= 10 ? id : `${id.slice(0, 6)}\u2026${id.slice(-3)}`;
-  return ` \u00b7 <span class="mono">${esc(short)}</span>`;
-}
-
 async function askIdentity(token, questions, onDone, linked, conflicts) {
   const modal = $("#modal");
   modal.innerHTML = `
@@ -3119,8 +3005,7 @@ async function askIdentity(token, questions, onDone, linked, conflicts) {
     const members = [...g.members.values()]
       .sort((a, b) => (b.hands || 0) - (a.hands || 0));
     const allExact = g.questions.every(isExactName);
-    const div = document.createElement("div");
-    div.className = "q group" + (allExact ? " exact" : "");
+    const div = h("div", "q group" + (allExact ? " exact" : ""));
     div.dataset.group = g.questions.map(q => q.id).join("|");
     div.innerHTML = `
       <div class="q-prompt">${members.length} accounts with similar names</div>
@@ -3140,8 +3025,7 @@ async function askIdentity(token, questions, onDone, linked, conflicts) {
   const singles = new Set(
     groups.filter(x => x.questions.length === 1).map(x => x.questions[0].id));
   for (const q of questions.filter(x => singles.has(x.id))) {
-    const div = document.createElement("div");
-    div.className = isExactName(q) ? "q exact" : "q";
+    const div = h("div", isExactName(q) ? "q exact" : "q");
     // Two identical strings are not a choice, so the picker goes away rather
     // than offering "keep Pratul" or "keep Pratul".
     const distinct = [...new Map((q.names || []).map(n => [displayKey(n), n])).values()];
@@ -3398,8 +3282,7 @@ async function viewPlayer(id) {
   $("#meta").textContent = names.length > 1
     ? `also known as ${names.slice(1).join(", ")}` : "";
   view.innerHTML = "";
-  const back = document.createElement("p");
-  back.innerHTML = `<button class="linkbtn" id="back">\u2190 all players</button>`;
+  const back = h("p", "", `<button class="linkbtn" id="back">\u2190 all players</button>`);
   view.appendChild(back);
   $("#back").onclick = () => {
     state.player = null;
@@ -3417,43 +3300,36 @@ async function viewPlayer(id) {
   // page, so that a wrong merge and a wrong player are undone from the same
   // place instead of one being a button hidden in a table.
   if (data.aliases && data.aliases.length > 1) {
-    const panel = document.createElement("div");
-    panel.className = "panel";
-    panel.innerHTML = `<h2>Accounts</h2>
+    const panel = h("div", "panel", `<h2>Accounts</h2>
       <div class="panel-lead">
         ${data.aliases.length} accounts are pooled as this player.</div>
-      <div id="alias-rows"></div>`;
+      <div id="alias-rows"></div>`);
     view.appendChild(panel);
     const rows = panel.querySelector("#alias-rows");
     for (const a of data.aliases) {
-      const row = document.createElement("div");
-      row.className = "alias-row";
-      row.innerHTML = `<span><b>${esc(a.name || a.account)}</b>
+      const row = h("div", "alias-row", `<span><b>${esc(a.name || a.account)}</b>
           <span class="small muted mono">${esc(a.account)}</span></span>
-        <span class="small muted num">${a.hands} hands</span>`;
+        <span class="small muted num">${a.hands} hands</span>`);
       rows.appendChild(row);
     }
   }
 
   if (data.by_table && data.by_table.length > 1) {
-    const panel = document.createElement("div");
-    panel.className = "panel";
-    panel.innerHTML = `<h2>split by table size</h2>
+    const panel = h("div", "panel", `<h2>split by table size</h2>
       <div class="small muted" style="margin:0 0 12px">
         The read above pools these.</div>
       <div class="scroller"><table><thead><tr>
         <th>table</th><th class="num">hands</th><th>read</th>
         <th class="num">skill</th><th>biggest leak</th>
-      </tr></thead><tbody></tbody></table></div>`;
+      </tr></thead><tbody></tbody></table></div>`);
     const body = $("tbody", panel);
     for (const t of data.by_table) {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `<td>${esc(t.regime_label)}</td>
+      const tr = h("tr", "", `<td>${esc(t.regime_label)}</td>
         <td class="num">${t.hands}</td>
         <td>${esc(t.archetype)} <span class="small muted">${fmtPct(t.archetype_confidence)}</span></td>
         <td class="num">${t.skill.score.toFixed(0)}</td>
         <td class="small">${t.leaks.length ? esc(t.leaks[0].headline)
-          : '<span class="muted">none</span>'}</td>`;
+          : '<span class="muted">none</span>'}</td>`);
       body.appendChild(tr);
     }
     view.appendChild(panel);
@@ -3468,19 +3344,15 @@ async function viewPlayer(id) {
    that acts, and both live at the foot of the page rather than beside the read
    -- nothing here is part of playing a hand. */
 function playerActions(data) {
-  const box = document.createElement("div");
-  box.className = "panel player-actions";
-  box.innerHTML = `<h2>Manage this player</h2>
+  const box = h("div", "panel player-actions", `<h2>Manage this player</h2>
     <div class="panel-lead">Neither of these touches a stored hand. Hands
       belong to a table, not to a person.</div>
-    <div class="row"></div>`;
+    <div class="row"></div>`);
   const row = $(".row", box);
 
-  const split = document.createElement("button");
-  split.className = "act";
+  const split = h("button", "act");
   split.textContent = "Split player\u2026";
-  const del = document.createElement("button");
-  del.className = "act danger";
+  const del = h("button", "act danger");
   del.textContent = "Delete player\u2026";
 
   if (isGuest()) {
@@ -3522,12 +3394,10 @@ function splitDialog(data) {
   $("#close").onclick = () => { modal.innerHTML = ""; };
   const rows = $("#split-rows", modal);
   for (const a of data.aliases) {
-    const row = document.createElement("div");
-    row.className = "alias-row";
-    row.innerHTML = `<span><b>${esc(a.name || a.account)}</b>
+    const row = h("div", "alias-row", `<span><b>${esc(a.name || a.account)}</b>
         <span class="small muted mono">${esc(a.account)}</span></span>
       <span class="small muted num">${a.hands} hands</span>
-      <button class="act small">Split out</button>`;
+      <button class="act small">Split out</button>`);
     const button = $("button", row);
     button.onclick = async () => {
       button.disabled = true;
@@ -3678,8 +3548,7 @@ async function showEvidence(playerId, stat, headline) {
     });
   }
   for (const h of data.hands) {
-    const row = document.createElement("div");
-    row.className = "ev";
+    const row = h("div", "ev");
     const when = h.started_at ? new Date(h.started_at).toLocaleString() : "";
     row.innerHTML = `
       <span class="ev-board"></span>
@@ -3724,11 +3593,9 @@ async function showReplay(handId, playerId, headline) {
   box.appendChild(loadingBlock("Loading the hand\u2026"));
   const r = await get(`/api/hand/${handId}?focus=${playerId}`);
   box.innerHTML = "";
-  const seatLine = document.createElement("div");
-  seatLine.className = "small muted seatline";
+  const seatLine = h("div", "small muted seatline");
   for (const st of r.seats) {
-    const chunk = document.createElement("span");
-    chunk.className = "seatchunk";
+    const chunk = h("span", "seatchunk");
     chunk.textContent = `${st.position} ${st.name} `;
     if (st.hole_cards.length) chunk.appendChild(cardsEl(st.hole_cards, {small: true}));
     seatLine.appendChild(chunk);
@@ -3740,13 +3607,10 @@ async function showReplay(handId, playerId, headline) {
   $("#seats").appendChild(seatLine);
   const streets = $("#streets");
   for (const st of r.streets) {
-    const div = document.createElement("div");
-    div.className = "street";
-    div.innerHTML = `<h4>${esc(st.name)}</h4>`;
+    const div = h("div", "street", `<h4>${esc(st.name)}</h4>`);
     if ((st.new_cards || []).length) $("h4", div).appendChild(cardsEl(st.new_cards));
     for (const a of st.actions) {
-      const line = document.createElement("div");
-      line.className = "act" + (a.focus ? " focus" : "") + (a.post ? " post" : "");
+      const line = h("div", "act" + (a.focus ? " focus" : "") + (a.post ? " post" : ""));
       const amount = a.act.startsWith("check") || a.act.startsWith("fold")
         ? "" : `${a.to_bb} bb`;
       line.innerHTML = `<span class="small muted">${esc(a.position)}</span>

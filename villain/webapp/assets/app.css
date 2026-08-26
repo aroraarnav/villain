@@ -12,40 +12,54 @@
     font-family: "JetBrains Mono"; font-style: normal; font-weight: 100 800;
     font-display: swap; src: url("jetbrains-mono.woff2") format("woff2");
   }
-  /* Dark is the identity, so dark is what :root declares and what every value
-     below was tuned against; light is the accommodation, applied as an
-     override. It used to be the other way round, which meant the palette
-     anyone actually looks at was a mechanical inversion of one nobody did.
-     Neither theme is forced: with no explicit choice the OS still decides. */
+  /* One palette, both themes. `light-dark()` picks per token off the used
+     `color-scheme`, so the pair sits on one line and there is nowhere for a
+     light value to drift from its dark counterpart -- which is what happened
+     when light lived twice, once under `prefers-color-scheme` and once under
+     `[data-theme]`, and a hex edited in one was missed in the other.
+
+     Dark is still the identity and still the value every figure below was
+     tuned against; it is just the second argument now. With no explicit
+     choice the OS decides; the two rules under this one are the toggle, and
+     they set nothing but the scheme. */
   :root {
-    color-scheme: dark;
+    color-scheme: light dark;
     /* Three grounds: page / reference / raised primary. */
-    --bg: #0b0c0e;        /* page */
-    --panel: #141619;     /* reference surface */
-    --panel-2: #191c21;   /* raised: the primary tile on a screen */
-    --inset: #101215;     /* recessed: figure cells inside a panel */
-    --ink: #f2f1ee; --muted: #93938e;
-    --line: #24272b;      /* hairline between rows */
-    --edge: #4b5058;      /* border of something you can operate */
-    --accent: #f2f1ee; --accent-soft: #1d2025;
-    --lift: 0 1px 0 rgba(255,255,255,.03), 0 12px 28px rgba(0,0,0,.42);
+    --bg:       light-dark(#f4f4f2, #0b0c0e);   /* page */
+    --panel:    light-dark(#ffffff, #141619);   /* reference surface */
+    --panel-2:  light-dark(#ffffff, #191c21);   /* raised: a screen's primary tile */
+    --inset:    light-dark(#f3f2ef, #101215);   /* recessed: figure cells in a panel */
+    --ink:      light-dark(#111111, #f2f1ee);
+    --muted:    light-dark(#6b6b68, #93938e);
+    --line:     light-dark(#e6e5e2, #24272b);   /* hairline between rows */
+    --edge:     light-dark(#979590, #4b5058);   /* border of something operable */
+    --accent:   light-dark(#111111, #f2f1ee);
+    --accent-soft: light-dark(#f1f0ee, #1d2025);
     /* --red accent, --warn threshold, --danger irreversible. Not one hex. */
-    --red: #e5645a;
+    --red:      light-dark(#b4532a, #e5645a);
     /* Suit color, not the "you" accent -- .hero-scope rebinds --red. */
-    --card-red: #e5645a;
-    --warn: #d9a441;
-    --danger: #e5484d;
-    --up: #45b881;       /* realized money only -- P/L, session net bb */
-    --hero: #6aa6ff; --hero-soft: #16233a;   /* you; the villain world is warm, you are cool */
+    --card-red: light-dark(#b4532a, #e5645a);
+    --warn:     light-dark(#93650f, #d9a441);
+    --danger:   light-dark(#ab2f2f, #e5484d);
+    --up:       light-dark(#2f7d5b, #45b881);   /* realized money only */
+    /* You; the villain world is warm, you are cool. */
+    --hero:      light-dark(#2f6fe0, #6aa6ff);
+    --hero-soft: light-dark(#eaf1fd, #16233a);
     /* Neutral ordinal ramp, validated against the panel surface: monotone
        lightness, visible step gaps, dark end clears 2:1. Shade carries
        confidence, never identity. */
-    --mark-1: #6f6e6b;   /* tentative */
-    --mark-2: #a8a6a1;   /* likely */
-    --mark-3: #f0efec;   /* strong */
-    --band: #262a30;     /* credible interval wash */
-    --band-line: #383d45;/* its edge, so the interval reads as an interval */
-    --grid: #212429; --axis: #6f7178; --tick: #9b9a94;
+    --mark-1:   light-dark(#8f8d89, #6f6e6b);   /* tentative */
+    --mark-2:   light-dark(#575552, #a8a6a1);   /* likely */
+    --mark-3:   light-dark(#111111, #f0efec);   /* strong */
+    --band:     light-dark(#eceae6, #262a30);   /* credible interval wash */
+    --band-line: light-dark(#d4d2cd, #383d45);  /* its edge, so it reads as one */
+    --grid:     light-dark(#e6e5e2, #212429);
+    --axis:     light-dark(#8a8a86, #6f7178);
+    --tick:     light-dark(#6f6e69, #9b9a94);
+    /* The one token light-dark() cannot carry: a shadow is not a color. On
+       white there is nothing lighter to raise a surface to, so light carries
+       elevation with the shadow instead of with the surface. */
+    --lift: 0 1px 0 rgba(255,255,255,.03), 0 12px 28px rgba(0,0,0,.42);
     /* A grotesque with an actual opinion, and a mono for every figure. The
        platform UI stack behind each is a real fallback, not a formality: the
        faces are shipped files and a file can fail to arrive. */
@@ -57,34 +71,16 @@
        right under a heading. */
     --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 40px;
   }
-  /* Light: same structure, warm neutrals, elevation carried by shadow instead
-     of by a lighter surface (on white there is nothing lighter to go to). */
   @media (prefers-color-scheme: light) {
     :root:not([data-theme="dark"]) {
-      color-scheme: light;
-      --bg: #f4f4f2; --panel: #ffffff; --panel-2: #ffffff; --inset: #f3f2ef;
-      --ink: #111111; --muted: #6b6b68;
-      --line: #e6e5e2; --edge: #979590; --accent: #111111; --accent-soft: #f1f0ee;
       --lift: 0 1px 2px rgba(17,17,17,.05), 0 10px 24px rgba(17,17,17,.07);
-      --red: #b4532a; --card-red: #b4532a; --warn: #93650f; --danger: #ab2f2f; --up: #2f7d5b;
-      --hero: #2f6fe0; --hero-soft: #eaf1fd;
-      --mark-1: #8f8d89; --mark-2: #575552; --mark-3: #111111;
-      --band: #eceae6; --band-line: #d4d2cd;
-      --grid: #e6e5e2; --axis: #8a8a86; --tick: #6f6e69;
     }
   }
   :root[data-theme="light"] {
     color-scheme: light;
-    --bg: #f4f4f2; --panel: #ffffff; --panel-2: #ffffff; --inset: #f3f2ef;
-    --ink: #111111; --muted: #6b6b68;
-    --line: #e6e5e2; --edge: #979590; --accent: #111111; --accent-soft: #f1f0ee;
     --lift: 0 1px 2px rgba(17,17,17,.05), 0 10px 24px rgba(17,17,17,.07);
-    --red: #b4532a; --card-red: #b4532a; --warn: #93650f; --danger: #ab2f2f; --up: #2f7d5b;
-    --hero: #2f6fe0; --hero-soft: #eaf1fd;
-    --mark-1: #8f8d89; --mark-2: #575552; --mark-3: #111111;
-    --band: #eceae6; --band-line: #d4d2cd;
-    --grid: #e6e5e2; --axis: #8a8a86; --tick: #6f6e69;
   }
+  :root[data-theme="dark"] { color-scheme: dark; }
   * { box-sizing: border-box; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
@@ -644,11 +640,7 @@
              letter-spacing: -0.02em; margin: 3px 0; }
   .pnl-big.up { color: var(--up); }
   .pnl-big.down { color: var(--danger); }
-  .desc-toggle { display: flex; align-items: center; gap: 7px; margin-top: 18px;
-                 font-size: 13px; cursor: pointer; }
-  .desc-toggle input { accent-color: var(--red); }
-  .think-bubble { position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
-    background: var(--panel); border: 1px solid var(--edge); border-radius: 10px; padding: 7px 10px;
+  .think-bubble { position: absolute; bottom: calc(100% + 8px); left: 50%; transforborder: 1px solid var(--edge); border-radius: 10px; padding: 7px 10px;
     width: 188px; box-shadow: 0 8px 22px rgba(0,0,0,.45); z-index: 6; font-size: 12px; text-align: left; }
   .think-bubble.below { bottom: auto; top: calc(100% + 8px); }
   /* Seats near an edge anchor their bubble to that edge instead of centering
@@ -1035,9 +1027,6 @@
      word, but a rail lets three rows be compared for evidence strength in one
      downward glance -- which is what TIER_COLOR was defined for and never
      used on. */
-  .leak.t-strong { border-left-color: var(--mark-3); }
-  .leak.t-likely { border-left-color: var(--mark-2); }
-  .leak.t-tentative { border-left-color: var(--mark-1); }
   .leak.watch { opacity: 1; border-left-style: dashed; border-left-color: var(--edge); }
   .leak-price { text-align: right; padding-top: 2px; }
   .leak-price .v {
@@ -1115,7 +1104,6 @@
                        flex-wrap: wrap; margin-bottom: var(--sp-1); }
   .villain-view-head .label-t { margin: 0; }
   .villain-view > .panel:first-of-type { margin-top: var(--sp-3); }
-  .hero-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
   /* Graded / flagged / the rate between them. The two counts are stat-pairs so
      they match every other figure in the app; the bar is the proportion, which
      is the only thing a percentage in prose was trying to convey. */
@@ -1219,7 +1207,6 @@
     font-size: 11px; font-weight: 700; cursor: help; vertical-align: 1px;
   }
   .flag:hover { background: var(--red); color: var(--panel); }
-  .leak.weakspots .metric { grid-template-columns: 1fr 150px 30px; }
   /* Two bars to a row, the same length, so the shift is the thing you see
      rather than something to be worked out from two percentages. */
   .adjust .metric { grid-template-columns: 88px 1fr 40px; margin: 3px 0; }

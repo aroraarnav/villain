@@ -401,10 +401,10 @@ def _build_hero_payload(store: Store, hero_id: int | None, progress=None) -> dic
                "hole_cards": list(g.hole_cards), "board": g.board, "texture": g.texture,
                "summary": g.summary, "in_words": g.in_words}
 
-    def _bucketed_json(report, mistakes_attr, rate_attr):
+    def _bucketed_json(report):
         return {
-            "graded": report.graded, "flagged": len(getattr(report, mistakes_attr)),
-            "rate": getattr(report, rate_attr),
+            "graded": report.graded, "flagged": len(report.flagged),
+            "rate": report.rate,
             "by_street": {STREET_LABELS.get(s, s): {"flagged": m, "graded": n}
                          for s, (m, n) in sorted(report.by_street().items())},
             "by_texture": {t: {"flagged": m, "graded": n}
@@ -435,10 +435,8 @@ def _build_hero_payload(store: Store, hero_id: int | None, progress=None) -> dic
         ],
         "grid": {cls: {"played": played, "dealt": dealt}
                 for cls, (played, dealt) in combined_grid(ranges).items()},
-        "fold_grades": None if report is None else _bucketed_json(
-            report, "mistakes", "mistake_rate"),
-        "missed_value": None if missed_report is None else _bucketed_json(
-            missed_report, "missed", "missed_rate"),
+        "fold_grades": None if report is None else _bucketed_json(report),
+        "missed_value": None if missed_report is None else _bucketed_json(missed_report),
         "grade_error": grade_error,
         "sizing": _tell_json(sizing),
         "timing": _tell_json(timing),
