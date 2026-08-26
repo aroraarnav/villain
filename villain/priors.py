@@ -208,8 +208,7 @@ def spread_of(feature: str, table_regime: str = "",
     target without moving any player. Fitted per regime, from the observed
     scatter between players with sampling noise subtracted; a global constant
     was wrong by up to 2x in both directions. See docs/decisions.md for the
-    measured gap and why the Beta route inverts.
-    """
+    measured gap and why the Beta route inverts."""
     if priors:
         fitted = priors.get(f"spread:{feature}")
         if fitted:
@@ -227,8 +226,7 @@ class Estimate:
 
     ``alpha``/``beta`` are the full Beta posterior, kept so downstream code can ask
     probability questions -- "how sure are we they fold *more* than the field?" --
-    rather than being stuck with a point estimate and an interval.
-    """
+    rather than being stuck with a point estimate and an interval."""
 
     value: float
     lo: float
@@ -249,8 +247,7 @@ class Estimate:
 
     def _beta_prob(self, threshold: float, above: bool, *, prior: bool = False) -> float:
         """A finite probability. scipy's Beta is undefined at alpha/beta = 0, and the
-        NaN that produces is not JSON. docs/decisions.md.
-        """
+        NaN that produces is not JSON. docs/decisions.md."""
         from scipy.stats import beta as _beta
         if prior:
             a = self.prior * self.strength
@@ -272,8 +269,7 @@ class Estimate:
         """What we would have believed with no hands on this player at all.
 
         Against :meth:`prob_above`, this is how much the *data* moved the answer --
-        the only part of a read that was earned.
-        """
+        the only part of a read that was earned."""
         return self._beta_prob(threshold, True, prior=True)
 
     def prior_prob_below(self, threshold: float) -> float:
@@ -328,8 +324,7 @@ def fit_empirical(samples: dict[str, list[tuple[float, float]]],
 
     The between-player spread sets the strength. If everyone folds to c-bets at
     roughly the same rate, three observations should barely move a new player's
-    estimate; if the spread is wide, the same three mean more.
-    """
+    estimate; if the spread is wide, the same three mean more."""
     out: dict[str, tuple[float, float]] = {}
     for stat, rows in samples.items():
         usable = [(h, o) for h, o in rows if o >= 5]

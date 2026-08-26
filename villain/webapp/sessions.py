@@ -138,8 +138,7 @@ def _conflicting_pairs(session: dict) -> list[list[str]]:
     Dealt into the same hand more than a glitch's worth of times, so
     `Store.link` refuses them. The dialog needs to know, so it can show a whole
     knot of similar names together while keeping those pairs apart and saying
-    why, rather than accepting the drop and failing after. Handful-sized.
-    """
+    why, rather than accepting the drop and failing after. Handful-sized."""
     from ..db import SPURIOUS_OVERLAP
     from ..identity import _incoming_co_occurrence
 
@@ -170,8 +169,7 @@ def session_brief(token: str) -> dict:
     shows profiles before you save. An import needs only the token, the counts
     and the questions, then commits and computes it all again from the stored
     hands -- 80s of native CPU on a 71k import, an order of magnitude worse in
-    the browser, under a bar that said "matching players".
-    """
+    the browser, under a bar that said "matching players"."""
     session = SESSIONS[token]
     return {
         "token": token,
@@ -329,8 +327,7 @@ def apply_answers(session: dict, answers: dict) -> None:
 
     Pairs that sat together more than a reconnect glitch are never pooled
     here — ``commit_session`` would refuse the link, and showing a merged
-    profile the save step cannot keep is worse than leaving them apart.
-    """
+    profile the save step cannot keep is worse than leaving them apart."""
     from ..db import SPURIOUS_OVERLAP
     from ..identity import _incoming_co_occurrence
 
@@ -371,8 +368,7 @@ def commit_session(store: Store, token: str, answers: dict) -> dict:
     Order matters. Hands are stored first so that every account exists as a
     player, then declined renames are re-keyed, then accepted aliases are
     merged. Doing the merges first would mean linking players that do not exist
-    yet.
-    """
+    yet."""
     session = SESSIONS[token]
     questions = {q.id: q for q in session.get("questions", [])}
     answers = answers or session.get("answers") or {}

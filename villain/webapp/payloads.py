@@ -59,8 +59,7 @@ def _references(stat: str, _regime: str, profile) -> dict:
     The tick has to be the same field the estimate was shrunk toward. After
     ``villain fit`` that is ``profile.population`` (the pool), not the built-in
     online mean: drawing the online number next to a home-game posterior is how
-    most of a loose pool read "high vs field".
-    """
+    most of a loose pool read "high vs field"."""
     out = {"population": profile.population(stat)}
     rule = _THRESHOLD_RULES.get(stat)
     if rule is not None:
@@ -149,8 +148,7 @@ def _roster_fingerprint(store: Store) -> tuple:
 
     Measured against the live database: 4ms, versus 1,440ms to rebuild -- so
     this is checked on every request rather than invalidated by hand from the
-    routes that write. An invalidation hook is a thing to forget; this is not.
-    """
+    routes that write. An invalidation hook is a thing to forget; this is not."""
     hands, players = store.conn.execute(
         "SELECT (SELECT COUNT(*) FROM hands), (SELECT COUNT(*) FROM players)"
     ).fetchone()
@@ -263,8 +261,7 @@ def tab_availability(store: Store) -> dict[str, dict]:
 
     Reasons name the fix, not the deficiency -- "import an export you played
     in" rather than "no hero found" -- because every one of these is reached by
-    someone who has just arrived and has no idea what the tool wanted.
-    """
+    someone who has just arrived and has no idea what the tool wanted."""
     # Local, not top-level: heroview imports this module, so importing it back
     # at module scope is a cycle.
     from .heroview import _cached_hero_id

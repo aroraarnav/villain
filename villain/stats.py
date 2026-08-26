@@ -115,8 +115,7 @@ class StatBook:
     Regime is part of the identity of a book, not a label on it. The same
     person three-handed and heads-up produces two books, because pooling them
     would average two genuinely different strategies into one that describes
-    neither.
-    """
+    neither."""
 
     player_id: str = ""
     name: str = ""
@@ -183,8 +182,7 @@ class HandView:
     """Precomputed per-hand context: who saw what, who had initiative, who won.
 
     Built once per hand and shared by every statistic, because most of the cost
-    of a stat engine is recomputing this state over and over.
-    """
+    of a stat engine is recomputing this state over and over."""
 
     def __init__(self, hand: Hand):
         self.hand = hand

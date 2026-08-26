@@ -99,8 +99,7 @@ class Profile:
         somebody whose frequencies merely look tight.
 
         Measured against one fixed bar rather than each player's own faced sizes;
-        pricing it per-player inverts the signal. docs/decisions.md.
-        """
+        pricing it per-player inverts the signal. docs/decisions.md."""
         errors = []
         for street in ("flop", "turn", "river"):
             est = self.stats.get(f"fold_vs_bet:{street}")
@@ -184,8 +183,7 @@ def build_profile(book: StatBook, others: dict[str, StatBook] | None = None,
 
     ``others`` is the same player's books in other regimes, used as a personal
     prior. ``priors`` overrides the population defaults, which is how
-    empirically fitted priors from the database get used.
-    """
+    empirically fitted priors from the database get used."""
     reg = book.regime or regime(book.mean("table_size") or 6.0)
     others = {r: b for r, b in (others or {}).items() if r != reg and b.hands > 0}
     priors = priors or {}
@@ -255,8 +253,7 @@ def build_profiles(by_regime: dict[str, StatBook], min_hands: int = 1,
     """One profile per regime the player has been seen in, busiest first.
 
     Each book is shrunk toward *that* table's fitted prior, never the busiest
-    regime's. docs/decisions.md.
-    """
+    regime's. docs/decisions.md."""
     profiles = []
     for reg, book in by_regime.items():
         if book.hands < min_hands:
@@ -292,8 +289,7 @@ def rate_chain(profile, keys, default=None, min_opps: float = 0.0):
 
     Position and stack splits are real and measured, but thin. A missing or
     4-hand ``three_bet:UTG`` must not become the policy -- that is how a
-    pooled 8% turns into a 50% 3-bet off one hand.
-    """
+    pooled 8% turns into a 50% 3-bet off one hand."""
     for key in keys:
         if key:
             hit = rate(profile, key, None, min_opps)
@@ -458,8 +454,7 @@ def _translate_rate(stat: str, ratio: Ratio, source: str, target: str,
     """Re-express a rate measured in one regime on another regime's scale.
 
     Shrunk first, and against the fitted field rather than the built-in one --
-    both of which are load bearing. docs/decisions.md.
-    """
+    both of which are load bearing. docs/decisions.md."""
     mean, strength = _pop_mean_strength(stat, source, populations)
     shrunk = shrink(ratio.hits, ratio.opps, mean, strength).value
     source_pop = mean

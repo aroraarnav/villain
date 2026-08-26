@@ -61,8 +61,7 @@ def test_heads_up_the_slice_is_the_whole_counter(hands, hero):
     """With one opponent every decision is against them, so the two agree.
 
     The sharpest check available on the counterparty logic: any decision
-    credited to the wrong player shows up here as a mismatch.
-    """
+    credited to the wrong player shows up here as a mismatch."""
     hu = [h for h in hands
           if regime_of(len(h.seats)) == "hu"
           and any(s.player_id == hero for s in h.seats)]

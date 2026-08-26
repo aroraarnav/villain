@@ -61,8 +61,7 @@ def find_hero(store, min_hands: int = MIN_HERO_HANDS, progress=None,
     regardless of outcome rather than almost only at showdown.
 
     ``min_hands`` is overridable for testing against small fixtures; it exists so
-    a villain who showed a few hands in a short sample cannot look like hero.
-    """
+    a villain who showed a few hands in a short sample cannot look like hero."""
     seen: dict[int, int] = {}
     total: dict[int, int] = {}
     # `hands` lets a caller that has already loaded them hand them over. A cold
@@ -130,8 +129,7 @@ def hero_of(hands) -> str | None:
     Resolved from the seat rather than a stored account id, so the answer follows
     a player through renames and merges. Returns ``None`` rather than guessing: a
     wrong answer here does not fail loudly, it quietly relabels one opponent's
-    decisions as your own.
-    """
+    decisions as your own."""
     hands = list(hands)
     stated = Counter(
         hand.seat(hand.hero_seat).player_id
@@ -170,8 +168,7 @@ def texture_label(board: list[str]) -> str:
     """"wet" or "dry" -- a chosen two-way split of :func:`villain.reads.texture`,
     not a derived one. Suited or connected boards carry live draws and are wet.
     Coarse on purpose: a finer split needs more hands per bucket than most
-    players have to spend.
-    """
+    players have to spend."""
     _paired, suited, connected, _high = texture(board)
     return "wet" if (suited or connected) else "dry"
 
@@ -212,8 +209,7 @@ def preflop_range(hands: list, hero_id: int) -> dict[str, PositionRange]:
     Simplified on purpose: "what did you do with this hand from this seat", not
     split by whether you were opening or responding to a raise. An open-raise
     chart and a vs-raise chart are genuinely different objects, and collapsing
-    them is a real limitation rather than an oversight.
-    """
+    them is a real limitation rather than an oversight."""
     by_position: dict[str, PositionRange] = {}
     for hand in hands:
         seat = next((s for s in hand.seats if s.player_id == str(hero_id)), None)
@@ -246,8 +242,7 @@ def preflop_range(hands: list, hero_id: int) -> dict[str, PositionRange]:
 def combined_grid(ranges: dict[str, PositionRange]) -> dict[str, tuple[int, int]]:
     """Every hand class summed across position: (times played, times dealt).
 
-    The one-chart summary; a real range chart is 13 of these, one per position.
-    """
+    The one-chart summary; a real range chart is 13 of these, one per position."""
     dealt: dict[str, int] = {}
     played: dict[str, int] = {}
     for pos in ranges.values():
@@ -273,8 +268,7 @@ def fit_population_model(store, progress=None, hands=None) -> StrengthModel:
     hero's folds against what the bet actually represents.
 
     The walk over hands can be counted; fitting the trees cannot, and says so by
-    reporting no total.
-    """
+    reporting no total."""
     if hands is None:
         loading = (lambda done, total: progress(done, total, "loading")) if progress else None
         hands = store.player_hands(progress=loading)
@@ -292,8 +286,7 @@ def _hero_spots(hands: list, hero_id: int, progress=None):
     street. Written out five times that preamble drifted -- the board check, the
     two-card check and the ``str(hero_id)`` comparison are load bearing together,
     and a fix applied to folds but missed on checks silently changes a
-    denominator rather than raising.
-    """
+    denominator rather than raising."""
     total = len(hands)
     every = 200
     if progress is not None:
@@ -324,8 +317,7 @@ class GradeKind:
     ``margin`` is not shared. Folds have a strongly negative mean edge, so a
     tight bar rarely fires on noise; checks measure -0.03 mean against a 0.24
     stdev, and at 0.05 fully 40% of them cross. 0.20 is roughly the 80th
-    percentile of the real distribution and brings that to 19%.
-    """
+    percentile of the real distribution and brings that to 19%."""
     margin: float
     line: str                 # "a bet like that one" / "a check on that line"
     priced: bool              # a fold faces pot odds; a check never does
@@ -474,8 +466,7 @@ def _predict_strength(model: StrengthModel, hand, decision: Decision) -> float:
     unknown, so the honest question is what the typical, mostly showdown-selected
     training row looks like. That sample skews toward calling ranges, so the
     estimate runs a little strong -- the safe direction, since it under-flags
-    hero's folds and missed value rather than over-flagging them.
-    """
+    hero's folds and missed value rather than over-flagging them."""
     act = decision.action.act
     features = [
         0.0, float(decision.street),
@@ -563,8 +554,7 @@ class TellKind:
     ``phrase`` renders the two averages into the sentence and ``warning`` the
     clause after it -- the only parts that cannot be shared, since a size reads as
     a percentage of pot and a think time as seconds, and only timing has a
-    direction worth naming.
-    """
+    direction worth naming."""
     gap_bar: float
     verb: str
     phrase: Callable[[float, float], str]
@@ -602,8 +592,7 @@ class Tell:
 
         Sign is meaningful and differs by kind: a positive size gap means hero bets
         bigger with the better half; a negative timing gap means hero thinks longer
-        with the worse half, the classic tank-as-bluff tell.
-        """
+        with the worse half, the classic tank-as-bluff tell."""
         pair = self.by_street.get(street)
         if not pair:
             return None
@@ -627,8 +616,7 @@ class Tell:
         """One sentence for a street with enough data to compare, or None.
 
         ``lead=False`` drops the "On the {street}, " opener, for a caller that already
-        shows the street as its own label beside the sentence.
-        """
+        shows the street as its own label beside the sentence."""
         pair = self.by_street.get(street)
         if not pair:
             return None
@@ -653,8 +641,7 @@ def _aggression_tell(hands: list, hero_id: int, kind: TellKind,
     Scoped to bets and raises for both kinds: "does hero's aggression carry a
     tell" is narrower and more answerable than grading every action type. It is
     answerable at all only because hero's strength is known on every action, not
-    just the ones that reached showdown.
-    """
+    just the ones that reached showdown."""
     by_street: dict[int, tuple[Bucket, Bucket]] = {
         int(s): (Bucket("top half"), Bucket("bottom half"))
         for s in (Street.FLOP, Street.TURN, Street.RIVER)
@@ -677,8 +664,7 @@ def _aggression_tell(hands: list, hero_id: int, kind: TellKind,
 def sizing_tell(hands: list, hero_id: int, progress=None) -> Tell:
     """Does hero bet bigger with better hands? The mirror of fold grading, asked
     of hero's aggression. A real gap means an observant opponent could read hand
-    strength off bet size alone, without ever seeing a card.
-    """
+    strength off bet size alone, without ever seeing a card."""
     return _aggression_tell(hands, hero_id, SIZING,
                             lambda d: d.bet_fraction, progress)
 
@@ -686,8 +672,7 @@ def sizing_tell(hands: list, hero_id: int, progress=None) -> Tell:
 def timing_tell(hands: list, hero_id: int, progress=None) -> Tell:
     """Does hero take longer to act with one half of the strength range than the
     other? A snap bet and a tanked one are different information if they
-    correlate with strength.
-    """
+    correlate with strength."""
     return _aggression_tell(
         hands, hero_id, TIMING,
         lambda d: min((d.action.think_ms or 0) / 1000.0, THINK_CAP_S), progress)
@@ -714,8 +699,7 @@ def range_narrowing(hands: list, hero_id: int, progress=None) -> list[StreetStre
     "Still live" uses HandView.saw, reconstructed from who folded when rather
     than from who happened to act -- the same building block the rest of the
     stats engine uses to avoid counting a player who folded before a street was
-    dealt.
-    """
+    dealt."""
     totals: dict[int, list[float]] = {int(s): [] for s in (Street.FLOP, Street.TURN, Street.RIVER)}
     for hand, seat, strengths in _hero_spots(hands, hero_id, progress):
         view = HandView(hand)

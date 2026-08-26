@@ -127,8 +127,7 @@ class Hand:
     def _did(self, seat: int, they: str, you: str) -> str:
         """A log clause: third person for a name, first person for You.
 
-        The subject is the seat's display name. ``You calls`` is not a sentence.
-        """
+        The subject is the seat's display name. ``You calls`` is not a sentence."""
         name = self.seats[seat].name
         if seat == getattr(self, "hero_seat", None) or name.lower() == "you":
             return f"{name} {you}"
@@ -240,8 +239,7 @@ class Hand:
         acted that way -- but only if it is actually played, and a caller may
         ask what two profiles would do at one node without playing either. So
         the policy stages the update and :meth:`act` commits it. Staging again
-        replaces the slot.
-        """
+        replaces the slot."""
         self._staged = (seat, commit)
 
     def act(self, kind: str, amount: int = 0) -> None:

@@ -371,8 +371,7 @@ class Handler(BaseHTTPRequestHandler):
         validates Host either way so a DNS-rebinding name cannot point at this
         port and read the database. A request with neither header is allowed:
         that is curl and the CLI, which are not a browser and carry no
-        ambient cookies or cross-site risk.
-        """
+        ambient cookies or cross-site risk."""
         host = (self.headers.get("Host") or "").split(":")[0]
         if host and host not in LOCAL_HOSTS:
             return False

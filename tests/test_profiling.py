@@ -262,8 +262,7 @@ def test_a_tag_in_this_field_is_not_scored_as_loose():
 
     A 28% VPIP in a 42% home game is a TAG; scoring it against the built-in
     15% target called that selection bad and dragged every looser regular
-    down with it.
-    """
+    down with it."""
     book = StatBook(player_id="hero", name="Hero", regime="6max", hands=5000)
     book.meters["table_size"].add(6, 1)
     book.ratios["vpip"].hits = 285
@@ -424,8 +423,7 @@ def test_multiway_oop_folds_are_not_a_heads_up_overfold():
     """A 6-max field sits on MDF heads-up and folds more multiway / OOP.
 
     Pricing the OOP slice at a one-defender breakeven is how most of a home
-    game got 'folds too often to flop bets'.
-    """
+    game got 'folds too often to flop bets'."""
     book = _flop_fold_book(
         "6max", 400,
         **{"fold_vs_bet:flop": (94, 200),          # 47%, the pooled mix

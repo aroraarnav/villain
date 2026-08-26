@@ -35,8 +35,7 @@ def as_json(obj: Any, *derived: str) -> dict:
     field added to the dataclass is simply absent from the payload, with
     nothing failing on either side, so it is found when somebody notices the
     UI has been rendering ``undefined``. Properties are named explicitly
-    because most of them are prose or formatting the browser does not want.
-    """
+    because most of them are prose or formatting the browser does not want."""
     if not is_dataclass(obj):
         raise TypeError(f"{type(obj).__name__} is not a dataclass")
     out = {f.name: getattr(obj, f.name) for f in fields(obj)}

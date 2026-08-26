@@ -76,8 +76,7 @@ def forget_hero(store: Store) -> None:
     without adding or removing a single one. So the caches have to be dropped
     by hand, or the tool keeps answering with a hero id that no longer means
     what it did -- and the disk cache keeps serving a whole payload built
-    around it.
-    """
+    around it."""
     key = str(store.path)
     _HERO_ID_CACHE.pop(key, None)
     _HERO_MODEL_CACHE.pop(key, None)
@@ -163,8 +162,7 @@ def threads_work() -> bool:
 
     Callers use this to choose between answering ``202`` and polling, and
     building inside the request. Without it the browser asks for a build that
-    can never start and then waits for it forever.
-    """
+    can never start and then waits for it forever."""
     global _THREADS_WORK
     if _THREADS_WORK is None:
         try:
@@ -208,8 +206,7 @@ def hero_begin(store: Store, hero_id: int | None = None) -> bool:
     appears in and fits a strength model over it -- and it was done inside the
     request, so the browser sat on a blank Hero tab with no way to know
     whether anything was happening. Same lock, same caches; only who waits
-    changes.
-    """
+    changes."""
     key = (str(store.path), hero_id)
     if hero_status(store, hero_id) != "cold" or key in _HERO_BUILDING:
         return False
@@ -360,8 +357,7 @@ def _build_hero_payload(store: Store, hero_id: int | None, progress=None) -> dic
         similar cache hit -- splitting them into fake thirds of unequal
         cost was the bar that jumped 0-33% over minutes and 33-100% in
         a blink. Before the model, the first walk is the cold one and
-        this is still the least-wrong count we have.
-        """
+        this is still the least-wrong count we have."""
         def part(i):
             if progress is None:
                 return None

@@ -148,8 +148,7 @@ def rating(rows: list[GTORow]) -> float | None:
     """0-100 closeness to the baseline, or ``None`` below any sample.
 
     Exact (preflop solver) rows weigh double the benchmark (postflop) rows, so
-    the rating leans on the part of the comparison that is actually exact.
-    """
+    the rating leans on the part of the comparison that is actually exact."""
     if not rows:
         return None
     num = den = 0.0

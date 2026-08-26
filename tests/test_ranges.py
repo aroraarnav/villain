@@ -64,8 +64,7 @@ def test_the_conditional_gate_is_far_tighter_than_the_unconditional_one():
     A player who 4-bets 16.3% of the range they opened with, opening ~40%.
     Read as a cut on the whole deck that gate is 0.837 and T9o (0.804) clears
     it on noise. Read inside the opening range -- which is what the statistic
-    was counted over -- T9o sits at 0.51 and is nowhere near the cut.
-    """
+    was counted over -- T9o sits at 0.51 and is nowhere near the cut."""
     r = Ranges(2)
     r.narrow(0, OPEN, [(1 - 0.40, 1.0)])          # they opened: top 40%
     t9o = r.percentile(0, hole("Tc", "9d"), OPEN)
@@ -104,8 +103,7 @@ def test_nothing_in_range_beats_a_ten_on_a_double_paired_ten_board():
 
     After a line that leaves mostly broadway tens, QT is tied for the nuts
     with every other ten -- and the midpoint of that pile is the middle
-    of the range, not the top.
-    """
+    of the range, not the top."""
     from villain.ranges import CLASS_NAMES
     board = [int(card_id(c)) for c in ("9s", "3h", "Tc", "9d", "Th")]
     r = Ranges(2)
@@ -195,8 +193,7 @@ def test_playability_never_reorders_the_made_hands():
     it produces is the frequency cut every postflop decision is taken on. A
     flat bonus on top of a percentile already near the ceiling inverted it: on
     a paired board a made straight scored 1.149 against quads at 0.999, so the
-    top of a c-betting range was a straight and the quads were in the bluffs.
-    """
+    top of a c-betting range was a straight and the quads were in the bluffs."""
     board = [int(card_id(c)) for c in ("5c", "6d", "7h", "7s")]
     play = Ranges(2).board_cache(board).play
     straight = play[index_of(hole("8h", "9d"))]

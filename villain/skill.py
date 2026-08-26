@@ -117,8 +117,7 @@ def _solid(profile: Profile, feature: str) -> float:
     """What a competent player does with this stat at this table size.
 
     TAG against *this* field, not the built-in online one: 28% VPIP in a 42%
-    home game is a TAG, and a 15% online target calls it bad hand selection.
-    """
+    home game is a TAG, and a 15% online target calls it bad hand selection."""
     return target_frequency(ARCHETYPE_BY_NAME["tag"], feature, profile.regime, profile)
 
 
@@ -137,8 +136,7 @@ def _pool_tolerance(profile, stat: str, builtin: float) -> float:
     the ruler being longer than the room.
 
     Tightening only, never past the theory band, and it falls back to the
-    built-in number when there is no pool to ask.
-    """
+    built-in number when there is no pool to ask."""
     band = profile.priors.get(f"range:{stat}") if profile is not None else None
     if not band:
         return builtin
@@ -155,8 +153,7 @@ def _band_score(value: float, target: float, tolerance: float,
     """100 at the target, decaying with distance in units of ``tolerance``.
 
     ``loose_tolerance`` widens the high side: poker errors are asymmetric, and
-    scoring them symmetrically misreads solid players.
-    """
+    scoring them symmetrically misreads solid players."""
     span = tolerance if value < target else (loose_tolerance or tolerance)
     z = abs(value - target) / span
     return max(0.0, 100.0 * (1.0 - 0.5 * z * z)) if z < 1.4 else max(0.0, 100.0 - 45.0 * z)
@@ -269,8 +266,7 @@ def _exploitability_component(exploitability: float, profile: Profile) -> Compon
     """Money available against them, mapped onto the same 0-100 scale.
 
     Weighted by sample size, because "no leaks found" and "no leaks yet
-    findable" are the same number here and only one of them is a compliment.
-    """
+    findable" are the same number here and only one of them is a compliment."""
     # The divisor is calibrated against real bb/100: a leak worth ~3bb/100 (the
     # "big" band in exploits.py) lands near 75, ~9 near 50, ~30 near 25. It was
     # 4.0 when severities were accidentally computed as bb per *hand*, i.e. a
@@ -345,8 +341,7 @@ def weaknesses(skill: Skill, limit: int = 3) -> list[Component]:
     Separate from leaks on purpose. A leak is a frequency you can attack for a
     known price; this is where somebody is simply worse, which may or may not
     be exploitable but is always the reason their rating is what it is. Without
-    it a player rated 68 with no leaks listed looks identical to one rated 90.
-    """
+    it a player rated 68 with no leaks listed looks identical to one rated 90."""
     rated = [c for c in skill.components
              if c.weight > 0 and c.name != "Resistance to exploitation"]
     weak = [c for c in sorted(rated, key=lambda c: c.score) if c.score < WEAK_COMPONENT]
@@ -359,8 +354,7 @@ def leaderboard(profiles: list[Profile]) -> list[Profile]:
     Ranking by the displayed (pulled) score ranked sample size. Ranking by
     ``base`` once there are enough hands is the comparison the number claims
     to be; everyone below :data:`MEASURED_HANDS` goes to the bottom rather
-    than clustering at 50.
-    """
+    than clustering at 50."""
     for p in profiles:
         if p.skill is None:
             p.skill = rate(p)

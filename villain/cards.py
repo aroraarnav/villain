@@ -92,8 +92,7 @@ def _top_bits(mask: np.ndarray, count: int) -> np.ndarray:
     :data:`_TOP_TABLE` and this is a single gather -- no sort or per-row work,
     where an argsort or a cumsum scatter was the biggest cost in a hero build.
     Masked to 13 bits because callers pass complements, which set high bits.
-    Unset slots and a deuce both read 0, which callers rely on.
-    """
+    Unset slots and a deuce both read 0, which callers rely on."""
     return _TOP_TABLE[np.asarray(mask, dtype=np.int64) & 0x1FFF][:, :count]
 
 

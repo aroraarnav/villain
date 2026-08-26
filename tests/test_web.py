@@ -100,8 +100,7 @@ def test_same_name_overlapping_time_is_not_offered_as_one(session, store):
     look like dozens of accounts, and their active windows all overlap by
     construction -- they are the same person playing all season. Overlapping
     windows are therefore not evidence of two humans; being dealt into a hand
-    together is, and that is tested separately below.
-    """
+    together is, and that is tested separately below."""
     from villain.webapp import SESSIONS
 
     hands = copy.deepcopy(SESSIONS[session]["hands"])
@@ -164,8 +163,7 @@ def test_regular_opponents_are_never_offered_as_one(session, store):
 
     A single shared hand is tolerated on purpose -- a reconnect can leave a
     stale seat -- but the question then says so, so the user is never asked to
-    overrule the evidence without being shown it.
-    """
+    overrule the evidence without being shown it."""
     from villain.db import SPURIOUS_OVERLAP
     hands = SESSIONS[session]["hands"]
     for q in session_questions(store, hands):
@@ -240,8 +238,7 @@ def test_roster_hides_rounding_error_profiles(seeded):
     """A one-hand book is a rounding error, not a profile.
 
     The exception is a player who has nothing bigger: they still get a single
-    row, because vanishing from the roster entirely is worse than a thin read.
-    """
+    row, because vanishing from the roster entirely is worse than a thin read."""
     from collections import defaultdict
     rows = roster_payload(seeded)
     assert rows
@@ -416,8 +413,7 @@ def test_roster_always_names_the_biggest_leak_it_can(seeded):
     """"None clears the bar" left the weakest player looking like the safest.
 
     The column falls back through what is known -- priced leak, unconfirmed
-    read, weakest rated area -- and says which kind of claim it is making.
-    """
+    read, weakest rated area -- and says which kind of claim it is making."""
     from villain.webapp import roster_payload
     rows = roster_payload(seeded)
     assert rows
@@ -442,8 +438,7 @@ def test_a_rated_weakness_is_never_presented_as_a_measured_leak(seeded):
 
 def test_a_database_merge_shows_up_in_a_loaded_session(tmp_path, hands):
     """The same people, so the same answer. A session that ignored a merge made
-    in the database would contradict the database it is about to be saved into.
-    """
+    in the database would contradict the database it is about to be saved into."""
     import copy
 
     from villain.webapp import SESSIONS, database_merges, session_payload
@@ -521,8 +516,7 @@ def test_auto_merges_do_not_swallow_the_questions_that_need_a_human(session, tmp
     The UI opens the identity dialog only for an unanswered session. Auto
     answers share the dict human answers live in, so counting them as "the
     user has answered" hid every remaining question behind merges the user
-    never saw.
-    """
+    never saw."""
     from villain.identity import auto_answers, session_questions
     from villain.webapp import SESSIONS, apply_answers, session_payload
 
@@ -551,8 +545,7 @@ def test_a_name_plus_suffix_match_is_asked_and_never_auto_merged(session, tmp_pa
     It used to be raised and immediately auto-answered, which made the shape
     that makes ``PlayerA``/``PlayerALaptop`` one person silently pool
     ``PlayerG``/``PlayerG North``, who are two. A wrong merge costs an unlink
-    and a rebuild; a wrong question costs a click.
-    """
+    and a rebuild; a wrong question costs a click."""
     from villain.identity import matched_only_by_containment
 
     hands = SESSIONS[session]["hands"]
@@ -597,8 +590,7 @@ def test_every_post_route_says_whether_it_writes():
     This used to re-read ``do_POST``'s source with a regex, because a frozenset
     kept beside the handler by hand was the thing under test. Registration now
     carries the answer, so what is left to check is that every route went
-    through it.
-    """
+    through it."""
     import inspect
 
     from villain.webapp.server import POST_ROUTES, Handler
@@ -778,8 +770,7 @@ def test_a_cross_origin_page_cannot_read_the_roster(tmp_path, hands):
 
     Only writes were checked, so any tab open in the same browser could fetch
     the roster off localhost and read every player's name -- or point an <img>
-    at it, which sends no Origin but does send a Referer.
-    """
+    at it, which sends no Origin but does send a Referer."""
     db = tmp_path / "v.db"
     with Store(db) as store:
         store.add_hands(hands)
@@ -829,8 +820,7 @@ def test_a_read_that_only_holds_at_one_table_size_survives(tmp_path):
     One player folds to turn bets 31% of the time heads-up against the hero
     and 54% against everybody else, while six-handed the same gap runs the
     other way. Averaged they cancel and nothing is reported, which is how the
-    strongest against-you read in the database went missing.
-    """
+    strongest against-you read in the database went missing."""
     from villain.dynamics import REGIME_MIN_OPPS, adjustments
     from villain.stats import VS_HERO, Ratio, StatBook
 
@@ -859,8 +849,7 @@ def test_the_against_you_read_is_detail_only(store):
     """The roster is how everybody plays the field; one reference per list.
 
     Mixing "how they play the table" with "how they play you" in one column is
-    how the field read stopped meaning anything in the first place.
-    """
+    how the field read stopped meaning anything in the first place."""
     from tests.conftest import FIXTURE
     from villain.analyze import as_dict
     from villain.parsers import parse_file
@@ -982,8 +971,7 @@ def test_hands_without_an_identifiable_hero_open_simulate_but_not_hero(monkeypat
     whose cards are visible rather than about the database being empty.
 
     Simulate's sample bar is tested separately; here it is dropped to 1 so
-    the fixture can stand in for a measured opponent.
-    """
+    the fixture can stand in for a measured opponent."""
     from villain.webapp import payloads
     monkeypatch.setattr(payloads, "MIN_SIM_HANDS", 1)
     seeded.rebuild()
@@ -1259,8 +1247,7 @@ def _dispatch(db_path, method, path, body=None):
     """One request through the real routing, with the socket taken out.
 
     Same bridge the in-browser build uses, so a route tested here is the route
-    the hosted page runs -- not a re-implementation of it.
-    """
+    the hosted page runs -- not a re-implementation of it."""
     from villain.webapp import browser
     browser.set_db(str(db_path))
     payload = json.dumps(body or {}).encode()
@@ -1299,8 +1286,7 @@ def test_delete_player_route_refuses_the_hero(tmp_path, hands):
 
     The fixture is twenty heads-up hands and has no hero of its own, so one is
     seeded into the same cache the route consults -- the point under test is
-    the guard, not hero detection.
-    """
+    the guard, not hero detection."""
     from villain.webapp.heroview import _HERO_ID_CACHE, _hand_count
 
     db = tmp_path / "v.db"
@@ -1333,8 +1319,7 @@ def test_unlink_route_404s_on_an_alias_that_is_not_there(seeded, db):
 
     ``Store.unlink`` raises LookupError, which only the catch-all caught, so
     asking about an alias that is not on that player came back as a 500 --
-    the tool reporting itself broken instead of answering the question.
-    """
+    the tool reporting itself broken instead of answering the question."""
     pid = int(seeded.players()[0]["id"])
     status, body, _ = _dispatch(db, "POST", "/api/unlink",
                                 {"player_id": pid, "site": "pokernow",
@@ -1349,8 +1334,7 @@ def test_sim_paces_every_auto_action_the_same():
     A villain's ``think_ms`` could be 400ms next to an 8s tank, folds had a
     shorter wait than everything else, and an armed check/fold fired on the
     same paint as the bet it was answering. One 3s beat, shared by bots and
-    the auto-act, is what makes the action readable.
-    """
+    the auto-act, is what makes the action readable."""
     # The assembled asset, not a source file: /static/app.js is concatenated
     # from villain/webapp/assets/app/*.js, and what ships is what to assert on.
     from villain.webapp.assets import static
@@ -1375,8 +1359,7 @@ def test_simulate_stays_in_the_viewport_on_a_phone():
     The seats sit on the rim, the action bar sits under them, and the log
     used to stack underneath as a document. A phone then had to scroll to
     find its own cards. The sim stays locked to the viewport; the layout
-    inside it has to fit.
-    """
+    inside it has to fit."""
     from pathlib import Path
     css = (Path(__file__).resolve().parent.parent
            / "villain" / "webapp" / "assets" / "app.css").read_text()

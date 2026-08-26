@@ -134,8 +134,7 @@ def test_betting_again_takes_the_lead_back():
     ``declined_initiative`` is what the policy reads to tell a delayed c-bet
     from a second barrel. It never cleared, so once a seat checked a flop with
     the lead every later street they bet stayed 'delayed' for the rest of the
-    hand -- against a stat whose denominator had by then moved on.
-    """
+    hand -- against a stat whose denominator had by then moved on."""
     h = Hand(_seats(200, 200), button=0, sb=1, bb=2, rng=np.random.default_rng(11))
     h.act("raise", 6)
     h.act("call")
@@ -152,8 +151,7 @@ def test_betting_again_takes_the_lead_back():
 def test_a_short_all_in_does_not_reopen_raising():
     """An all-in shorter than a full raise: players already square may call
     the extra or fold, not raise. Players who have not yet acted still can.
-    The engine advertised the first half and then left can_raise True.
-    """
+    The engine advertised the first half and then left can_raise True."""
     h = Hand(_seats(200, 14, 200), button=0, sb=1, bb=2, rng=np.random.default_rng(6))
     # 3-handed: 0 UTG/BTN, 1 SB short, 2 BB.
     h.act("raise", 10)                          # UTG opens to 10 (full)

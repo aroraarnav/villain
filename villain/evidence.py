@@ -57,8 +57,7 @@ def find(hands: list[Hand], player_key: str, stat: str,
     A hand counts when it contributed to the statistic's *denominator* -- the
     opportunity -- and is marked ``hit`` when it also moved the numerator. Both
     matter: sixteen fold-to-river-bet opportunities of which nine were folds is
-    the whole picture, and showing only the folds would misrepresent it.
-    """
+    the whole picture, and showing only the folds would misrepresent it."""
     # Freeze the snap/tank cutoffs over the whole hand list, exactly as
     # record_hands does when the profile is built. Replaying one hand at a
     # time leaves each hand below MIN_PACE_SAMPLES, so _pace_thresholds falls

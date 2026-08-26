@@ -311,8 +311,7 @@ class Store:
 
         An inverted row is invisible to :meth:`shared_hands`, which looks the
         pair up sorted, so the constraint silently stops applying and the merge
-        it prevents becomes possible. Rows pointing at a deleted player go too.
-        """
+        it prevents becomes possible. Rows pointing at a deleted player go too."""
         live = {r["id"] for r in self.conn.execute("SELECT id FROM players")}
         rows = self.conn.execute("SELECT a, b, hands FROM distinct_pairs").fetchall()
         fixed: dict[tuple[int, int], int] = {}
@@ -358,8 +357,7 @@ class Store:
         """Internal player id for a site account, creating one if needed.
 
         ``alias_key`` overrides the storage key, which is how a shared account
-        id gets split into two identities.
-        """
+        id gets split into two identities."""
         key = alias_key or account
         row = self.conn.execute(
             "SELECT player_id FROM aliases WHERE site = ? AND account = ?",
@@ -405,8 +403,7 @@ class Store:
         callers merging many accounts at once. One rebuild re-extracts every
         hand the player appears in, so doing it per link made a 36-account
         reconnect run re-read the same 7,000 hands thirty-five times; the
-        caller is expected to rebuild once when it is done.
-        """
+        caller is expected to rebuild once when it is done."""
         if keep == absorb:
             return
         overlap = self.shared_hands(keep, absorb)
@@ -464,8 +461,7 @@ class Store:
 
         Merges used to be one-way; undoing a bad link meant deleting the
         database. The hands stay put — only the alias pointer moves — then both
-        profiles are rebuilt from the stored hand log.
-        """
+        profiles are rebuilt from the stored hand log."""
         row = self.conn.execute(
             "SELECT name FROM aliases WHERE site = ? AND account = ? AND player_id = ?",
             (site, account, player_id)).fetchone()
@@ -535,8 +531,7 @@ class Store:
         ``defer_rebuild`` records the players touched and returns, leaving the
         caller to call :meth:`rebuild_pending` once -- a rebuild passes over
         every hand those players appear in, so one per file makes an N-file
-        import N full rebuilds, and a directory is the normal case.
-        """
+        import N full rebuilds, and a directory is the normal case."""
         report = report or ImportReport()
         fresh: list[Hand] = []
         for hand in hands:
@@ -638,8 +633,7 @@ class Store:
         merge must not rewrite what was recorded, and a test enforces it. Any
         caller that wants to line these up with per-player statistics has to
         resolve the ids itself -- :meth:`player_hands` does, and anything
-        joining hands to a player id should follow it rather than this.
-        """
+        joining hands to a player id should follow it rather than this."""
         if player_id is None:
             rows = self.conn.execute(
                 "SELECT payload FROM hands ORDER BY started_at").fetchall()
@@ -664,8 +658,7 @@ class Store:
 
         When ``only`` is set, hands that never seat those players are skipped so
         a single-player rebuild (e.g. after a merge) does not rescan the whole
-        database through the feature pipeline.
-        """
+        database through the feature pipeline."""
         alias_rows = list(self.conn.execute(
             "SELECT site, account, player_id FROM aliases"))
         alias_map = {(r["site"], r["account"]): int(r["player_id"]) for r in alias_rows}
@@ -676,8 +669,7 @@ class Store:
             Order matters: ``"<account>#<name>"`` is the more specific claim.
             Checking the bare account first would hand every split hand back to
             whoever owned the account originally, which is exactly the merge
-            the user declined.
-            """
+            the user declined."""
             hit = alias_map.get((site, split_key(account, name)))
             if hit is not None:
                 return hit
@@ -795,8 +787,7 @@ class Store:
         database full of hands that every profile query reads as "no such
         player". That rendered as an empty roster with no error at all, which
         is the worst way for it to present: indistinguishable from a database
-        nobody has imported into yet. Callers surface this instead of guessing.
-        """
+        nobody has imported into yet. Callers surface this instead of guessing."""
         hands = self.conn.execute("SELECT COUNT(*) c FROM hands").fetchone()["c"]
         if not hands:
             return 0
@@ -848,8 +839,7 @@ class Store:
         Derived features are assembled from raw action counters and never
         stored as ratio rows, so a scan of this table alone never sees them --
         which left aggression:* (importance 4.0, the matcher's heaviest block)
-        on the built-in defaults however much pool there was to fit.
-        """
+        on the built-in defaults however much pool there was to fit."""
         from .profile import DERIVED
         raw: dict[tuple[str, int], dict[str, tuple[float, float]]] = defaultdict(dict)
         sql = "SELECT regime, player_id, stat, hits, opps FROM ratios"
@@ -893,8 +883,7 @@ class Store:
 
         Nothing records a session id -- the hands are the source of truth and a
         sitting is just a run of them close together in time. Deriving it means
-        no migration and no second thing to keep correct.
-        """
+        no migration and no second thing to keep correct."""
         rows = list(self.conn.execute(
             "SELECT hand_id, started_at FROM hands ORDER BY started_at"))
         out: list[dict] = []
@@ -973,8 +962,7 @@ class Store:
         The baseline is the player's other hands, not this sitting's -- comparing
         a session against a total that contains it shrinks every difference
         toward nothing, and the more of their history this sitting is, the more
-        it hides.
-        """
+        it hides."""
         from .priors import REGIME_LABELS
         books = self.session_books(session["hand_ids"])
         names = {str(r["id"]): r["display_name"] for r in self.players()}
@@ -1054,8 +1042,7 @@ class Store:
         """Variance a *single* player's log-odds carries purely from sampling.
 
         The delta-method variance of ``logit(k/n)`` is ``1 / (n p (1-p))``.
-        Subtracting its average is what turns raw scatter into a spread.
-        """
+        Subtracting its average is what turns raw scatter into a spread."""
         p = min(max(rate, 0.02), 0.98)
         return 1.0 / max(opps * p * (1.0 - p), 1e-9)
 
@@ -1078,8 +1065,7 @@ class Store:
         feature and leaves them looking far more separable than they are,
         which is the same preflop-versus-postflop imbalance this measurement
         exists to remove, reintroduced one level down. Subtract it, and what
-        is left is how much players genuinely differ.
-        """
+        is left is how much players genuinely differ."""
         import math
         import statistics
 
@@ -1107,8 +1093,7 @@ class Store:
 
         Robust percentiles rather than min and max: one player on a thin
         sample should not be able to stretch the band, and the point of the
-        band is to say what is *normal* here, not what is possible.
-        """
+        band is to say what is *normal* here, not what is possible."""
         by: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
         for regime, stat, hits, opps in self._ratio_samples(40, self.POOL_SKIP):
             by[regime][stat].append(hits / opps)
@@ -1156,8 +1141,7 @@ class Store:
 
         One dict because it travels as one thing all the way to
         :func:`villain.priors.spread_of`; the prefix keeps the two kinds of
-        entry apart without a second parameter on every call in between.
-        """
+        entry apart without a second parameter on every call in between."""
         out: dict = {}
         for row in self.conn.execute(
                 "SELECT stat, mean, strength, spread, floor, ceiling"
@@ -1197,8 +1181,7 @@ class Store:
         """The single profile for a player, pooled across table sizes.
 
         This is the default everywhere. Splitting by table size is how the
-        statistics stay meaningful, not how anybody wants to read them.
-        """
+        statistics stay meaningful, not how anybody wants to read them."""
         from .profile import build_unified, primary_regime
         books = self.books(player_id)
         if not books:
@@ -1220,8 +1203,7 @@ class Store:
         omitted, every hand -- for callers (like the hand-strength model) that
         need every seat resolved to the id used elsewhere, not just one
         player's. Prefer this over :meth:`stored_hands`, whose ids are the raw
-        site accounts on purpose.
-        """
+        site accounts on purpose."""
         accounts = {
             (r["site"], r["account"]): int(r["player_id"])
             for r in self.conn.execute("SELECT site, account, player_id FROM aliases")
@@ -1293,8 +1275,7 @@ class Store:
         unknown account, so they do not reappear. Re-importing that account
         creates a fresh player, which is the right answer.
 
-        Raises LookupError if there is no such player.
-        """
+        Raises LookupError if there is no such player."""
         row = self.conn.execute(
             "SELECT display_name FROM players WHERE id = ?", (player_id,)).fetchone()
         if row is None:
@@ -1321,8 +1302,7 @@ class Store:
         There is no undo. Hands are the source of truth for everything else, so
         once they are gone every profile, alias and merge decision goes with
         them -- re-importing the original exports rebuilds the statistics, but
-        not the identity decisions made along the way.
-        """
+        not the identity decisions made along the way."""
         counts = {
             "hands": self.conn.execute("SELECT COUNT(*) c FROM hands").fetchone()["c"],
             "players": self.conn.execute("SELECT COUNT(*) c FROM players").fetchone()["c"],

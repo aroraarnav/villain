@@ -320,8 +320,7 @@ def prototype_scale(arch: Archetype, profile: Profile | None) -> float:
     One factor for the whole vector, not a clamp per feature: a prototype is a
     shape, and clamping the features that stick out flattens what made it
     distinctive. Player-blind -- the factor comes from the pool's range and the
-    prototype's traits, never from an individual.
-    """
+    prototype's traits, never from an individual."""
     if not PROTOTYPE_RESCALE or profile is None or not profile.priors:
         return 1.0
     scale = 1.0
@@ -349,8 +348,7 @@ def target_frequency(arch: Archetype, feature: str, table_regime: str,
     Pass ``profile`` to measure against that player's fitted population rather
     than the built-in one. A prototype is a deviation *from the field*, so with
     a fitted pool the same deviation has to be applied to the fitted mean or
-    the label is describing a different field than the numbers are.
-    """
+    the label is describing a different field than the numbers are."""
     pop = profile.population(feature) if profile is not None \
         else population_mean(feature, table_regime)
     spread = spread_of(feature, table_regime,
@@ -418,8 +416,7 @@ def match(profile: Profile) -> tuple[str, float, list[tuple[str, float]]]:
     on whichever plan the counts support. Two archetypes that fit equally well
     produce two middling numbers, which is the honest answer: players do sit
     between buckets, and a forced label invites a plan the evidence cannot
-    carry.
-    """
+    carry."""
     # One shared support set: every feature the player has real data on.
     observed = []
     for feature in PROFILE_FEATURES:
@@ -480,8 +477,7 @@ def _log_beta_binomial(hits: float, opps: float, mean: float,
     """Log marginal likelihood of ``hits``/``opps`` under a Beta(mean) prior.
 
     The binomial coefficient is dropped: it is identical across archetypes and
-    only the differences matter.
-    """
+    only the differences matter."""
     # Read the module constant at call time: binding it as a default would
     # freeze it at import, silently ignoring anything that tries to fit it.
     if concentration is None:

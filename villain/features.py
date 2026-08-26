@@ -91,8 +91,7 @@ def record_hands(hands: Iterable[Hand], books: Books | None = None,
     those means so every hand in the import is tagged against the same ones.
     The second pass evaluates every holding each board allows and each hand is
     independent once the cutoffs are frozen, so a large import splits across
-    processes; counters merge, so the division cannot change the result.
-    """
+    processes; counters merge, so the division cannot change the result."""
     hands = list(hands)
     books = books if books is not None else {}
     scratch: Books = {}
@@ -147,8 +146,7 @@ def record_hand(hand: Hand, books: Books,
     ``hero`` is whoever exported the hands. Given one, decisions with that
     player on the other side are counted again under :data:`VS_HERO`; without
     one no ``vs:`` counter is written, since an against-you slice keyed on an
-    arbitrary seat is worse than none.
-    """
+    arbitrary seat is worse than none."""
     if "pot_mismatch" in hand.flags or hand.big_blind <= 0:
         return
     view = HandView(hand)
@@ -351,8 +349,7 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
     """Postflop frequencies plus pace tags for timing-outcome resolution.
 
     Returns ``(seat, street) -> (pace, action)`` for the first timed
-    check/call/aggro on each flop/turn, used by :func:`_results`.
-    """
+    check/call/aggro on each flop/turn, used by :func:`_results`."""
     pf_raises = sum(1 for a in hand.actions
                     if a.street is Street.PREFLOP and a.act.is_aggressive)
     if pf_raises >= 2:
@@ -602,8 +599,7 @@ def _timing(book: StatBook, d, street_label: str,
 
     With ``pace_locks`` (batch import), every hand uses the same cutoffs from
     the player's full-sample mean. Without locks, thresholds follow the
-    running mean so a streaming session still adapts.
-    """
+    running mean so a streaming session still adapts."""
     ms = d.action.think_ms
     if ms is None or ms < 0 or ms > 120_000:
         return None
@@ -721,8 +717,7 @@ def _all_in_ev(hand: Hand, view: HandView, books: Books, reg: str,
     capped at ``sum(min(other.invested, mine))``; uncapped, aces in for 10
     against two 100bb stacks score +75bb of equity in a +10bb pot. A genuine
     side pot (three-plus all-in at different depths) is still approximate, and
-    flagged.
-    """
+    flagged."""
     all_in_actions = [a for a in hand.actions if a.all_in]
     if not all_in_actions or len(showdown) < 2:
         return
@@ -758,8 +753,7 @@ def _showdown_strengths(board: list[str], known: dict[int, tuple[str, ...]]) -> 
     """Percentile of each shown hand among every holding the board allows.
 
     "Two pair" says nothing without the board -- two pair on a paired
-    four-flush board is a bluff-catcher.
-    """
+    four-flush board is a bluff-catcher."""
     board5 = board[:5]
     board_ids = card_ids(board5).astype(np.int64)
     dead = set(board_ids.tolist())

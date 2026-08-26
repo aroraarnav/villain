@@ -32,8 +32,7 @@ def blinds(bb=10):
 
     Named because they are never what a test is about: written out, four of the
     seven lines of a c-bet fixture were the blinds and the open, and the two
-    lines that made the case were the ones easiest to miss.
-    """
+    lines that made the case were the ones easiest to miss."""
     return [act(Street.PREFLOP, 1, Act.POST_SB, bb // 2, bb // 2),
             act(Street.PREFLOP, 2, Act.POST_BB, bb, bb, pot_before=bb // 2)]
 
@@ -130,8 +129,7 @@ def test_retaking_the_lead_ends_the_delayed_cbet_run():
     fire the river as well"). The flag never cleared, so every later street
     stayed delayed and both cbet:turn and cbet:river lost the opportunity --
     while the other seat was already being booked fold_to_cbet:river against
-    the very same bet.
-    """
+    the very same bet."""
     hand = build_hand([
         *srp(),
         act(Street.FLOP, 2, Act.CHECK, pot_before=60),
@@ -247,8 +245,7 @@ def test_vpip_and_pfr_are_counted_once_per_hand():
 
     Counting each preflop decision separately inflated both numerator and
     denominator, which made samples look larger than they were and quietly
-    raised the confidence attached to every read built on them.
-    """
+    raised the confidence attached to every read built on them."""
     hand = build_hand([
         *blinds(),
         act(Street.PREFLOP, 1, Act.CALL, 5, 10, pot_before=15, to_call=5),
@@ -479,8 +476,7 @@ def test_splitting_the_batch_does_not_change_the_books():
     ``record_hands`` splits the expensive pass across processes on a large
     import. That is only safe because every hand is independent once the pace
     cutoffs are frozen -- this asserts it directly rather than trusting it,
-    by chunking by hand instead of by process.
-    """
+    by chunking by hand instead of by process."""
     from tests.conftest import FIXTURE
     from villain.features import merge_books, record_hand, record_hands
     from villain.parsers import parse_file

@@ -59,8 +59,7 @@ def _referenced(text: str, own_host: str | None = None) -> list[tuple[str, str]]
 
     Skips anything pointing at another host -- the auth client comes from a CDN
     and is nobody's file to copy -- and treats an absolute URL back to our own
-    domain exactly like a relative one, because the browser does.
-    """
+    domain exactly like a relative one, because the browser does."""
     out = []
     for match in REFERENCE.finditer(text):
         raw = match.group(1)
@@ -154,8 +153,7 @@ def test_hero_progress_callback_is_a_js_function():
     The worker used to call pyodide.ffi.create_proxy and die on the first
     Hero visit with "create_proxy is not a function". A JS function handed
     to Python is already a JsProxy; Number() is what keeps a PyProxy off
-    the progress message the page divides for the bar.
-    """
+    the progress message the page divides for the bar."""
     src = WORKER.read_text()
     assert "pyodide.ffi.create_proxy" not in src
     assert "bridge.build_hero(report)" in src
@@ -179,8 +177,7 @@ def test_the_third_party_script_is_pinned_and_checked():
     A floating major-version tag means a bad publish upstream reaches every
     visitor with a live session and nothing on this page notices. An exact
     version plus subresource integrity makes the browser refuse anything that
-    is not the reviewed bytes; crossorigin is what makes the check apply.
-    """
+    is not the reviewed bytes; crossorigin is what makes the check apply."""
     html = BOOT.read_text()
     tags = re.findall(r'<script[^>]*src="(https://[^"]+)"[^>]*>', html, re.S)
     assert tags, "the boot page should still load the auth client"
@@ -205,8 +202,7 @@ def test_signing_out_tells_the_next_load_rather_than_leaving_it_to_guess():
     look intermittent instead of like a race.
 
     Both halves have to agree on the marker, so this checks they are written in
-    terms of the same constant rather than two matching string literals.
-    """
+    terms of the same constant rather than two matching string literals."""
     shell = SHELL.read_text()
 
     assert re.search(r'const SIGNED_OUT = "\w+";', shell), (

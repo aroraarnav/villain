@@ -54,8 +54,7 @@ def static(name: str) -> tuple[bytes, str] | None:
     """``(body, content_type)`` for a /static request, or None if unknown.
 
     Rejects anything with a path separator in it: this is a fixed set of files
-    shipped beside the module, never a directory to walk.
-    """
+    shipped beside the module, never a directory to walk."""
     if "/" in name or "\\" in name or name.startswith("."):
         return None
     suffix = Path(name).suffix

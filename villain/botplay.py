@@ -64,8 +64,7 @@ def _open_score(cls: str) -> float:
     """Chen, but pairs are not floored together at 5.0.
 
     That floor is why 22-55 ranked as one clump around a 45% open, so a button
-    that should open 22 folded it. Spread the pairs; leave unpaired Chen alone.
-    """
+    that should open 22 folded it. Spread the pairs; leave unpaired Chen alone."""
     order = "23456789TJQKA"
     hi = order.index(cls[0])
     lo = order.index(cls[1])
@@ -86,8 +85,7 @@ def _defend_score(cls: str) -> float:
     """Blind defense: every pair outranks every unpaired hand.
 
     A tight BB still set-mines 22/33 against a steal. Ranking them with Chen
-    put them below KTo and 76s, which is the opposite of how the spot plays.
-    """
+    put them below KTo and 76s, which is the opposite of how the spot plays."""
     order = "23456789TJQKA"
     hi = order.index(cls[0])
     lo = order.index(cls[1])
@@ -187,8 +185,7 @@ def _polar_split(freq: float, value_cap: float,
     """The value share and the bluff share of a betting frequency.
 
     Short SPR does not invent a new c-bet rate -- it cuts the *air* slice.
-    Value still fires; stabbing 70% of junk at SPR 2 is the 100bb plan.
-    """
+    Value still fires; stabbing 70% of junk at SPR 2 is the 100bb plan."""
     freq = _clamp(freq, 0.0, 1.0)
     value_frac = min(freq, value_cap)
     bluff_frac = max(0.0, freq - value_cap)
@@ -203,8 +200,7 @@ def _polar_bet(strength: float, freq: float, value_cap: float,
 
     With ``rng`` the inner edges fade across :data:`POLAR_MIX` so the same
     combo is not a pure strategy. Without it (the unit tests of the split)
-    the cut is hard, which is what "this percentile is a bluff" means.
-    """
+    the cut is hard, which is what "this percentile is a bluff" means."""
     value_frac, bluff_frac = _polar_split(freq, value_cap, spr)
     if rng is None:
         if strength >= 1 - value_frac:
@@ -235,8 +231,7 @@ def _street_value_cap(profile, street: str, freq: float, default_cap: float) -> 
     ``river_bet_bluff`` is the fraction of river bets shown down as junk,
     which *is* the river's polar split -- 40% bluffs means 40% of the frequency
     is air, whatever VALUE_CAP says. ``sd_strength`` is the weaker prior for
-    earlier streets and thin river samples.
-    """
+    earlier streets and thin river samples."""
     if street == "river":
         bluff = _freq_n(profile, "river_bet_bluff", None, 15)
         if bluff is not None:
@@ -336,8 +331,7 @@ def _bet_frac(profile, street: str, rng, default: float = 0.6,
     Sampled from the measured spread when we have one, so every stab is not
     exactly the mean. Delayed c-bets use their own size. Polar air is allowed
     to fire the overbet coin even when the mean is small; value is not,
-    because that is how KK jammed a texture they bet a third on.
-    """
+    because that is how KK jammed a texture they bet a third on."""
     keys = []
     if delayed:
         keys.append(f"delayed_cbet_size:{street}")
@@ -458,8 +452,7 @@ def _under(strength: float, gate: float, rng, band: float = POLAR_MIX) -> bool:
     """Whether a hand sits in the bottom ``gate`` slice, mixed inside ``band``.
 
     Polar air is a *low* cut. Reusing :func:`_over` would fade the wrong edge.
-    ``gate <= 0`` is a player who does not polar-bluff -- never a coin flip.
-    """
+    ``gate <= 0`` is a player who does not polar-bluff -- never a coin flip."""
     if gate <= 0:
         return False
     if band <= 0:
@@ -504,8 +497,7 @@ def _rank_hi(hand, seat, order, board=None) -> float:
 
     Midpoint keeps preflop class cuts from slicing AA in half. Postflop a made
     tie can be most of the range -- every ten on T-T-9-9-x is one full house --
-    and its midpoint sits at 0.6, so a 21% continue cut folds the nuts.
-    """
+    and its midpoint sits at 0.6, so a 21% continue cut folds the nuts."""
     rs = _ranges(hand)
     hole = hand.seats[seat].hole
     better = rs.better_frac(seat, hole, order, board)
@@ -517,8 +509,7 @@ def _keep(hand, seat, order, bands, board=None) -> None:
 
     Acting on a frequency is a statement about the range: 4-betting the top
     16% of what you hold says you hold that slice. Without recording it every
-    node re-reads the frequency against the full deck and nothing narrows.
-    """
+    node re-reads the frequency against the full deck and nothing narrows."""
     rs = _ranges(hand)
     hole = tuple(hand.seats[seat].hole)
     hand.stage(seat, lambda: rs.narrow(seat, order, bands, board, keep_hole=hole))
@@ -546,8 +537,7 @@ def _in_position(hand, seat) -> bool:
     """Whether ``seat`` acts last among the players still in the hand.
 
     Postflop action starts left of the button and ends on it, so the last live
-    seat walking backwards from the button is the one in position.
-    """
+    seat walking backwards from the button is the one in position."""
     live = {i for i, s in enumerate(hand.seats) if not s.folded}
     if len(live) < 2:
         return True
@@ -574,8 +564,7 @@ def _effective(hand, seat) -> int:
 
     Facing a bet, that is the aggressor -- a 20bb jam with a 200bb fish still
     in is not a 100bb SPR. Opening a street, the shortest live stack: that is
-    who can actually go with you.
-    """
+    who can actually go with you."""
     mine = hand.seats[seat].stack
     live = [(i, s.stack) for i, s in enumerate(hand.seats)
             if i != seat and not s.folded]
@@ -602,8 +591,7 @@ def _raise_or_jam(hand, seat, legal, target: int) -> tuple[str, int]:
 
     A stub behind a raise is not a plan, but an opening bet at SPR 2 still has
     1.7 pots behind after a third-pot stab. ``COMMIT_SPR`` applies only to a
-    raise *of* a bet, where a small raise at SPR 2 really is a stub.
-    """
+    raise *of* a bet, where a small raise at SPR 2 really is a stub."""
     s = hand.seats[seat]
     _, to = _raise_to(hand, legal, target)
     add = max(to - s.street_put, 0)
@@ -647,8 +635,7 @@ def _continue_vs_size(base_cont: float, mdf: float) -> float:
 
     Loose players (high ``base_cont``) still continue more than nits; the
     pot odds just bind. Against a 100bb jam a station who flats 3-bets
-    continues around 10%; a nit who folds them continues around 3%.
-    """
+    continues around 10%; a nit who folds them continues around 3%."""
     usual_mdf = 1.0 / (1.0 + USUAL_PRE_RAISE_POT)
     looseness = base_cont / TYPICAL_THREE_BET_CONTINUE
     price = max(mdf, usual_mdf * 0.12)
@@ -681,8 +668,7 @@ def think_ms(profile, kind: str, street_idx: int, reason: str, rng) -> int:
     """A think time from their meters, conditioned on the action.
 
     Folds and polar bluffs draw from ``think:fold``; raises from
-    ``think:aggro``. Missing meters fall back to a short pause, not zero.
-    """
+    ``think:aggro``. Missing meters fall back to a short pause, not zero."""
     street_label = "pf" if street_idx == 0 else STREETS[street_idx]
     keys = []
     if kind == "fold" or "bluff" in reason:
@@ -734,8 +720,7 @@ def _decide_preflop(hand, seat: int, profile, rng, lg, bb: int) -> tuple[str, in
     depth, and every path through it returns. Postflop hangs off a dozen
     board-derived locals instead -- which is the only reason the two
     halves sat in one 534-line function despite neither reading the
-    other.
-    """
+    other."""
     # Ranked inside the range they can still hold, not inside the deck.
     # Every preflop frequency was counted over a denominator their own
     # earlier actions already filtered, so this is the measure the cut

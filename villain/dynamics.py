@@ -85,8 +85,7 @@ def adjustments(by_regime: dict[str, StatBook],
 
     Nothing rather than something weak: below the sample, confidence or size
     floors a statistic is simply absent. Having no read is the normal case at
-    these sample sizes, and an empty list says so.
-    """
+    these sample sizes, and an empty list says so."""
     live = {r: b for r, b in by_regime.items() if b.hands > 0}
     if not live:
         return []
@@ -124,8 +123,7 @@ def _adjustment_within(stat: str, book: StatBook, regime: str,
 
     Nothing is translated or borrowed here, which is the point: this is the
     slice as observed, measured against how they play everybody else *at the
-    same table size*.
-    """
+    same table size*."""
     slice_ = book.ratios.get(VS_HERO + stat)
     if slice_ is None or slice_.opps < min_opps:
         return None
@@ -152,8 +150,7 @@ def _one_per_decision(found: list[Adjustment]) -> list[Adjustment]:
 
     Keyed by table size as well as decision: "heads-up he will not fold to you"
     and "six-handed he folds normally" are two facts about one player, and
-    collapsing them to one loses whichever is second.
-    """
+    collapsing them to one loses whichever is second."""
     seen: set[tuple[str, str, str]] = set()
     out = []
     for adjustment in found:                    # widest gap first
@@ -243,8 +240,7 @@ def _baseline(stat: str, book: StatBook | None, regime: str,
     """Their rate at this table size against everyone who is not you.
 
     The against-you slice is subtracted out of the pooled counter, which is the
-    whole reason this is a separate function and not ``profile.stats[stat]``.
-    """
+    whole reason this is a separate function and not ``profile.stats[stat]``."""
     if book is None:
         return None
     pooled = book.ratios.get(stat)
@@ -290,8 +286,7 @@ def versus_book(book: StatBook) -> StatBook:
     Every counter the profile machinery understands is recorded twice: once
     pooled, once for the decisions where the other side was the hero. Renaming
     the second set is all it takes to run the whole read -- shrinkage,
-    archetype, the lot -- on "how they play you" instead of "how they play".
-    """
+    archetype, the lot -- on "how they play you" instead of "how they play"."""
     out = StatBook(player_id=book.player_id, name=book.name,
                    regime=book.regime, hands=book.hands,
                    first_seen=book.first_seen, last_seen=book.last_seen)
@@ -313,8 +308,7 @@ def versus_read(by_regime: dict[str, StatBook],
     two of you -- and never pooled across sizes. Pooling is what hid the read
     in the first place: a player can be a station against you heads-up and
     ordinary against you six-handed, and the average of those is a fiction
-    that describes neither table you sat at.
-    """
+    that describes neither table you sat at."""
     from .archetypes import match
     from .profile import build_profile
 

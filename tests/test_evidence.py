@@ -31,8 +31,7 @@ def test_evidence_count_matches_the_statistic(hands):
     """The point of the feature: the hands listed must be the hands counted.
 
     Both come from the same extraction, so any drift here means the evidence
-    is lying about which hands produced the number.
-    """
+    is lying about which hands produced the number."""
     books = record_hands(hands)
     for player_key, by_regime in books.items():
         for regime, book in by_regime.items():

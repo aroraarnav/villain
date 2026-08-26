@@ -56,8 +56,7 @@ def test_regular_opponents_can_never_be_merged(store, hands):
     The fixture is twenty hands and its busiest pair shares ten of them --
     exactly ``SPURIOUS_OVERLAP``, and so still mergeable by design. Copying the
     batch under fresh hand ids puts them clearly past it, which is the state
-    this is about: not a reconnect, two people at one table.
-    """
+    this is about: not a reconnect, two people at one table."""
     import copy
     from collections import Counter
 
@@ -158,8 +157,7 @@ def test_delete_player_forgets_the_person_and_keeps_the_hands(tmp_path, hands):
     """The one thing delete must never do is take a hand with it.
 
     A hand seats several people; deleting one player's hands would silently
-    shrink everybody else's sample. So the identity goes and the log stays.
-    """
+    shrink everybody else's sample. So the identity goes and the log stays."""
     with Store(tmp_path / "v.db") as s:
         s.add_hands(hands)
         before_hands = s.conn.execute("SELECT COUNT(*) c FROM hands").fetchone()["c"]

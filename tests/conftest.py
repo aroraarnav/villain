@@ -48,8 +48,7 @@ def store(db):
     Sixty-eight tests opened one, and fifty-nine of them wanted nothing from
     the ``with`` block but the store -- two lines and an indent level around
     the assertions that were the point. The eight that genuinely test a
-    close-and-reopen keep their own blocks; that is what they are for.
-    """
+    close-and-reopen keep their own blocks; that is what they are for."""
     with Store(db) as open_store:
         yield open_store
 

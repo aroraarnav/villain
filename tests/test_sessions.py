@@ -67,8 +67,7 @@ def test_a_sitting_survives_a_deleted_player(store):
     table -- so the sitting still has to render. It did not: the unresolved
     seat kept its raw site account as its book key and ``int()`` on that took
     the whole route down with a 500, which is every sitting the deleted player
-    ever sat in.
-    """
+    ever sat in."""
     sessions = store.sessions()
     before = {row["player_id"] for row in store.session_detail(sessions[0])}
     victim = sorted(before)[0]

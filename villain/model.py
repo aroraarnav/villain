@@ -96,8 +96,7 @@ def positions_for(seats: list[int], dealer_seat: int) -> dict[int, str]:
     """Map seat number -> position label, walking clockwise from the button.
 
     ``seats`` is the occupied seats in table order. Heads-up the dealer *is* the
-    small blind, which the ``_POSITIONS`` table encodes by starting at BTN.
-    """
+    small blind, which the ``_POSITIONS`` table encodes by starting at BTN."""
     n = len(seats)
     if n < 2:
         return {}
@@ -215,8 +214,7 @@ def postflop_rank(table_size: int) -> dict[str, int]:
 
     For three or more players that is just ``_POSITIONS`` (small blind first,
     button last). Heads-up it inverts: the button posts the small blind and acts
-    first preflop, so the big blind is first to act on every later street.
-    """
+    first preflop, so the big blind is first to act on every later street."""
     order = ["BB", "BTN"] if table_size == 2 else _POSITIONS.get(table_size, [])
     return {p: i for i, p in enumerate(order)}
 
