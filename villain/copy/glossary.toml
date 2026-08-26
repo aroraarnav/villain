@@ -210,10 +210,6 @@ what = "Facing a bet on the river, how often they call rather than fold or raise
 high = "They pay off. Bet every made hand and never bluff."
 low = "They fold rivers. Bluff the last street relentlessly."
 
-[stats."call_cbet:flop"]
-what = """Facing a continuation bet from the preflop raiser, how often they call rather than fold or raise."""
-high = "They call the flop wide and give up later. Fire again."
-low = "They fold or raise the flop rather than calling along."
 
 [stats."raise_vs_bet:flop"]
 what = "Facing a bet on the flop, how often they raise."

@@ -308,8 +308,6 @@ def _preflop(hand: Hand, view: HandView, books: Books, reg: str,
                         book.measure("four_bet_ratio", a.to_amount / three_bet_amt)
                 if three_bettor is not None and three_bettor == hero_seat:
                     book.count(f"{VS_HERO}fold_to_three_bet", folded)
-            else:
-                book.count("cold_four_bet", raised)
 
         elif d.aggression_level >= 3 and d.seat == three_bettor:
             book.count("fold_to_four_bet", folded)
@@ -533,8 +531,6 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
                         called_here_ip.add(d.seat)
                 if first_bettor is not None and bettor_had_initiative:
                     book.count(f"fold_to_cbet:{s}", folded)
-                    book.count(f"raise_cbet:{s}", raised)
-                    book.count(f"call_cbet:{s}", called)
                 # The same decisions, sliced to bets that were yours. Under
                 # first_face for the reason the pooled counters are, and this
                 # is the thinnest sample in the tool.
@@ -553,8 +549,6 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
             if raised:
                 book.measure(f"raise_ratio:{s}", a.to_amount / max(a.to_call, 1))
 
-        if a.all_in:
-            book.count("all_in_action", True)
 
         tagged = _timing(book, d, s, pace_locks=pace_locks, regime=reg)
         if tagged is not None:
@@ -668,10 +662,6 @@ def _results(hand: Hand, view: HandView, books: Books, reg: str,
             book.measure("nonsd_net_bb", net_bb)
         if seat.seat in view.folded_on:
             book.measure("fold_street", float(view.folded_on[seat.seat]))
-        if seat.showed:
-            # Showing a single card is a distinctive habit -- usually a bluff
-            # being advertised, occasionally a slow-roll.
-            book.count("shows_one_card", len(seat.revealed) == 1)
 
         for (s_seat, street), (pace, action) in pace_events.items():
             if s_seat != seat.seat:
@@ -746,7 +736,6 @@ def _all_in_ev(hand: Hand, view: HandView, books: Books, reg: str,
         # the other instead of counting the all-in twice.
         book.measure("allin_realised_bb", player.net / hand.big_blind)
         book.measure("allin_equity", share)
-        book.count("all_in_pot", True)
 
 
 def _showdown_strengths(board: list[str], known: dict[int, tuple[str, ...]]) -> dict[int, float]:

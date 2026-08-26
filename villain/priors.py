@@ -130,7 +130,7 @@ MIN_STRENGTH, MAX_STRENGTH = 8.0, 40.0
 #: events need a heavier prior than their spread implies, because a single
 #: observation out of two chances should barely move anything.
 STRENGTH: dict[str, float] = {
-    "four_bet": 35, "fold_to_four_bet": 30, "five_bet": 35, "cold_four_bet": 35,
+    "four_bet": 35, "fold_to_four_bet": 30, "five_bet": 35,
 }
 
 
