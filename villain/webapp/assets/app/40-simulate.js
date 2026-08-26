@@ -455,10 +455,8 @@ async function stepBots(token) {
 }
 
 function cfArmed(st) {
-  // Armed for *this hand*, not for the session. It has to survive the whole
-  // hand -- you arm it on the flop and it should still fold the river -- but
-  // a standing instruction that outlives the hand is how you fold aces two
-  // hands later without touching anything.
+  // Armed for *this hand*: it must survive from the flop to the river, but a
+  // standing instruction that outlives the hand folds aces two hands later.
   return state.checkFold && state.checkFoldHand === st.hand_no;
 }
 

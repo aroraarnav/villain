@@ -88,10 +88,9 @@ function renderGradedSection(el, section, opts) {
     el.innerHTML = `<div class="small muted">${esc(opts.emptyText)}</div>`;
     return;
   }
-  // Two counts and the proportion between them, as figures and a bar rather
-  // than a sentence with two bold numbers buried in it. How many were graded
-  // and how many of those were wrong is the finding; the sentence made the
-  // reader parse it out of prose every time.
+  // Two counts and the proportion between them, as figures and a bar: how
+  // many were graded and how many were wrong is the finding, and a sentence
+  // makes the reader parse it out of prose.
   const summary = h("div", "graded-head", `
     <div class="stat-pair"><span class="v">${section.graded}</span>
       <span class="k">graded</span></div>
@@ -194,11 +193,9 @@ function renderTellSection(el, section, opts) {
    turn 52% (39) river 55% (22)" it was three numbers the reader had to plot
    themselves. */
 function narrowingChart(rows) {
-  // Axis, labels and values all live inside the SVG. Put the street names in a
-  // sibling flex row and they line up with the dots only by luck -- the dots
-  // are inset by the plot padding and the labels are not.
-  // The right margin is a gutter for the median label, not slack: anchored to
-  // the plot edge it sat directly on the line it was naming.
+  // Axis, labels and values all inside the SVG: street names in a sibling
+  // flex row line up with the dots only by luck, since the dots are inset by
+  // the plot padding. The right margin is a gutter for the median label.
   const W = 380, H = 152;
   const x0 = 40, x1 = W - 84, y0 = 18, y1 = 92;
   const y = v => y1 - Math.max(0, Math.min(1, v)) * (y1 - y0);

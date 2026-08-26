@@ -319,11 +319,8 @@ function whatToDoTile(p, hero, leaks) {
     // sentence is never dropped, only moved into "Why, and what not to do".
     const doFirst = l.do ? l.do.split(/\.\s+/)[0].replace(/\.+$/, "") + "." : "";
     const doTruncated = !!(l.do && doFirst.length < l.do.length);
-    // One decimal on the glance surface, two only in the numbers line beside
-    // the sample it rests on. A leak under 0.1 prints as "<0.1" rather than
-    // "0.00": a list sorted by price should never show a price of zero, and
-    // rounding a real figure to nothing is the one thing worse than the extra
-    // digit.
+    // One decimal at a glance, two beside the sample it rests on. Under 0.1
+    // prints "<0.1": a list sorted by price must never show a price of zero.
     const thin = l.severity_bb100 < 0.1;
     div.innerHTML = `
       <div class="leak-price${thin ? " thin" : ""}">
@@ -354,16 +351,13 @@ function whatToDoTile(p, hero, leaks) {
     }
     numbers.appendChild(info(statTip(l.stat, l.headline)));
 
-    // A popup, not an inline <details>: expanding it in place grew this panel
-    // after the columns were balanced, which is what threw the layout off. Same
-    // sheet the hands open in. "Do" only appears here when the glance view cut
-    // it short -- otherwise the one sentence already on screen is the whole of it.
+    // A popup, not an inline <details>, which would grow the panel after its
+    // columns were balanced. "Do" appears only when the glance view cut it.
     const whydont = [doTruncated ? ["Do", l.do] : null, ["Why", l.why], ["Do not", l.dont]]
       .filter(Boolean).filter(([, t]) => t);
-    // On the evidence line rather than a line of its own. Five leaks with a
-    // disclosure each was five extra rows of height on the one panel that has
-    // to fit above the fold, and the link belongs with the rest of the
-    // "where this came from" apparatus anyway.
+    // On the evidence line, not a row of its own: five leaks with a
+    // disclosure each is five rows on the panel that has to fit above the
+    // fold, and it belongs with the rest of the provenance anyway.
     if (!hero && whydont.length) {
       numbers.appendChild(document.createTextNode(" · "));
       const link = h("button", "linkbtn how-link");
@@ -382,10 +376,9 @@ function whatToDoTile(p, hero, leaks) {
     leakBox.appendChild(div);
   }
 
-  // Same row shape as a priced leak, because it is the same kind of claim one
-  // step short of the evidence bar -- but the left cell holds the confidence
-  // rather than a price, and the rail is dashed, so it never reads as another
-  // number in the ranking.
+  // Same row shape as a priced leak -- the same claim one step short of the
+  // bar -- but the left cell holds confidence, not a price, and the rail is
+  // dashed, so it never reads as another number in the ranking.
   for (const w of (p.watchlist || [])) {
     const div = h("div", "leak priced watch", `
       <div class="leak-price thin">
@@ -551,11 +544,9 @@ function timingTellsTile(p) {
 function keyNumbersTile(p, hero) {
   /* The HUD line: the six every tracker prints, in the order they print them,
      because that order is what a player's eye already knows. */
-  // The HUD line: the six every tracker prints, in the order they print them,
-  // because that order is what a player's eye already knows. Cutting this to
-  // three rows of a table did not make the screen calmer -- it left a column
-  // 300px empty beside a full one. Six figures in one strip is more numbers in
-  // less height than three rows were, and it reads as an instrument.
+  // The six every tracker prints, in the order they print them, because that
+  // order is what a player's eye already knows. One strip rather than three
+  // table rows: more numbers in less height, and it reads as an instrument.
   const HUD = [["vpip", "VPIP"], ["pfr", "PFR"], ["three_bet", "3-bet"],
                ["fold_to_three_bet", "Fold to 3B"], ["cbet:flop", "C-bet flop"],
                ["fold_vs_bet:flop", "Fold v bet F"]];
@@ -605,10 +596,9 @@ function keyNumbersTile(p, hero) {
                            : "—"}</div>`;
     if (row) {
       cell.appendChild(sparkRow(row));
-      // One hover gives what the strip cannot: what the figure counts, the
-      // interval around it, the sample under it, and the threshold. Composed
-      // here rather than concatenating the two existing tip builders, which
-      // between them would print the label and the field reading twice.
+      // What the strip cannot show: what the figure counts, its interval,
+      // its sample, the threshold. Composed here because concatenating the
+      // two existing tip builders prints the label and field twice.
       bindTip(cell, `${statTip(row.stat, row.label, row)}
         <div class="dir"><span class="muted">95% range ${fmtPct(row.lo)}–${fmtPct(row.hi)}
         · ${row.opps} ${esc(row.denominator)} · field ${fmtPct(row.population)}</span></div>${

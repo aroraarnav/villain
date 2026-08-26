@@ -88,14 +88,11 @@ async function importFiles(list, status, done) {
   const setBusy = showBusy(`Reading ${files.length} file(s)\u2026`);
   try {
     const payload = await readFiles(files);
-    // Parsed in pieces rather than in one call. In the browser the whole tool
-    // runs on this thread, so a single parse of two hundred files is a frozen
-    // window with no way to tell it apart from a crash; the same work in
-    // tens is a counter that moves. The session is assembled server-side and
-    // the identity questions are still asked once, over the whole batch.
-    // Measured in bytes rather than in files. A run of these exports goes from
-    // 3 KB to 2.6 MB, so counting files makes the bar jump and stall by turns;
-    // counting bytes tracks the work actually being done.
+    // Parsed in pieces: in the browser everything runs on this thread, so one
+    // parse of two hundred files is a frozen window indistinguishable from a
+    // crash. The session is still assembled once and the identity questions
+    // asked once. Measured in bytes, not files -- these exports run 3 KB to
+    // 2.6 MB, so a file count jumps and stalls by turns.
     const totalBytes = payload.reduce((n, f) => n + (f.content ? f.content.length : 0), 0) || 1;
     const PIECE = 10;
     let token = null, sent = 0;
@@ -107,10 +104,9 @@ async function importFiles(list, status, done) {
       sent += piece.reduce((n, f) => n + (f.content ? f.content.length : 0), 0);
       setBusy(null, sent / totalBytes);
     }
-    // Closing the batch is its own step, and on a large import much the
-    // longest: every hand is deduplicated and every name in it matched against
-    // everybody already in the database. One call into Python that reports
-    // nothing until it returns, so the bar says "working" rather than guessing.
+    // Closing the batch is its own step and on a large import the longest:
+    // every hand deduplicated, every name matched against the database. One
+    // call that reports nothing until it returns, so the bar says "working".
     setBusy("Matching players across every file\u2026", undefined);
     const data = await post("/api/upload", {files: [], token, more: false});
     const skipped = (data.rejected || []).length
@@ -120,10 +116,9 @@ async function importFiles(list, status, done) {
       setBusy("Saving and rebuilding profiles\u2026", undefined);
       const r = await post(`/api/session/${data.token}/commit`,
                            answers ? {answers} : {});
-      // In the browser the import is not finished when the hands are stored --
-      // they are stored in this tab. Uploading is part of the same action, so
-      // it happens under the same veil rather than silently afterwards.
-      // Absent on the desktop, which has no account to save to.
+      // In the browser the hands are stored *in this tab*, so uploading is
+      // part of the same action and happens under the same veil. Absent on
+      // the desktop, which has no account to save to.
       if (window.villainSaveNow) {
         setBusy("Saving to your account\u2026", 0);
         try {
@@ -299,10 +294,9 @@ async function drawSession(id) {
     const skillBar = bar(p.skill, 100, "var(--mark-2)", 999);
     skillBar.setAttribute("preserveAspectRatio", "none");
     $(".sess-skill", div).appendChild(skillBar);
-    // This pill is a sitting-only read, not the pooled one on their Database
-    // page -- Database and Sessions disagreeing about the same person is
-    // correct (a sitting can look nothing like the season), but only if it
-    // says so rather than looking like the same claim twice.
+    // A sitting-only read, not the pooled one on their Database page. The
+    // two disagreeing is correct -- a sitting can look nothing like the
+    // season -- but only if it says so.
     $(".sitting-note", div).appendChild(info(`<span class="hl">this sitting</span><br>
       Measured on just tonight's hands here, not the pooled read on their
       Database page. The two can disagree, and when they do the difference is
@@ -314,13 +308,9 @@ async function drawSession(id) {
       box.innerHTML = `<div class="small muted sess-none">No outside sample at
         this table size to compare tonight against.</div>`;
     } else {
-      // One table size at a time, picked with a tab, rather than every table
-      // size stacked under its own heading. Rendering a row per (stat,
-      // regime) put VPIP on screen two or three times with the table size in
-      // small print, which read as a duplicate rather than as two different
-      // games -- stacked headings fixed the duplication but still made you
-      // scroll past every table size to find the one you sat at. A player
-      // who only played one table size gets no tabs at all.
+      // One table size at a time, picked with a tab. A row per (stat, regime)
+      // puts VPIP on screen three times and reads as a duplicate rather than
+      // as three different games. One table size, no tabs.
       const byRegime = new Map();
       for (const d of p.deltas) {
         const key = d.regime_label || d.regime || "";
@@ -329,10 +319,9 @@ async function drawSession(id) {
       }
       const regimes = [...byRegime.keys()];
       const rows = document.createElement("div");
-      // Tonight against usually, as two bars on one scale -- the same picture
-      // the against-you panel draws, for the same reason: the finding is the
-      // gap, and a four-column text grid makes the reader do the subtraction
-      // that a pair of bars does for them.
+      // Tonight against usually, two bars on one scale, as the against-you
+      // panel draws it: the finding is the gap, and a text grid makes the
+      // reader do the subtraction.
       const drawRows = label => {
         rows.innerHTML = "";
         const set = byRegime.get(label);

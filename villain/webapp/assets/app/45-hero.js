@@ -1,13 +1,10 @@
 async function viewHero() {
   const view = $("#view");
-  // Blocking, because in the browser this genuinely blocks: there is no thread
-  // to build the hero model on, so the tab cannot answer anything -- including
-  // a click on another tab -- until it is done. Three minutes of that with an
-  // inline spinner reads as a hung page. The veil says what is happening, and
-  // the tab lock that comes with it turns "nothing responds" into "not yet".
-  //
-  // Only for a cold build. Once the cache is warm this returns immediately and
-  // a veil would be a flash of furniture.
+  // Blocking, because in the browser it genuinely blocks: no thread to build
+  // the hero model on, so nothing responds -- including another tab -- until
+  // it is done, and three minutes of that reads as a hung page. The veil turns
+  // "nothing responds" into "not yet". Cold builds only; warm, it would be a
+  // flash of furniture.
   let cold = false;
   try {
     const peek0 = await get("/api/hero?peek=1");

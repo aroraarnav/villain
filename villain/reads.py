@@ -296,11 +296,9 @@ def strength_by_street(hand: Hand, known: dict) -> dict[tuple[int, Street], floa
     Measured against every holding the board allows, because "top pair" means
     something different on a dry board than on a four-flush one.
 
-    Public because :mod:`villain.hero` needs the same calculation for hero's
-    folds, which this module's own dataset deliberately excludes ("a folded
-    hand has no strength worth predicting" is true when the strength has to
-    be inferred from betting patterns; it is false when the hand is already
-    known).
+    Public because :mod:`villain.hero` needs it for hero's folds, which this
+    module's dataset excludes -- a folded hand has no strength worth inferring
+    from betting patterns, but hero's is already known.
     """
     # Pure in (board, known holes, which streets were reached): the same board
     # is scored once, not once per hero feature. Five features each walk hero's

@@ -532,12 +532,10 @@ class Store:
         declared to be a *different* person from whoever already owns that
         account id.
 
-        ``defer_rebuild`` records the players this batch touched and returns
-        without rebuilding, leaving the caller to call :meth:`rebuild_pending`
-        once. A rebuild costs a pass over every hand those players appear in,
-        which on a real database is most of it -- so doing one per file turned
-        an import of N files into N full rebuilds. Importing a directory is the
-        normal case, not the exception.
+        ``defer_rebuild`` records the players touched and returns, leaving the
+        caller to call :meth:`rebuild_pending` once -- a rebuild passes over
+        every hand those players appear in, so one per file makes an N-file
+        import N full rebuilds, and a directory is the normal case.
         """
         report = report or ImportReport()
         fresh: list[Hand] = []
@@ -1288,17 +1286,12 @@ class Store:
     def delete_player(self, player_id: int) -> dict:
         """Forget one person. Their hands stay exactly where they are.
 
-        A hand belongs to a table, not to a player: five other people sat in it
-        and their samples are built from the same rows. So this deletes the
-        identity and everything derived from it -- the player, the accounts
-        pointing at them, their notes, their books -- and leaves the hand log
-        untouched. Their seats simply stop resolving to anybody.
-
-        That is not a leak. :meth:`rebuild` maps seats through ``aliases`` and
-        returns None for an account it does not know, so a deleted player does
-        not reappear on the next rebuild. Importing hands with that account
-        again *does* create a fresh player, which is the right answer: you told
-        the tool to forget them, not to refuse to ever see them again.
+        A hand belongs to a table, not a player -- five others sat in it and
+        their samples are the same rows -- so this deletes the identity and
+        everything derived from it and leaves the hand log alone. Their seats
+        stop resolving to anybody, and :meth:`rebuild` returns None for an
+        unknown account, so they do not reappear. Re-importing that account
+        creates a fresh player, which is the right answer.
 
         Raises LookupError if there is no such player.
         """

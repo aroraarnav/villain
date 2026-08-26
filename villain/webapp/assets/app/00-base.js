@@ -181,11 +181,8 @@ function statTipHtml(row) {
 }
 
 function statRow(row) {
-  // 44 rather than 34, and a 16px band rather than 12. This is the one picture
-  // the whole tool turns on -- estimate, uncertainty, the field, the price of
-  // being wrong -- and at the old scale the band read as a smudge and the
-  // quarter marks did not exist, so the chart was decoration on a page whose
-  // argument it was supposed to be carrying.
+  // The one picture this tool turns on: estimate, uncertainty, the field, the
+  // price of being wrong. Drawn small enough, the band reads as a smudge.
   const W = 300, H = 44, mid = 22, r = 6;
   const x = v => Math.max(0, Math.min(1, v)) * W;
   const svg = el("svg", {width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img",

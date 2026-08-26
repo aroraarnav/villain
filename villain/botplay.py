@@ -232,11 +232,10 @@ def _polar_bands(freq: float, value_cap: float,
 def _street_value_cap(profile, street: str, freq: float, default_cap: float) -> float:
     """Value share of a betting frequency, from their shown-down betting range.
 
-    ``river_bet_bluff`` is the fraction of river bets that went to showdown
-    as junk. That *is* the polar split on the river: 40% bluffs means 40% of
-    the betting frequency is air, not whatever VALUE_CAP says. ``sd_strength``
-    is the weaker prior on earlier streets, and on the river when the bluff
-    sample is thin.
+    ``river_bet_bluff`` is the fraction of river bets shown down as junk,
+    which *is* the river's polar split -- 40% bluffs means 40% of the frequency
+    is air, whatever VALUE_CAP says. ``sd_strength`` is the weaker prior for
+    earlier streets and thin river samples.
     """
     if street == "river":
         bluff = _freq_n(profile, "river_bet_bluff", None, 15)
@@ -503,11 +502,9 @@ def _rank(hand, seat, order, board=None) -> float:
 def _rank_hi(hand, seat, order, board=None) -> float:
     """``_rank``, counted from the top of a tie rather than its midpoint.
 
-    Midpoint is how preflop class cuts avoid slicing AA in half. Postflop a
-    *made* tie can be most of the range -- every ten on T-T-9-9-x is the
-    same full house -- and the midpoint of that pile sits at 0.6. A 21%
-    continue cut then folds the nuts. The top of the tie is the number
-    that means "this is the best I can hold here."
+    Midpoint keeps preflop class cuts from slicing AA in half. Postflop a made
+    tie can be most of the range -- every ten on T-T-9-9-x is one full house --
+    and its midpoint sits at 0.6, so a 21% continue cut folds the nuts.
     """
     rs = _ranges(hand)
     hole = hand.seats[seat].hole
@@ -518,11 +515,9 @@ def _rank_hi(hand, seat, order, board=None) -> float:
 def _keep(hand, seat, order, bands, board=None) -> None:
     """Stage the range this action implies, for the engine to commit if played.
 
-    Acting on a frequency *is* a statement about the range: a player who
-    4-bets the top 16% of what they hold here has, by 4-betting, told you they
-    hold that slice. Recording it is what keeps the next decision's cut honest
-    -- without it every node re-reads the frequency against the full deck and
-    the range never narrows, which is the whole defect.
+    Acting on a frequency is a statement about the range: 4-betting the top
+    16% of what you hold says you hold that slice. Without recording it every
+    node re-reads the frequency against the full deck and nothing narrows.
     """
     rs = _ranges(hand)
     hole = tuple(hand.seats[seat].hole)
@@ -605,11 +600,9 @@ def _spr(hand, seat) -> float:
 def _raise_or_jam(hand, seat, legal, target: int) -> tuple[str, int]:
     """A raise, or a shove if *this size* would commit the stack.
 
-    A stub behind a raise is not a plan. An opening bet at SPR 2 still has
-    1.7 pots behind after a third-pot stab -- jamming because SPR is low is
-    how KK 5x-shoves a flop they bet small. ``COMMIT_SPR`` only applies when
-    this is already a raise of a bet, where a small raise at SPR 2 really is
-    a stub.
+    A stub behind a raise is not a plan, but an opening bet at SPR 2 still has
+    1.7 pots behind after a third-pot stab. ``COMMIT_SPR`` applies only to a
+    raise *of* a bet, where a small raise at SPR 2 really is a stub.
     """
     s = hand.seats[seat]
     _, to = _raise_to(hand, legal, target)

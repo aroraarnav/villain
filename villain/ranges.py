@@ -114,16 +114,13 @@ def _above_frac(w: np.ndarray, order: np.ndarray) -> np.ndarray:
 def _draw_bonus(rows: np.ndarray, board: np.ndarray) -> np.ndarray:
     """Playability bump so a flush draw is not ranked with 72o.
 
-    Made-hand evaluation cannot see four-to-a-flush or an open-ender, so
-    every polarised bluff that used that ranking was a naked ace-high --
-    never a draw. The bonuses are in the same 0-1 units as a percentile
-    so :class:`_BoardCache` can fold them into one.
+    Made-hand evaluation cannot see four-to-a-flush or an open-ender, so every
+    polarised bluff off that ranking is a naked ace-high. Bonuses are in
+    percentile units so :class:`_BoardCache` folds them into one.
 
-    A *draw* is something the hand does not have yet. Four to a flush already
-    stops counting at five suited, and the straight side has to do the same:
-    scoring a hand that already holds the straight as though it were drawing
-    to one is how a straight came out ahead of quads in the playability order
-    the postflop cuts are taken on.
+    A draw is something the hand does not have yet: both sides stop counting
+    once the hand is made, or a straight outranks quads in the playability
+    order the postflop cuts use.
     """
     n = len(rows)
     if n == 0 or len(board) >= 5:
@@ -302,14 +299,10 @@ class Ranges:
         the value slice and the bluff slice together, and a call keeps the
         band between folding and raising.
 
-        High bands (``hi >= 1``) use weight-above, not the midpoint
-        percentile: a made-hand tie that is the top of the range stays in
-        the top of the range. Low bands still use the midpoint, so a 70%
-        air pile is not all spent as a bluff.
-
-        ``keep_hole`` is the holding that just acted. Narrowing cannot
-        delete it -- they have it, regardless of which slice a frequency
-        said they would hold.
+        High bands (``hi >= 1``) use weight-above rather than the midpoint, so
+        a made-hand tie at the top of the range stays there; low bands keep the
+        midpoint, so a 70% air pile is not all spent as a bluff. ``keep_hole``
+        is the holding that just acted and narrowing cannot delete it.
         """
         w = self.live_weights(seat, board)
         if w.sum() <= 0:

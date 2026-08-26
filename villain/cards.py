@@ -88,14 +88,11 @@ _TOP_TABLE = _build_top_table()
 def _top_bits(mask: np.ndarray, count: int) -> np.ndarray:
     """The ``count`` highest set bits of each mask, as rank indices.
 
-    A rank mask is only 13 bits, so the answer for every possible mask is
-    precomputed in :data:`_TOP_TABLE` and this becomes a single gather -- no
-    sort, scatter or per-row work. Earlier versions (a stable ``argsort``, then
-    a ``cumsum`` scatter) were each the biggest single cost in a hero build;
-    this one barely registers. Masked to 13 bits because callers pass
-    ``rank_mask & ~pair_mask`` and friends, whose complement sets high bits.
-    Unset slots and a deuce (rank 0) both read 0, the convention callers rely
-    on.
+    A rank mask is 13 bits, so every answer is precomputed in
+    :data:`_TOP_TABLE` and this is a single gather -- no sort or per-row work,
+    where an argsort or a cumsum scatter was the biggest cost in a hero build.
+    Masked to 13 bits because callers pass complements, which set high bits.
+    Unset slots and a deuce both read 0, which callers rely on.
     """
     return _TOP_TABLE[np.asarray(mask, dtype=np.int64) & 0x1FFF][:, :count]
 
