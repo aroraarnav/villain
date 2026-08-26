@@ -45,12 +45,10 @@ MAX_BODY_BYTES = 256 * 1024 * 1024
 #: route that is in neither, because "I forgot to classify it" is exactly the
 #: mistake this exists to make impossible.
 #:
-#: The hosted app is why this is data rather than a comment. It runs the same
-#: handler in a Pyodide worker over a database it has to upload after a change,
-#: and it decides whether to upload by asking this list. It used to carry its
-#: own hand-copied copy of it, so a new writing route would have worked
-#: perfectly on a laptop and silently never been saved to the account -- the
-#: user's import surviving until they opened the app on another device.
+#: Data rather than a comment because the hosted app reads it: a Pyodide
+#: worker decides whether to upload the database by asking this list, and a
+#: second hand-copied copy of it meant a new writing route worked on a laptop
+#: and was silently never saved to the account.
 #:
 #: ``<token>`` stands for one path segment; see :func:`writes_to_disk`.
 WRITING_POST_ROUTES = frozenset({

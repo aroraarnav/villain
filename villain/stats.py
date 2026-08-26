@@ -35,12 +35,10 @@ STACK_BUCKETS = (("short", 0.0, 25.0), ("mid", 25.0, 70.0), ("deep", 70.0, math.
 #: other side of the decision was you. ``vs:fold_vs_bet:river`` is the slice of
 #: ``fold_vs_bet:river`` where the bet was yours.
 #:
-#: A namespace rather than a table because the counters *are* the same
-#: counters: they add the same way, merge the same way and rebuild the same
-#: way, and the pooled key stays the baseline the slice is read against. What
-#: they do not share is a population -- there is no field frequency for "folds
-#: to that guy" -- so everything that measures a stat against the field has to
-#: leave this namespace alone.
+#: A namespace rather than a table: they add, merge and rebuild identically,
+#: and the pooled key stays the baseline. What they do not share is a
+#: population -- there is no field frequency for "folds to that guy" -- so
+#: anything measuring against the field must skip this namespace.
 VS_HERO = "vs:"
 
 

@@ -440,16 +440,11 @@ def match(profile: Profile) -> tuple[str, float, list[tuple[str, float]]]:
             # got most confidently wrong were the ones borrowing most.
             n = est.native_opps or est.opps
             # Cap how much evidence one feature may contribute. The
-            # beta-binomial log-likelihood grows with the opportunity count,
-            # and opportunity counts are wildly unequal by *where the spot
-            # occurs*, not by how much the feature tells you: a preflop
-            # feature gets a spot every hand, a river fold only when the hand
-            # gets there. On a real 13,888-hand profile that is raise_share at
-            # n=1745 and limp at n=2901 against fold_vs_bet:river at n=263, so
-            # preflop play decided the archetype 108% of the way -- the
-            # postflop evidence pointed the other way and was outvoted.
-            # IMPORTANCE is supposed to be what weights a feature; this stops
-            # the sample size from overruling it.
+            # log-likelihood grows with the opportunity count, and those are
+            # unequal by *where the spot occurs* rather than by how much the
+            # feature says -- preflop every hand, a river fold only when the
+            # hand gets there. Uncapped, preflop play decided the archetype
+            # 108% of the way and outvoted the postflop evidence.
             if EVIDENCE_CAP and n > EVIDENCE_CAP:
                 observed.append((feature, est.raw * EVIDENCE_CAP, float(EVIDENCE_CAP)))
             else:
