@@ -92,11 +92,9 @@ def rate(profile: Profile) -> Skill:
         base = 0.88 * base + 0.12 * _winrate_score(adjusted)
 
     confidence = _confidence(profile)
-    # With little evidence, pull toward the middle rather than announcing that
-    # a 20-hand sample plays like an expert. The pulled number is not a skill
-    # comparison -- corr(hands, displayed score) was 0.49 on a real pool, and
-    # almost all of that was this lid. Below MEASURED_HANDS we refuse the
-    # tier rather than printing "competent (52)".
+    # With little evidence, pull toward the middle rather than announce that a
+    # 20-hand sample plays like an expert. The pulled number is not a skill
+    # comparison, so below MEASURED_HANDS the tier is refused outright.
     measured = profile.hands >= MEASURED_HANDS
     score = 50.0 + (base - 50.0) * confidence
     if measured:
@@ -118,10 +116,8 @@ def rate(profile: Profile) -> Skill:
 def _solid(profile: Profile, feature: str) -> float:
     """What a competent player does with this stat at this table size.
 
-    TAG against *this* field, not the built-in online one. A 28% VPIP in a
-    42% home game is a TAG; scoring it against a 15% online target called
-    that hand selection bad and dragged every looser regular's rating down
-    with it.
+    TAG against *this* field, not the built-in online one: 28% VPIP in a 42%
+    home game is a TAG, and a 15% online target calls it bad hand selection.
     """
     return target_frequency(ARCHETYPE_BY_NAME["tag"], feature, profile.regime, profile)
 
@@ -135,16 +131,13 @@ MIN_TOLERANCE_SHARE = 0.35
 def _pool_tolerance(profile, stat: str, builtin: float) -> float:
     """The built-in band, tightened to the one players actually occupy.
 
-    The bands were set from poker theory and are two to four times wider than
-    the pool's real spread, so a player a full standard deviation from solid
-    still scored 96 and every component saturated: postflop aggression had a
-    standard deviation of 3.7 around a median of 98, which is not a measure of
-    anything. Distance from solid play is still the thing being scored -- this
-    only stops the ruler being longer than the room.
+    The theory bands run two to four times wider than the pool's real spread,
+    so every component saturates -- postflop aggression had sd 3.7 around a
+    median of 98. Distance from solid play is still what is scored; this stops
+    the ruler being longer than the room.
 
-    Tightening only. It never widens past the theory band, so nobody is scored
-    more leniently than the absolute standard, and it falls back to the built
-    in number when there is no pool to ask.
+    Tightening only, never past the theory band, and it falls back to the
+    built-in number when there is no pool to ask.
     """
     band = profile.priors.get(f"range:{stat}") if profile is not None else None
     if not band:
@@ -161,10 +154,8 @@ def _band_score(value: float, target: float, tolerance: float,
                 loose_tolerance: float | None = None) -> float:
     """100 at the target, decaying with distance in units of ``tolerance``.
 
-    ``loose_tolerance`` widens the band on the high side. Several poker errors
-    are asymmetric and scoring them symmetrically misreads solid players: being
-    tighter than the field costs a little value, while being looser than it
-    costs a lot, and the same is not true in reverse.
+    ``loose_tolerance`` widens the high side: poker errors are asymmetric, and
+    scoring them symmetrically misreads solid players.
     """
     span = tolerance if value < target else (loose_tolerance or tolerance)
     z = abs(value - target) / span
@@ -175,9 +166,8 @@ def _preflop_selection(profile: Profile) -> Component | None:
     vpip = profile.get("vpip")
     if vpip is None:
         return None
-    # Tighter than the field is a mild error and loose is a large one, so the
-    # band is generous below the target and strict above it. A player who folds
-    # too much leaves value behind; one who plays everything bleeds it.
+    # Tighter than the field leaves value behind; looser bleeds it. So the
+    # band is generous below the target and strict above it.
     target = _solid(profile, "vpip")
     score = _band_score(vpip, target,
                         tolerance=_pool_tolerance(profile, "vpip", 0.22),
@@ -197,9 +187,8 @@ def _preflop_aggression(profile: Profile) -> Component | None:
     if not vpip or pfr is None:
         return None
     ratio = pfr / vpip
-    # Solid players raise most of the hands they play. Passive entry is the
-    # single most reliable marker of a weak player, and raising *everything*
-    # you play is barely an error at all, so the band is one-sided.
+    # Passive entry is the most reliable marker of a weak player, and raising
+    # everything you play is barely an error, so the band is one-sided.
     score = _band_score(min(ratio, 1.0), 0.80, tolerance=0.30, loose_tolerance=0.60)
     three_bet = profile.get("three_bet")
     note = f"raises {100 * ratio:.0f}% of hands played"

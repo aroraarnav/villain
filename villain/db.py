@@ -137,27 +137,22 @@ DEFAULT_PATH = Path.home() / ".villain" / "villain.db"
 SPURIOUS_OVERLAP = 10
 
 #: Feature / display-stat definition stamp. Bump when existing databases need
-#: a rebuild to grow new counters or fix wrong ones.
-#:
-#: The rebuild runs inline inside ``Store()`` and the web layer opens one per
-#: request, so a real database (71k hands, about a minute) makes the next page
-#: wait. Acceptable once: the stamp has to survive the request that wrote it.
-#: See :data:`PROGRESS_HOOK` and :func:`consume_cache_dirty`.
+#: a rebuild. It runs inline inside ``Store()`` and the web layer opens one per
+#: request, so a 71k-hand database makes the next page wait about a minute --
+#: acceptable once, so the stamp must survive the request that wrote it. See
+#: :data:`PROGRESS_HOOK` and :func:`consume_cache_dirty`.
 DEFINITIONS_VERSION = "2026-08-24.sim-plays-the-rest-of-the-book"
 
-#: Set by a host that can show a progress bar. Called as
-#: ``hook(done, total, phase)`` while a rebuild works; ``total`` of zero means
-#: the phase cannot be counted, only reported as still going.
-#:
-#: Module-level rather than a parameter because the rebuild that needs it is
-#: the one nobody asked for -- the migration inside ``Store()``, reached from
-#: seventeen request handlers, none of which would thread an argument to it.
+#: Set by a host that can show a progress bar: ``hook(done, total, phase)``,
+#: where ``total`` of zero means the phase cannot be counted. Module-level
+#: rather than a parameter because the rebuild that needs it is the migration
+#: inside ``Store()``, reached from seventeen handlers that would all have to
+#: thread it through.
 PROGRESS_HOOK = None
 
-#: True after ``_ensure_definitions`` rebuilt books and the host has not yet
-#: been told the file changed. The hosted page keys its upload off ``wrote``,
-#: which is a property of the *route*, so a GET that migrated looked like a
-#: read -- the stamp stayed in this process, the next visit rebuilt 71k hands.
+#: True after ``_ensure_definitions`` rebuilt books and the host has not been
+#: told. The hosted page keys its upload off ``wrote``, a property of the
+#: route, so a GET that migrated reads as a read and the stamp never lands.
 _CACHE_DIRTY = False
 
 #: Two request threads can both see a stale stamp and each start a full
@@ -181,10 +176,10 @@ def _report(done: int, total: int, phase: str) -> None:
         pass                      # a broken reporter must not break a rebuild
 
 
-#: Prefix for a seat whose account resolves to no player -- the person was
-#: deleted, but the hand they sat in is still the source of truth for everyone
-#: else at that table. A site account can be any string, so the marker has to be
-#: something a real (integer) player id can never start with.
+#: Prefix for a seat whose account resolves to no player: they were deleted,
+#: but the hand is still evidence for everyone else at the table. A site
+#: account is any string, so the marker must be one no integer id can start
+#: with.
 UNATTRIBUTED = "?"
 
 
@@ -292,9 +287,8 @@ class Store:
             if n_hands:
                 self.rebuild()
                 rebuilt = True
-            # Stamp before the prior fit, and commit it: a fit that throws must
-            # not leave the version unwritten, or the next Store() rebuilds the
-            # whole database again -- a minute, every request, forever.
+            # Stamp before the fit and commit it: a fit that throws must not
+            # leave the version unwritten, or every later Store() rebuilds.
             self.conn.execute(
                 "INSERT OR REPLACE INTO meta (key, value) VALUES ('definitions_version', ?)",
                 (DEFINITIONS_VERSION,))
@@ -313,15 +307,11 @@ class Store:
                     pass              # books and stamp are current; do not loop
 
     def _repair_distinct_pairs(self) -> None:
-        """Restore the ``a < b`` invariant that a past merge could break.
+        """Restore the ``a < b`` invariant a bare UPDATE could break.
 
-        Earlier versions re-pointed these rows with a bare UPDATE, which could
-        leave ``a > b``. Such a row is invisible to :meth:`shared_hands`, which
-        looks the pair up sorted -- so a constraint saying two accounts were
-        dealt in together silently stopped applying, and the merge it was there
-        to prevent became possible. Rows left pointing at a player that no
-        longer exists go too; they can never match anything and only confuse a
-        later repair.
+        An inverted row is invisible to :meth:`shared_hands`, which looks the
+        pair up sorted, so the constraint silently stops applying and the merge
+        it prevents becomes possible. Rows pointing at a deleted player go too.
         """
         live = {r["id"] for r in self.conn.execute("SELECT id FROM players")}
         rows = self.conn.execute("SELECT a, b, hands FROM distinct_pairs").fetchall()
@@ -341,9 +331,8 @@ class Store:
             [(a, b, n) for (a, b), n in fixed.items()])
 
     def close(self) -> None:
-        # The .db file is what we copy, export, and (in the browser) upload.
-        # WAL left sitting beside it is a second file nobody copies, so a
-        # checkpoint here is what makes the one file actually complete.
+        # The .db file is what gets copied, exported and uploaded; a WAL
+        # beside it is a second file nobody copies.
         try:
             self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         except sqlite3.Error:
@@ -354,9 +343,8 @@ class Store:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
-        # Roll back on the way out of a failed block. Committing regardless
-        # meant a parse failure halfway through ``villain import`` left the
-        # files before it, and half of the one that broke, permanently stored.
+        # Roll back out of a failed block: committing regardless leaves a
+        # half-imported file permanently stored.
         if exc_type is None:
             self.conn.commit()
         else:

@@ -49,35 +49,26 @@ class Route:
 #: so large batches can exceed the default 64MB limit.
 MAX_BODY_BYTES = 256 * 1024 * 1024
 
-#: POST path -> what answers it. Registered by the ``@post`` decorator on each
-#: handler, so a route and its "does this change the database" answer are one
-#: statement and cannot be added separately.
-#:
-#: The hosted app reads it through ``/api/meta``: a Pyodide worker decides
-#: whether to upload the database by asking here. Kept beside the handler by
-#: hand, a new writing route worked on a laptop and was silently never saved
-#: to the account.
-#:
+#: POST path -> what answers it. The ``@post`` decorator registers the route
+#: and its "does this change the database" answer in one statement, so they
+#: cannot be added separately -- the hosted app reads that answer through
+#: ``/api/meta`` to decide whether to upload, and a route missing from a
+#: hand-kept list works on a laptop and never reaches the account.
 #: ``<token>`` stands for one path segment; see :func:`writes_to_disk`.
 POST_ROUTES: dict[str, Route] = {}
 
 
 def post(path: str, *, writes: bool, needs: str = ""):
-    """Register a ``do_POST`` handler.
-
-    ``needs="session"`` checks the ``<token>`` segment against SESSIONS and
-    ``needs="game"`` resolves ``body["token"]`` against SIM_GAMES, each 404ing
-    on a miss before the handler runs -- eight routes opened with that same
-    three-line guard.
-    """
+    """Register a ``do_POST`` handler. ``needs="session"`` checks the
+    ``<token>`` segment against SESSIONS and ``needs="game"`` resolves
+    ``body["token"]`` against SIM_GAMES, 404ing before the handler runs."""
     def register(fn):
         POST_ROUTES[path] = Route(fn, writes, needs)
         return fn
     return register
 
 
-#: GET path -> handler, same shape as POST_ROUTES minus the writes flag: a GET
-#: never changes the database, which is the whole reason only POST carries one.
+#: GET path -> handler. No writes flag: a GET never changes the database.
 #: A trailing ``/<arg>`` captures one path segment and passes it in.
 GET_ROUTES: dict[str, object] = {}
 
@@ -111,11 +102,8 @@ def _post_route(path: str) -> tuple[Route | None, str]:
 
 
 def writes_to_disk(path: str) -> bool:
-    """Does a POST to ``path`` change what is stored on disk?
-
-    The hosted shell asks this through :data:`/api/meta` rather than pattern
-    matching on its own, so there is one answer and it is this module's.
-    """
+    """Does a POST to ``path`` change what is stored on disk? The hosted
+    shell asks through ``/api/meta`` rather than matching patterns itself."""
     route, _ = _post_route(path)
     return bool(route and route.writes)
 
@@ -138,13 +126,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         route = urlparse(self.path)
         path = route.path
-        # Reads carry the data this tool exists to keep local: the roster names
-        # every player in a real home game, and hand replay returns their cards.
-        # Only POST was checked, so any page open in the same browser could
-        # `fetch("http://127.0.0.1:8766/api/roster")` -- or point an <img> at it
-        # -- and read all of it. The shell and its assets are deliberately not
-        # guarded: they hold nothing about anybody, and leaving the page itself
-        # loadable keeps this from being able to break opening the app.
+        # Reads carry what this tool exists to keep local -- the roster names
+        # every player, replay returns their cards -- so any page in the same
+        # browser could fetch them. The shell and its assets stay unguarded:
+        # they hold nothing about anybody, and a guard there could break
+        # opening the app.
         if path.startswith("/api/") and not self._same_origin():
             return self._send(403, {"error": "cross-origin request refused"})
         handler, arg = _get_route(path)
@@ -252,14 +238,12 @@ class Handler(BaseHTTPRequestHandler):
     @get("/api/hero")
     def _hero(self, route):
         with Store(self.db_path) as store:
-            # "Is this going to take a while?" -- asked before the real
-            # request so the page can put a veil up first. It must not
-            # start anything: the whole point is to answer instantly.
+            # "Is this going to take a while?", asked before the real
+            # request so the page can veil first. Must start nothing.
             if parse_qs(route.query).get("peek", ["0"])[0] == "1":
                 return self._send(200, hero_peek(store))
-            # Never block the request on the build. A cold hero is
-            # ~90s of model fitting; the page asks again rather than
-            # holding a socket open and showing nothing.
+            # Never block on the build: a cold hero is ~90s of model
+            # fitting, so the page polls rather than holding a socket.
             status = hero_status(store)
             if status != "ready" and hero_begin(store):
                 return self._send(202, {
@@ -275,10 +259,9 @@ class Handler(BaseHTTPRequestHandler):
                                "strength model over every one of them. "
                                "This runs once per import.",
                 })
-            # Cold, and no background thread to build it on: that is
-            # the browser, where the whole tool is single-threaded.
-            # Building inside the request is slower to first paint than
-            # polling, and it is the only thing that ever finishes.
+            # Cold with no thread to build on: the browser, where the
+            # tool is single-threaded and this is the only path that
+            # finishes at all.
             payload = hero_payload(store)
             if payload is None:
                 return self._send(404, {
@@ -296,11 +279,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, {"error": "stat required"})
         with Store(self.db_path) as store:
             hands = store.player_hands(player_id)
-        # Count over *every* matching hand, then truncate. Truncating
-        # first made "count" a synonym for the cap and, worse, computed
-        # "hits" inside that window -- so a player who limped 4 times in
-        # 6,210 hands showed 0 of 60, because none of the four fell in
-        # the slice. The instances are what you came to see, so they go
+        # Count over *every* matching hand, then truncate. Truncating first
+        # makes "count" a synonym for the cap and computes "hits" inside that
+        # window -- 4 limps in 6,210 hands shows as 0 of 60. The instances go
         # first and the rest fill the remainder.
         found = find_evidence(hands, str(player_id), stat)
         hits = [e for e in found if e.hit]

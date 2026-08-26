@@ -16,13 +16,10 @@ from .profile import CROSS_REGIME_DISCOUNT, primary_regime
 from .stats import VS_HERO, Ratio, StatBook
 
 #: How strongly to believe, before seeing any of it, that he plays you the way
-#: he plays everybody -- in opportunities.
-#:
-#: Nothing in a database can fit this. It would take pairwise samples across
-#: many players to learn how much people vary between opponents, and a home
-#: game has one pair worth counting. So it is a judgment call, stated here
-#: rather than buried: raise it and an adjustment needs more evidence before it
-#: shows, lower it and normal variation starts reading as a read.
+#: he plays everybody -- in opportunities. Nothing in a database can fit this
+#: (it needs pairwise samples across many players; a home game has one pair),
+#: so it is a judgment call: raise it and an adjustment needs more evidence,
+#: lower it and normal variation reads as a read.
 ADJUSTMENT_PRIOR = 30.0
 
 #: Against-you opportunities before an adjustment can be reported at all,
@@ -31,10 +28,8 @@ ADJUSTMENT_PRIOR = 30.0
 MIN_OPPS = 12
 
 #: And decisions against *other* people, or there is no baseline to differ
-#: from. This is the honest refusal in a heads-up database: if you are the only
-#: person he has played, "against you" and "in general" are the same hands, and
-#: the difference between them is not a read, it is a subtraction of a number
-#: from itself.
+#: from. In a heads-up database "against you" and "in general" are the same
+#: hands, and their difference is a number subtracted from itself.
 MIN_BASELINE_OPPS = 12
 
 #: Posterior probability the shift has the sign it appears to have.
@@ -44,20 +39,17 @@ MIN_CONFIDENCE = 0.85
 #: certain given enough hands and still not change a single decision.
 MIN_GAP = 0.08
 
-#: Facing a bet a player folds, calls or raises: one decision and three
-#: counters that add to one. A shift in any of them is the same shift seen from
-#: another side, so reporting all three would say one thing three times and
-#: then sort it to the top by weight of numbers. Only the largest is kept.
-#: :func:`villain.exploits.dedupe_leaks` collapses overlapping leaks for the
-#: same reason.
+#: Facing a bet a player folds, calls or raises: one decision, three counters
+#: that add to one. A shift in any is the same shift from another side, so all
+#: three would say one thing three times and sort it to the top by weight of
+#: numbers. Only the largest is kept, as in `exploits.dedupe_leaks`.
 ONE_DECISION = ("fold_vs_bet", "call_vs_bet", "raise_vs_bet")
 
-#: Regularisation on another table size's slice before its deviation is
-#: measured -- just enough to keep the log-odds finite when somebody folded to
-#: none of thirty bets. Deliberately tiny: :data:`ADJUSTMENT_PRIOR` is applied
-#: to the pooled result at the end, and applying it here as well shrinks the
-#: borrowed deviation to nothing before the cross-regime discount has even
-#: touched it, which discards the signal the borrowing exists to carry.
+#: Regularisation on a borrowed table size's slice -- just enough to keep the
+#: log-odds finite when somebody folded to none of thirty bets. Tiny on
+#: purpose: :data:`ADJUSTMENT_PRIOR` already applies at the end, and applying
+#: it twice shrinks the borrowed deviation away before the cross-regime
+#: discount touches it.
 TRANSLATION_SMOOTHING = 2.0
 
 
@@ -91,10 +83,9 @@ def adjustments(by_regime: dict[str, StatBook],
                 min_confidence: float = MIN_CONFIDENCE) -> list[Adjustment]:
     """Every statistic where the against-you slice moved off the baseline.
 
-    Returns nothing rather than something weak: below the sample floors, or
-    inside the confidence and size floors, a statistic is simply absent. A
-    player you have no read on is the normal case at these sample sizes, and
-    an empty list says so more honestly than a list of coin flips.
+    Nothing rather than something weak: below the sample, confidence or size
+    floors a statistic is simply absent. Having no read is the normal case at
+    these sample sizes, and an empty list says so.
     """
     live = {r: b for r, b in by_regime.items() if b.hands > 0}
     if not live:
@@ -104,13 +95,10 @@ def adjustments(by_regime: dict[str, StatBook],
 
     out: list[Adjustment] = []
     for stat in _sliced_stats(live):
-        # A read that only holds at one table size is still a read. Folding
-        # every regime into the home one and translating the rest loses
-        # exactly the strongest cases: one player folds to turn bets 23% of
-        # the time heads-up against 42% otherwise, and 6-max the same gap runs
-        # the *other way* -- averaged, they cancel and nothing is reported.
-        # Where a single table size carries the read on its own decisions, say
-        # so and name the table size.
+        # A read that holds at one table size is still a read, and folding
+        # every regime into the home one loses the strongest cases: 23% vs 42%
+        # fold-to-turn-bet heads-up, the gap running the other way 6-max --
+        # averaged, they cancel. Where one table size carries it, name it.
         for regime, book in live.items():
             native = _adjustment_within(stat, book, regime, priors,
                                         REGIME_MIN_OPPS, min_confidence)

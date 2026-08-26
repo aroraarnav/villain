@@ -132,7 +132,6 @@ MIN_STRENGTH, MAX_STRENGTH = 8.0, 40.0
 STRENGTH: dict[str, float] = {
     "four_bet": 35, "fold_to_four_bet": 30, "five_bet": 35, "cold_four_bet": 35,
 }
-DEFAULT_STRENGTH = 25.0
 
 
 def strength_for(stat: str) -> float:

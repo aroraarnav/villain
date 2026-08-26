@@ -40,8 +40,6 @@ STREET_LABELS = {
     Street.RIVER: "river",
 }
 
-# Cards dealt on each street, used to slice a board into streets.
-STREET_CARDS = {Street.PREFLOP: 0, Street.FLOP: 3, Street.TURN: 1, Street.RIVER: 1}
 
 
 class Act(IntEnum):
@@ -92,9 +90,6 @@ _POSITIONS = {
     10: ["SB", "BB", "UTG", "UTG1", "UTG2", "MP", "LJ", "HJ", "CO", "BTN"],
 }
 
-# Coarse buckets used by stats that would be too sparse per exact position.
-IN_POSITION_LAST = ("BTN", "CO")
-BLINDS = ("SB", "BB")
 
 
 def positions_for(seats: list[int], dealer_seat: int) -> dict[int, str]:

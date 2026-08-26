@@ -20,9 +20,6 @@ from .priors import prior_for
 from .profile import PROFILE_FEATURES
 from .stats import StatBook
 
-#: A Bayes factor above this is strong evidence for one player, below it for two.
-STRONG_EVIDENCE = 4.0
-
 #: Minimum hands each side needs before behavior is worth testing at all.
 MIN_HANDS_FOR_BEHAVIOUR = 60
 
