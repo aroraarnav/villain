@@ -623,46 +623,38 @@ def test_a_name_plus_suffix_match_is_asked_and_never_auto_merged(session, tmp_pa
 
 # --- every POST route says whether it writes ---------------------------------
 
-def _routed_post_paths() -> set[str]:
-    """The routes ``do_POST`` actually answers, read out of its own source.
-
-    Reading the source is not elegant, and it is the only thing that fails when
-    somebody adds a route and forgets to say whether it writes. A list of routes
-    maintained beside the handler by hand is the thing under test here, not the
-    thing to test it with.
-    """
-    import inspect
-    import re
-
-    from villain.webapp.server import Handler
-    src = inspect.getsource(Handler.do_POST)
-    routes = set(re.findall(r'route == "(/api/[^"]+)"', src))
-    for suffix in re.findall(
-            r'route\.startswith\("/api/session/"\) and route\.endswith\("(/[^"]+)"\)', src):
-        routes.add(f"/api/session/<token>{suffix}")
-    return routes
-
-
-def test_every_post_route_is_classified_as_writing_or_not():
+def test_every_post_route_says_whether_it_writes():
     """The hosted app uploads the database after a write and not otherwise.
 
     It asks the server which is which. A route the server does not classify is
     reported as "changed nothing", so the import that went through it works on
     this laptop and is never saved to the account -- found, if ever, on a second
     device that is missing a session.
-    """
-    from villain.webapp.server import READING_POST_ROUTES, WRITING_POST_ROUTES
 
-    routed = _routed_post_paths()
-    assert routed, "the handler should answer at least one POST route"
-    declared = WRITING_POST_ROUTES | READING_POST_ROUTES
-    assert routed - declared == set(), (
-        "these POST routes do not say whether they change the database: "
-        f"{sorted(routed - declared)}")
-    assert declared - routed == set(), (
-        "these routes are classified but no longer served: "
-        f"{sorted(declared - routed)}")
-    assert not (WRITING_POST_ROUTES & READING_POST_ROUTES)
+    This used to re-read ``do_POST``'s source with a regex, because a frozenset
+    kept beside the handler by hand was the thing under test. Registration now
+    carries the answer, so what is left to check is that every route went
+    through it.
+    """
+    import inspect
+
+    from villain.webapp.server import POST_ROUTES, Handler
+
+    # A POST handler is exactly a Handler method taking a request body. Asking
+    # the signature rather than the name means a handler cannot dodge this by
+    # being called something else.
+    handlers = {
+        name for name, attr in vars(Handler).items()
+        if inspect.isfunction(attr) and name != "do_POST"
+        and "body" in inspect.signature(attr).parameters
+    }
+    registered = {route.handler.__name__ for route in POST_ROUTES.values()}
+    assert handlers, "no POST handlers found -- the check below would be vacuous"
+    assert handlers == registered, (
+        "these POST handlers are not registered, so nothing says whether they "
+        f"write: {sorted(handlers ^ registered)}")
+    assert any(r.writes for r in POST_ROUTES.values())
+    assert not all(r.writes for r in POST_ROUTES.values())
 
 
 def test_writes_to_disk_resolves_a_real_session_token():

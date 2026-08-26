@@ -12,6 +12,7 @@ import secrets
 import threading
 import time
 import webbrowser
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -34,44 +35,83 @@ from .sessions import SESSIONS, SIM_GAMES, _reap_sessions, apply_answers, commit
 #: Hostnames the UI may be reached on. Anything else is a rebinding attempt.
 LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", ""})
 
+@dataclass(frozen=True)
+class Route:
+    handler: object
+    #: Does answering this leave the stored database different afterwards?
+    writes: bool
+    #: "", "session" or "game" -- what to resolve and 404 on before dispatch.
+    needs: str = ""
+
+
 #: Cap on a request body. The upload route holds what it reads in memory.
 #: The UI uploads multiple hand-history JSON files in a single JSON payload,
 #: so large batches can exceed the default 64MB limit.
 MAX_BODY_BYTES = 256 * 1024 * 1024
 
-#: Which POST routes leave the stored database different afterwards, and which
-#: only touch memory. Every route ``do_POST`` answers has to appear in one of
-#: them -- ``tests/test_web.py`` reads this handler's source and fails on a
-#: route that is in neither, because "I forgot to classify it" is exactly the
-#: mistake this exists to make impossible.
+#: POST path -> what answers it. Registered by the ``@post`` decorator on each
+#: handler, so a route and its "does this change the database" answer are one
+#: statement and cannot be added separately.
 #:
-#: The hosted app is why this is data rather than a comment. It runs the same
-#: handler in a Pyodide worker over a database it has to upload after a change,
-#: and it decides whether to upload by asking this list. It used to carry its
-#: own hand-copied copy of it, so a new writing route would have worked
-#: perfectly on a laptop and silently never been saved to the account -- the
-#: user's import surviving until they opened the app on another device.
+#: That question is not bookkeeping. The hosted app runs this same handler in a
+#: Pyodide worker over a database it has to upload after a change, and it
+#: decides whether to upload by asking here (through ``/api/meta``). When the
+#: answer lived in a frozenset beside the handler, a new writing route worked
+#: perfectly on a laptop and was silently never saved to the account -- the
+#: user's import surviving until they opened the app on another device. A test
+#: used to re-read ``do_POST``'s own source with a regex to catch that; the
+#: registry makes the case unrepresentable instead.
 #:
 #: ``<token>`` stands for one path segment; see :func:`writes_to_disk`.
-WRITING_POST_ROUTES = frozenset({
-    "/api/reset",
-    "/api/unlink",
-    "/api/player/delete",
-    "/api/session/<token>/commit",
-})
+POST_ROUTES: dict[str, Route] = {}
 
-#: The rest: parsing into memory, running the simulator, asking a model for
-#: prose, answering identity questions on a session that has not been saved.
-READING_POST_ROUTES = frozenset({
-    "/api/upload",
-    "/api/sim/new",
-    "/api/sim/act",
-    "/api/sim/step",
-    "/api/sim/next",
-    "/api/sim/analysis",
-    "/api/session/<token>/identity",
-    "/api/session/<token>/plan",
-})
+
+def post(path: str, *, writes: bool, needs: str = ""):
+    """Register a ``do_POST`` handler.
+
+    ``needs="session"`` checks the ``<token>`` segment against SESSIONS and
+    ``needs="game"`` resolves ``body["token"]`` against SIM_GAMES, each 404ing
+    on a miss before the handler runs -- eight routes opened with that same
+    three-line guard.
+    """
+    def register(fn):
+        POST_ROUTES[path] = Route(fn, writes, needs)
+        return fn
+    return register
+
+
+#: GET path -> handler, same shape as POST_ROUTES minus the writes flag: a GET
+#: never changes the database, which is the whole reason only POST carries one.
+#: A trailing ``/<arg>`` captures one path segment and passes it in.
+GET_ROUTES: dict[str, object] = {}
+
+
+def get(*paths: str):
+    """Register a ``do_GET`` handler under one or more paths."""
+    def register(fn):
+        for path in paths:
+            GET_ROUTES[path] = fn
+        return fn
+    return register
+
+
+def _get_route(path: str):
+    """``(handler, captured segment)`` for a GET path, or ``(None, "")``."""
+    if path in GET_ROUTES:
+        return GET_ROUTES[path], ""
+    head, _, tail = path.rpartition("/")
+    handler = GET_ROUTES.get(f"{head}/<arg>") if tail else None
+    return (handler, tail) if handler else (None, "")
+
+
+def _post_route(path: str) -> tuple[Route | None, str]:
+    """The route for a POST path, and the session token in it if any."""
+    if path in POST_ROUTES:
+        return POST_ROUTES[path], ""
+    parts = path.split("/")
+    if len(parts) == 5 and parts[:3] == ["", "api", "session"]:
+        return POST_ROUTES.get(f"/api/session/<token>/{parts[4]}"), parts[3]
+    return None, ""
 
 
 def writes_to_disk(path: str) -> bool:
@@ -80,12 +120,8 @@ def writes_to_disk(path: str) -> bool:
     The hosted shell asks this through :data:`/api/meta` rather than pattern
     matching on its own, so there is one answer and it is this module's.
     """
-    if path in WRITING_POST_ROUTES:
-        return True
-    parts = path.split("/")
-    if len(parts) == 5 and parts[:3] == ["", "api", "session"]:
-        return f"/api/session/<token>/{parts[4]}" in WRITING_POST_ROUTES
-    return False
+    route, _ = _post_route(path)
+    return bool(route and route.writes)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -115,216 +151,241 @@ class Handler(BaseHTTPRequestHandler):
         # loadable keeps this from being able to break opening the app.
         if path.startswith("/api/") and not self._same_origin():
             return self._send(403, {"error": "cross-origin request refused"})
-        try:
-            if path in ("/", "/index.html"):
-                return self._send(200, page(), "text/html; charset=utf-8")
-            if path.startswith("/static/"):
-                asset = static(path[len("/static/"):])
-                if asset is None:
-                    return self._send(404, {"error": "no such asset"})
-                body, content_type = asset
-                return self._send(200, body, content_type)
-            if path == "/api/sessions":
-                with Store(self.db_path) as store:
-                    out = []
-                    for sess in store.sessions():
-                        out.append({k: v for k, v in sess.items() if k != "hand_ids"})
-                    return self._send(200, out)
-            if path.startswith("/api/session-detail"):
-                sid = int(parse_qs(urlparse(self.path).query).get("id", ["0"])[0])
-                with Store(self.db_path) as store:
-                    match = next((x for x in store.sessions() if x["id"] == sid), None)
-                    if match is None:
-                        return self._send(404, {"error": "no such session"})
-                    hero_id = _cached_hero_id(store)
-                    players = store.session_detail(match)
-                    for pl in players:
-                        pl["is_hero"] = pl.get("player_id") == hero_id
-                    return self._send(200, {
-                        "id": match["id"], "started_at": match["started_at"],
-                        "ended_at": match["ended_at"], "hands": match["hands"],
-                        "hero_id": hero_id, "players": players})
-            if path == "/api/roster":
-                with Store(self.db_path) as store:
-                    n_players = store.conn.execute(
-                        "SELECT COUNT(*) c FROM players").fetchone()["c"]
-                    n_fitted = store.conn.execute(
-                        "SELECT COUNT(*) c FROM fitted_priors").fetchone()["c"]
-                    return self._send(200, {
-                        "players": roster_payload(store),
-                        "db": str(self.db_path),
-                        "hands": store.conn.execute(
-                            "SELECT COUNT(*) c FROM hands").fetchone()["c"],
-                        "hero_id": _cached_hero_id(store),
-                        # An empty roster over a full hands table is a broken
-                        # import, not an empty database. Say which.
-                        "books_missing": store.books_missing(),
-                        "fit_priors": {
-                            "players": n_players,
-                            "has_fitted": n_fitted > 0,
-                        },
-                    })
-            if path.startswith("/api/player/"):
-                player_id = int(path.rsplit("/", 1)[1])
-                with Store(self.db_path) as store:
-                    row = store.conn.execute(
-                        "SELECT display_name FROM players WHERE id = ?",
-                        (player_id,)).fetchone()
-                    if row is None:
-                        return self._send(404, {"error": "no such player"})
-                    unified = store.profile(player_id)
-                    profiles = [profile_payload(unified, player_id)] if unified else []
-                    # The per-table breakdown stays available for anyone who
-                    # wants to check that the pooling is not hiding something.
-                    by_table = [profile_payload(p)
-                                for p in store.profiles(player_id,
-                                                        min_hands=MIN_ROSTER_HANDS)]
-                    aliases = [dict(r) for r in store.conn.execute(
-                        "SELECT site, account, name, hands FROM aliases WHERE player_id = ?",
-                        (player_id,))]
-                    return self._send(200, {
-                        "player_id": player_id,
-                        "display_name": row["display_name"],
-                        "aliases": aliases,
-                        "profiles": profiles,
-                        "by_table": by_table if len(by_table) > 1 else [],
-                        "notes": [dict(n) for n in store.notes(player_id)],
-                        "hero_id": _cached_hero_id(store),
-                    })
-            if path.startswith("/api/session/"):
-                token = path.rsplit("/", 1)[1]
-                if token not in SESSIONS:
-                    return self._send(404, {"error": "session expired -- upload again"})
-                with Store(self.db_path) as store:
-                    return self._send(200, session_payload(token, store))
-            if path == "/api/hero":
-                with Store(self.db_path) as store:
-                    # "Is this going to take a while?" -- asked before the real
-                    # request so the page can put a veil up first. It must not
-                    # start anything: the whole point is to answer instantly.
-                    if parse_qs(route.query).get("peek", ["0"])[0] == "1":
-                        return self._send(200, hero_peek(store))
-                    # Never block the request on the build. A cold hero is
-                    # ~90s of model fitting; the page asks again rather than
-                    # holding a socket open and showing nothing.
-                    status = hero_status(store)
-                    if status != "ready" and hero_begin(store):
-                        return self._send(202, {
-                            "status": "building",
-                            "message": "Reading your hands -- fitting the "
-                                       "strength model over every one of them. "
-                                       "This runs once per import.",
-                        })
-                    if status == "building":
-                        return self._send(202, {
-                            "status": "building",
-                            "message": "Reading your hands -- fitting the "
-                                       "strength model over every one of them. "
-                                       "This runs once per import.",
-                        })
-                    # Cold, and no background thread to build it on: that is
-                    # the browser, where the whole tool is single-threaded.
-                    # Building inside the request is slower to first paint than
-                    # polling, and it is the only thing that ever finishes.
-                    payload = hero_payload(store)
-                    if payload is None:
-                        return self._send(404, {
-                            "error": "Could not identify hero automatically -- "
-                                     "no player has cards known on enough of their "
-                                     "own hands."})
-                    return self._send(200, payload)
-            if path == "/api/evidence":
-                query = parse_qs(route.query)
-                player_id = int(query.get("player", ["0"])[0])
-                stat = query.get("stat", [""])[0]
-                if not stat:
-                    return self._send(400, {"error": "stat required"})
-                with Store(self.db_path) as store:
-                    hands = store.player_hands(player_id)
-                # Count over *every* matching hand, then truncate. Truncating
-                # first made "count" a synonym for the cap and, worse, computed
-                # "hits" inside that window -- so a player who limped 4 times in
-                # 6,210 hands showed 0 of 60, because none of the four fell in
-                # the slice. The instances are what you came to see, so they go
-                # first and the rest fill the remainder.
-                found = find_evidence(hands, str(player_id), stat)
-                hits = [e for e in found if e.hit]
-                misses = [e for e in found if not e.hit]
-                def recent(xs):
-                    return sorted(xs, key=lambda e: e.started_at or 0, reverse=True)
-                shown = recent(hits)[:60] + recent(misses)[:max(0, 60 - len(hits))]
-                # One line saying what the count actually means, from the
-                # glossary's own high/low readings -- a number without a
-                # reading is the thing this whole tool exists to avoid.
-                reading, rate, pop = "", None, None
-                against = "the field"
-                with Store(self.db_path) as store:
-                    prof = store.profile(player_id)
-                if prof is None:
-                    pass
-                elif stat.startswith(VS_HERO):
-                    # An against-you slice is not among the shrunk stats and
-                    # has no population -- there is no field frequency for
-                    # "folds to that guy". What it is read against is the
-                    # player's own baseline, so that is what the verdict
-                    # compares it with, and it says which.
-                    parent = stat[len(VS_HERO):]
-                    match = next((a for a in prof.adjustments
-                                  if a.stat == parent), None)
-                    against = "everyone else"
-                    if match is not None:
-                        rate, pop = match.versus, match.baseline
-                        entry = stat_help(parent) or {}
-                        reading = entry.get("high" if rate >= pop else "low", "")
-                elif prof.stats.get(stat) is not None:
-                    rate = prof.stats[stat].value
-                    pop = prof.population(stat)
-                    entry = stat_help(stat) or {}
-                    reading = entry.get("high" if rate >= pop else "low", "")
-                return self._send(200, {
-                    "stat": stat, "count": len(found), "hits": len(hits),
-                    "rate": None if rate is None else round(rate, 4),
-                    "population": None if pop is None else round(pop, 4),
-                    "compared_to": against,
-                    "reading": reading,
-                    "shown_hits": sum(1 for e in shown if e.hit),
-                    "hands": [vars(e) for e in shown],
-                })
-            if path.startswith("/api/hand/"):
-                hand_id = path.rsplit("/", 1)[1]
-                focus = parse_qs(route.query).get("focus", [None])[0]
-                with Store(self.db_path) as store:
-                    row = store.conn.execute(
-                        "SELECT payload FROM hands WHERE hand_id = ?", (hand_id,)).fetchone()
-                    if row is None:
-                        return self._send(404, {"error": "no such hand"})
-                    data = json.loads(gzip.decompress(row["payload"]))
-                    hand = hand_from_dict(data)
-                    accounts = {
-                        (r["site"], r["account"]): int(r["player_id"])
-                        for r in store.conn.execute(
-                            "SELECT site, account, player_id FROM aliases")}
-                for seat in hand.seats:
-                    pid = (accounts.get((hand.site, split_key(seat.player_id, seat.name)))
-                           or accounts.get((hand.site, seat.player_id)))
-                    if pid is not None:
-                        seat.player_id = str(pid)
-                return self._send(200, replay(hand, focus=focus))
-            if path == "/api/meta":
-                with Store(self.db_path) as store:
-                    return self._send(200, {
-                        "tabs": tab_availability(store),
-                        # The hosted shell decides whether a POST it just made
-                        # has to be uploaded to the account. It asks here so
-                        # that the answer comes from the module that owns the
-                        # routes, not from a regex kept in step by hand.
-                        "writing_routes": sorted(WRITING_POST_ROUTES),
-                    })
-            if path == "/api/glossary":
-                return self._send(200, glossary_payload())
+        handler, arg = _get_route(path)
+        if handler is None:
             return self._send(404, {"error": "not found"})
+        try:
+            return handler(self, route, arg) if arg else handler(self, route)
         except Exception as exc:                      # keep the server alive
             return self._send(500, {"error": str(exc)})
+
+    @get("/", "/index.html")
+    def _page(self, _route):
+        return self._send(200, page(), "text/html; charset=utf-8")
+
+    @get("/static/<arg>")
+    def _static(self, _route, name):
+        asset = static(name)
+        if asset is None:
+            return self._send(404, {"error": "no such asset"})
+        body, content_type = asset
+        return self._send(200, body, content_type)
+
+    @get("/api/sessions")
+    def _sessions(self, _route):
+        with Store(self.db_path) as store:
+            out = []
+            for sess in store.sessions():
+                out.append({k: v for k, v in sess.items() if k != "hand_ids"})
+            return self._send(200, out)
+
+    @get("/api/session-detail")
+    def _session_detail(self, route):
+        sid = int(parse_qs(route.query).get("id", ["0"])[0])
+        with Store(self.db_path) as store:
+            match = next((x for x in store.sessions() if x["id"] == sid), None)
+            if match is None:
+                return self._send(404, {"error": "no such session"})
+            hero_id = _cached_hero_id(store)
+            players = store.session_detail(match)
+            for pl in players:
+                pl["is_hero"] = pl.get("player_id") == hero_id
+            return self._send(200, {
+                "id": match["id"], "started_at": match["started_at"],
+                "ended_at": match["ended_at"], "hands": match["hands"],
+                "hero_id": hero_id, "players": players})
+
+    @get("/api/roster")
+    def _roster(self, _route):
+        with Store(self.db_path) as store:
+            n_players = store.conn.execute(
+                "SELECT COUNT(*) c FROM players").fetchone()["c"]
+            n_fitted = store.conn.execute(
+                "SELECT COUNT(*) c FROM fitted_priors").fetchone()["c"]
+            return self._send(200, {
+                "players": roster_payload(store),
+                "db": str(self.db_path),
+                "hands": store.conn.execute(
+                    "SELECT COUNT(*) c FROM hands").fetchone()["c"],
+                "hero_id": _cached_hero_id(store),
+                # An empty roster over a full hands table is a broken
+                # import, not an empty database. Say which.
+                "books_missing": store.books_missing(),
+                "fit_priors": {
+                    "players": n_players,
+                    "has_fitted": n_fitted > 0,
+                },
+            })
+
+    @get("/api/player/<arg>")
+    def _player(self, _route, arg):
+        player_id = int(arg)
+        with Store(self.db_path) as store:
+            row = store.conn.execute(
+                "SELECT display_name FROM players WHERE id = ?",
+                (player_id,)).fetchone()
+            if row is None:
+                return self._send(404, {"error": "no such player"})
+            unified = store.profile(player_id)
+            profiles = [profile_payload(unified, player_id)] if unified else []
+            # The per-table breakdown stays available for anyone who
+            # wants to check that the pooling is not hiding something.
+            by_table = [profile_payload(p)
+                        for p in store.profiles(player_id,
+                                                min_hands=MIN_ROSTER_HANDS)]
+            aliases = [dict(r) for r in store.conn.execute(
+                "SELECT site, account, name, hands FROM aliases WHERE player_id = ?",
+                (player_id,))]
+            return self._send(200, {
+                "player_id": player_id,
+                "display_name": row["display_name"],
+                "aliases": aliases,
+                "profiles": profiles,
+                "by_table": by_table if len(by_table) > 1 else [],
+                "notes": [dict(n) for n in store.notes(player_id)],
+                "hero_id": _cached_hero_id(store),
+            })
+
+    @get("/api/session/<arg>")
+    def _session(self, _route, token):
+        if token not in SESSIONS:
+            return self._send(404, {"error": "session expired -- upload again"})
+        with Store(self.db_path) as store:
+            return self._send(200, session_payload(token, store))
+
+    @get("/api/hero")
+    def _hero(self, route):
+        with Store(self.db_path) as store:
+            # "Is this going to take a while?" -- asked before the real
+            # request so the page can put a veil up first. It must not
+            # start anything: the whole point is to answer instantly.
+            if parse_qs(route.query).get("peek", ["0"])[0] == "1":
+                return self._send(200, hero_peek(store))
+            # Never block the request on the build. A cold hero is
+            # ~90s of model fitting; the page asks again rather than
+            # holding a socket open and showing nothing.
+            status = hero_status(store)
+            if status != "ready" and hero_begin(store):
+                return self._send(202, {
+                    "status": "building",
+                    "message": "Reading your hands -- fitting the "
+                               "strength model over every one of them. "
+                               "This runs once per import.",
+                })
+            if status == "building":
+                return self._send(202, {
+                    "status": "building",
+                    "message": "Reading your hands -- fitting the "
+                               "strength model over every one of them. "
+                               "This runs once per import.",
+                })
+            # Cold, and no background thread to build it on: that is
+            # the browser, where the whole tool is single-threaded.
+            # Building inside the request is slower to first paint than
+            # polling, and it is the only thing that ever finishes.
+            payload = hero_payload(store)
+            if payload is None:
+                return self._send(404, {
+                    "error": "Could not identify hero automatically -- "
+                             "no player has cards known on enough of their "
+                             "own hands."})
+            return self._send(200, payload)
+
+    @get("/api/evidence")
+    def _evidence(self, route):
+        query = parse_qs(route.query)
+        player_id = int(query.get("player", ["0"])[0])
+        stat = query.get("stat", [""])[0]
+        if not stat:
+            return self._send(400, {"error": "stat required"})
+        with Store(self.db_path) as store:
+            hands = store.player_hands(player_id)
+        # Count over *every* matching hand, then truncate. Truncating
+        # first made "count" a synonym for the cap and, worse, computed
+        # "hits" inside that window -- so a player who limped 4 times in
+        # 6,210 hands showed 0 of 60, because none of the four fell in
+        # the slice. The instances are what you came to see, so they go
+        # first and the rest fill the remainder.
+        found = find_evidence(hands, str(player_id), stat)
+        hits = [e for e in found if e.hit]
+        misses = [e for e in found if not e.hit]
+        def recent(xs):
+            return sorted(xs, key=lambda e: e.started_at or 0, reverse=True)
+        shown = recent(hits)[:60] + recent(misses)[:max(0, 60 - len(hits))]
+        # One line saying what the count actually means, from the
+        # glossary's own high/low readings -- a number without a
+        # reading is the thing this whole tool exists to avoid.
+        reading, rate, pop = "", None, None
+        against = "the field"
+        with Store(self.db_path) as store:
+            prof = store.profile(player_id)
+        if prof is None:
+            pass
+        elif stat.startswith(VS_HERO):
+            # An against-you slice is not among the shrunk stats and
+            # has no population -- there is no field frequency for
+            # "folds to that guy". What it is read against is the
+            # player's own baseline, so that is what the verdict
+            # compares it with, and it says which.
+            parent = stat[len(VS_HERO):]
+            match = next((a for a in prof.adjustments
+                          if a.stat == parent), None)
+            against = "everyone else"
+            if match is not None:
+                rate, pop = match.versus, match.baseline
+                entry = stat_help(parent) or {}
+                reading = entry.get("high" if rate >= pop else "low", "")
+        elif prof.stats.get(stat) is not None:
+            rate = prof.stats[stat].value
+            pop = prof.population(stat)
+            entry = stat_help(stat) or {}
+            reading = entry.get("high" if rate >= pop else "low", "")
+        return self._send(200, {
+            "stat": stat, "count": len(found), "hits": len(hits),
+            "rate": None if rate is None else round(rate, 4),
+            "population": None if pop is None else round(pop, 4),
+            "compared_to": against,
+            "reading": reading,
+            "shown_hits": sum(1 for e in shown if e.hit),
+            "hands": [vars(e) for e in shown],
+        })
+
+    @get("/api/hand/<arg>")
+    def _hand(self, route, hand_id):
+        focus = parse_qs(route.query).get("focus", [None])[0]
+        with Store(self.db_path) as store:
+            row = store.conn.execute(
+                "SELECT payload FROM hands WHERE hand_id = ?", (hand_id,)).fetchone()
+            if row is None:
+                return self._send(404, {"error": "no such hand"})
+            data = json.loads(gzip.decompress(row["payload"]))
+            hand = hand_from_dict(data)
+            accounts = {
+                (r["site"], r["account"]): int(r["player_id"])
+                for r in store.conn.execute(
+                    "SELECT site, account, player_id FROM aliases")}
+        for seat in hand.seats:
+            pid = (accounts.get((hand.site, split_key(seat.player_id, seat.name)))
+                   or accounts.get((hand.site, seat.player_id)))
+            if pid is not None:
+                seat.player_id = str(pid)
+        return self._send(200, replay(hand, focus=focus))
+
+    @get("/api/meta")
+    def _meta(self, _route):
+        with Store(self.db_path) as store:
+            return self._send(200, {
+                "tabs": tab_availability(store),
+                # The hosted shell decides whether a POST it just made
+                # has to be uploaded to the account. It asks here so
+                # that the answer comes from the module that owns the
+                # routes, not from a regex kept in step by hand.
+                "writing_routes": sorted(p for p, r in POST_ROUTES.items() if r.writes),
+            })
+
+    @get("/api/glossary")
+    def _glossary(self, _route):
+        return self._send(200, glossary_payload())
 
     def _same_origin(self) -> bool:
         """Accept only requests the local UI itself could have made.
@@ -368,109 +429,106 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, {"error": "bad json"})
         if not isinstance(body, dict):
             return self._send(400, {"error": "body must be an object"})
-        route = urlparse(self.path).path
+        route, token = _post_route(urlparse(self.path).path)
+        if route is None:
+            return self._send(404, {"error": "not found"})
         try:
-            if route == "/api/upload":
-                return self._upload(body)
-            if route == "/api/sim/new":
-                return self._sim_new(body)
-            if route == "/api/sim/act":
-                return self._sim_act(body)
-            if route == "/api/sim/step":
-                return self._sim_step(body)
-            if route == "/api/sim/next":
-                return self._sim_next(body)
-            if route == "/api/sim/analysis":
-                return self._sim_analysis(body)
-            if route == "/api/reset":
-                if body.get("confirm") != "delete everything":
-                    return self._send(400, {"error": "reset not confirmed"})
-                with Store(self.db_path) as store:
-                    return self._send(200, store.reset())
-            if route == "/api/player/delete":
-                player_id = int(body.get("player_id", 0))
-                with Store(self.db_path) as store:
-                    # Hero is not a villain you can forget: the whole Hero tab
-                    # is built from that identity, and deleting it would leave
-                    # the tool reading a profile that no longer exists. The UI
-                    # disables the button for the same reason, but the check
-                    # belongs here too -- the button is not the only caller.
-                    if player_id == _cached_hero_id(store):
-                        return self._send(400, {"error":
-                            "That is you. Deleting the hero would empty the Hero tab; "
-                            "reset the database if that is really what you want."})
-                    try:
-                        result = store.delete_player(player_id)
-                    except LookupError as exc:
-                        return self._send(404, {"error": str(exc)})
-                    # Every cached answer about the hero names players by id,
-                    # so all of them have to go: one of those ids is now free.
-                    forget_hero(store)
-                    return self._send(200, result)
-            if route.startswith("/api/session/") and route.endswith("/identity"):
-                token = route.split("/")[3]
+            if route.needs == "session":
                 if token not in SESSIONS:
                     return self._send(404, {"error": "session expired -- upload again"})
                 # Being answered counts as being alive. Reading a dialog about
                 # six accounts takes as long as it takes, and a session evicted
                 # while somebody was thinking loses the whole import.
                 SESSIONS[token]["created"] = time.time()
-                apply_answers(SESSIONS[token], body.get("answers") or {})
-                # Brief unless the caller is showing the preview. This is the
-                # same trap as the upload response: building the full payload
-                # profiles every hand in the session, which on a large import
-                # is minutes of work behind a dialog that said "Applying".
-                # `route` is the path alone in do_POST -- unlike do_GET, where it
-                # is the whole parsed URL. Reading .query off it raised
-                # "'str' object has no attribute 'query'" and took down every
-                # apply.
-                if parse_qs(urlparse(self.path).query).get("full", ["0"])[0] == "1":
-                    with Store(self.db_path) as store:
-                        return self._send(200, session_payload(token, store))
-                return self._send(200, session_brief(token))
-            if route.startswith("/api/session/") and route.endswith("/plan"):
-                token = route.split("/")[3]
-                if token not in SESSIONS:
-                    return self._send(404, {"error": "session expired -- upload again"})
-                return self._send(
-                    200, [question_payload(q) for q in SESSIONS[token].get("questions", [])])
-            if route.startswith("/api/session/") and route.endswith("/commit"):
-                token = route.split("/")[3]
-                if token not in SESSIONS:
-                    return self._send(404, {"error": "session expired -- upload again"})
-                SESSIONS[token]["created"] = time.time()
-                with Store(self.db_path) as store:
-                    return self._send(200, commit_session(
-                        store, token, body.get("answers") or {}))
-            with Store(self.db_path) as store:
-                if route == "/api/unlink":
-                    try:
-                        new_id = store.unlink(int(body["player_id"]),
-                                              str(body["site"]), str(body["account"]))
-                    except LookupError as exc:
-                        # No such alias on that player -- the caller asked
-                        # about something that is not there, the same shape of
-                        # answer /api/player/delete already gives. Served as a
-                        # 500 it read as the tool breaking rather than as the
-                        # answer to the question, which is what sends somebody
-                        # looking for a bug that is not there.
-                        return self._send(404, {"error": str(exc)})
-                    # Splitting an account moves hands to a new identity without
-                    # changing how many there are, and the hero caches key on
-                    # exactly that count -- so if the account that just left was
-                    # hero's, nothing would notice.
-                    forget_hero(store)
-                    return self._send(200, {"ok": True, "player_id": new_id})
-            return self._send(404, {"error": "not found"})
+                return route.handler(self, body, token)
+            if route.needs == "game":
+                game = SIM_GAMES.get(body.get("token"))
+                if game is None:
+                    return self._send(404, {"error": "game not found -- start a new one"})
+                return route.handler(self, body, game)
+            return route.handler(self, body)
         except ValueError as exc:
             return self._send(409, {"error": str(exc)})
         except Exception as exc:
             return self._send(500, {"error": str(exc)})
 
-    def _sim_new(self, body: dict):
-        import secrets
+    @post("/api/reset", writes=True)
+    def _reset(self, body: dict):
+        if body.get("confirm") != "delete everything":
+            return self._send(400, {"error": "reset not confirmed"})
+        with Store(self.db_path) as store:
+            return self._send(200, store.reset())
 
+    @post("/api/player/delete", writes=True)
+    def _delete_player(self, body: dict):
+        player_id = int(body.get("player_id", 0))
+        with Store(self.db_path) as store:
+            # Hero is not a villain you can forget: the whole Hero tab is built
+            # from that identity, and deleting it would leave the tool reading a
+            # profile that no longer exists. The UI disables the button for the
+            # same reason, but the check belongs here too -- the button is not
+            # the only caller.
+            if player_id == _cached_hero_id(store):
+                return self._send(400, {"error":
+                    "That is you. Deleting the hero would empty the Hero tab; "
+                    "reset the database if that is really what you want."})
+            try:
+                result = store.delete_player(player_id)
+            except LookupError as exc:
+                return self._send(404, {"error": str(exc)})
+            # Every cached answer about the hero names players by id, so all of
+            # them have to go: one of those ids is now free.
+            forget_hero(store)
+            return self._send(200, result)
+
+    @post("/api/unlink", writes=True)
+    def _unlink(self, body: dict):
+        with Store(self.db_path) as store:
+            try:
+                new_id = store.unlink(int(body["player_id"]),
+                                      str(body["site"]), str(body["account"]))
+            except LookupError as exc:
+                # No such alias on that player -- the caller asked about
+                # something that is not there, the same shape of answer
+                # /api/player/delete already gives. Served as a 500 it read as
+                # the tool breaking rather than as the answer to the question,
+                # which is what sends somebody looking for a bug that is not
+                # there.
+                return self._send(404, {"error": str(exc)})
+            # Splitting an account moves hands to a new identity without
+            # changing how many there are, and the hero caches key on exactly
+            # that count -- so if the account that just left was hero's,
+            # nothing would notice.
+            forget_hero(store)
+            return self._send(200, {"ok": True, "player_id": new_id})
+
+    @post("/api/session/<token>/identity", writes=False, needs="session")
+    def _identity(self, body: dict, token: str):
+        apply_answers(SESSIONS[token], body.get("answers") or {})
+        # Brief unless the caller is showing the preview. This is the same trap
+        # as the upload response: building the full payload profiles every hand
+        # in the session, which on a large import is minutes of work behind a
+        # dialog that said "Applying".
+        if parse_qs(urlparse(self.path).query).get("full", ["0"])[0] == "1":
+            with Store(self.db_path) as store:
+                return self._send(200, session_payload(token, store))
+        return self._send(200, session_brief(token))
+
+    @post("/api/session/<token>/plan", writes=False, needs="session")
+    def _plan(self, body: dict, token: str):
+        return self._send(
+            200, [question_payload(q) for q in SESSIONS[token].get("questions", [])])
+
+    @post("/api/session/<token>/commit", writes=True, needs="session")
+    def _commit(self, body: dict, token: str):
+        with Store(self.db_path) as store:
+            return self._send(200, commit_session(
+                store, token, body.get("answers") or {}))
+
+    @post("/api/sim/new", writes=False)
+    def _sim_new(self, body: dict):
         from ..sim import Game, Villain
+
         vids = [int(x) for x in (body.get("villains") or [])][:5]
         if not vids:
             return self._send(400, {"error": "pick at least one villain"})
@@ -493,36 +551,29 @@ class Handler(BaseHTTPRequestHandler):
             SIM_GAMES.pop(stale, None)
         return self._send(200, {"token": token, "state": game.state()})
 
-    def _sim_act(self, body: dict):
-        game = SIM_GAMES.get(body.get("token"))
-        if game is None:
-            return self._send(404, {"error": "game not found -- start a new one"})
+    @post("/api/sim/act", writes=False, needs="game")
+    def _sim_act(self, body: dict, game):
         try:
             game.act(str(body.get("kind")), int(body.get("amount", 0)))
         except (RuntimeError, ValueError) as exc:
             return self._send(400, {"error": str(exc)})
         return self._send(200, {"state": game.state()})
 
-    def _sim_step(self, body: dict):
-        game = SIM_GAMES.get(body.get("token"))
-        if game is None:
-            return self._send(404, {"error": "game not found -- start a new one"})
+    @post("/api/sim/step", writes=False, needs="game")
+    def _sim_step(self, body: dict, game):
         event = game.step()
         return self._send(200, {"state": game.state(), "event": event})
 
-    def _sim_next(self, body: dict):
-        game = SIM_GAMES.get(body.get("token"))
-        if game is None:
-            return self._send(404, {"error": "game not found -- start a new one"})
+    @post("/api/sim/next", writes=False, needs="game")
+    def _sim_next(self, body: dict, game):
         game.new_hand()
         return self._send(200, {"state": game.state()})
 
-    def _sim_analysis(self, body: dict):
-        game = SIM_GAMES.get(body.get("token"))
-        if game is None:
-            return self._send(404, {"error": "game not found -- start a new one"})
+    @post("/api/sim/analysis", writes=False, needs="game")
+    def _sim_analysis(self, body: dict, game):
         return self._send(200, {"analysis": game.analysis()})
 
+    @post("/api/upload", writes=False)
     def _upload(self, body: dict):
         """Parse uploaded files into a session held in memory."""
         files = body.get("files") or []
