@@ -131,6 +131,22 @@ function h(tag, cls, html) {
   if (html != null) node.innerHTML = html;
   return node;
 }
+/* Click to browse, drag to drop, and the hover state in between. Both upload
+   paths -- the Database tab's importer and the Sessions tab's -- wired this by
+   hand, so "over" was added in one place and removed in two others. */
+function wireDrop(drop, input, take) {
+  if (!drop) return;
+  drop.onclick = () => input.click();
+  drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
+  drop.ondragleave = () => drop.classList.remove("over");
+  drop.ondrop = e => {
+    e.preventDefault();
+    drop.classList.remove("over");
+    take(e.dataTransfer.files);
+  };
+  input.onchange = () => take(input.files);
+}
+
 /* Every dialog in this app is a veil over a sheet, and ten places built that
    shell inline -- showEvidence built it three times, once per state, so its
    close handler was written three times too. This returns the `.sheet` to

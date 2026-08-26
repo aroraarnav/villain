@@ -20,14 +20,7 @@ function viewSession() {
     if (state.session) renderSession();
     return;
   }
-  drop.onclick = () => input.click();
-  drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
-  drop.ondragleave = () => drop.classList.remove("over");
-  drop.ondrop = e => {
-    e.preventDefault(); drop.classList.remove("over");
-    handleFiles(e.dataTransfer.files);
-  };
-  input.onchange = () => handleFiles(input.files);
+  wireDrop(drop, input, list => handleFiles(list));
 
   async function handleFiles(list) {
     const files = [...list];

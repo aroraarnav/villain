@@ -177,19 +177,10 @@ function wireImport() {
     const after = $("#db-status");
     if (after && summary) after.innerHTML = summary;
   });
-  input.onchange = () => go(input.files);
+  wireDrop(drop, input, go);
   const button = $("#db-add");
   if (button && drop) {
     button.onclick = () => { drop.hidden = false; input.click(); };
-  }
-  if (drop) {
-    drop.onclick = () => input.click();
-    drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
-    drop.ondragleave = () => drop.classList.remove("over");
-    drop.ondrop = e => {
-      e.preventDefault(); drop.classList.remove("over");
-      go(e.dataTransfer.files);
-    };
   }
   // Dropping anywhere on the panel works too: hunting for a target is friction
   // on the one action this tab exists for.
