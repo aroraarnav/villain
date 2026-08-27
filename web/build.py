@@ -13,6 +13,7 @@ Everything it needs already exists elsewhere in the repo.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -33,6 +34,14 @@ PLACEHOLDER = "BUILD_STAMP"
 #: stamp one and miss another.
 STAMPED = ("index.html", "app-shell.js")
 
+#: The stylesheet the boot page borrows its colors from.
+APP_CSS = ROOT / "villain" / "webapp" / "assets" / "app.css"
+
+#: Boot-page-only tokens: the gate button's hover and the step line under the
+#: bar. Both exist only while the page is still the boot screen, so app.css has
+#: no counterpart and the sync below leaves them alone.
+BOOT_ONLY = {"--red-hover", "--ink-dim"}
+
 #: Copied through untouched. They carry no placeholder because nothing in them
 #: names another asset -- the page and the shell own every URL between them.
 COPIED = ("config.js", "sync.js", "worker.js", "app-shell.css",
@@ -50,6 +59,52 @@ def stamp_boot_page(text: str, stamp: str) -> str:
     return text.replace(PLACEHOLDER, stamp)
 
 
+#: ``--name: light-dark(<light>, <dark>);`` or ``--name: <hex>;``. The boot
+#: page paints before any theme has been resolved and app.css's dark values are
+#: what it was designed against, so the dark half is what gets borrowed.
+_TOKEN = re.compile(
+    r"(--[a-z0-9-]+)\s*:\s*(?:light-dark\(\s*#[0-9a-fA-F]{3,8}\s*,\s*)?"
+    r"(#[0-9a-fA-F]{3,8})\s*\)?\s*;")
+
+
+def dark_palette(css: str) -> dict[str, str]:
+    """Every hex token app.css's bare ``:root`` declares, dark side."""
+    block = re.search(r":root\s*\{(.*?)\n\s*\}", css, re.S)
+    if not block:
+        raise ValueError("app.css has no :root block")
+    return {name: value.lower() for name, value in _TOKEN.findall(block.group(1))}
+
+
+def sync_boot_palette(page: str, css: str) -> str:
+    """Rewrite the boot page's borrowed colors from app.css.
+
+    The hosted page paints a sign-in screen and a progress bar before the wheel
+    carrying app.css has finished downloading, so it declares the handful of
+    colors it needs itself. A value that drifts does not fail anything or look
+    wrong in review -- it makes the site visibly change theme the moment the
+    runtime loads, which reads to a visitor as two products rather than one.
+    A comment saying "change it in both places" was the whole enforcement;
+    deriving it here means there is only one place.
+    """
+    palette = dark_palette(css)
+
+    def swap(m):
+        name, value = m.group(1), m.group(2)
+        if name in BOOT_ONLY:
+            return m.group(0)
+        if name not in palette:
+            raise ValueError(
+                f"the boot page declares {name}, which app.css's :root does not -- "
+                f"either it is misnamed or it belongs in BOOT_ONLY")
+        return m.group(0).replace(value, palette[name])
+
+    root = re.search(r":root\s*\{(.*?)\n\s*\}", page, re.S)
+    if not root:
+        raise ValueError("the boot page has no :root block")
+    fixed = _TOKEN.sub(swap, root.group(1))
+    return page[:root.start(1)] + fixed + page[root.end(1):]
+
+
 def run(*args: str) -> None:
     print("+", " ".join(args))
     subprocess.run(args, check=True, cwd=ROOT)
@@ -63,7 +118,11 @@ def run(*args: str) -> None:
 WHEEL_MUST_CARRY = (
     "villain/webapp/assets/index.html",
     "villain/webapp/assets/app.css",
-    "villain/webapp/assets/app.js",
+    # /static/app.js is assembled from these at request time, so it is the
+    # parts that have to be in the wheel; a missing one is a UI that half
+    # loads, in the browser only, with nowhere to show the traceback.
+    "villain/webapp/assets/app/00-base.js",
+    "villain/webapp/assets/app/90-shell.js",
     "villain/copy/glossary.toml",
     "villain/copy/playbook.toml",
 )
@@ -131,8 +190,12 @@ def main() -> int:
     # does not let us set Cache-Control, the wheel filename does not change
     # between deploys, and a cached worker is the previous application.
     stamp = str(int(time.time()))
+    css_text = APP_CSS.read_text()
     for name in STAMPED:
-        (DIST / name).write_text(stamp_boot_page((WEB / name).read_text(), stamp))
+        text = stamp_boot_page((WEB / name).read_text(), stamp)
+        if name == "index.html":
+            text = sync_boot_palette(text, css_text)
+        (DIST / name).write_text(text)
         print(f"+ stamped {name}")
     for name in COPIED:
         shutil.copy(WEB / name, DIST / name)

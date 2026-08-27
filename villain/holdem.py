@@ -127,8 +127,7 @@ class Hand:
     def _did(self, seat: int, they: str, you: str) -> str:
         """A log clause: third person for a name, first person for You.
 
-        The subject is the seat's display name. ``You calls`` is not a sentence.
-        """
+        The subject is the seat's display name. ``You calls`` is not a sentence."""
         name = self.seats[seat].name
         if seat == getattr(self, "hero_seat", None) or name.lower() == "you":
             return f"{name} {you}"
@@ -236,15 +235,11 @@ class Hand:
     def stage(self, seat: int, commit) -> None:
         """Hold a callback to run if ``seat``'s pending decision is played.
 
-        The villain policy learns something about a seat's range at the moment
-        it picks their action -- which slice of it the frequency it just used
-        would have acted this way with. That is only true if the action is
-        actually taken, and a caller is free to ask the policy what two
-        different profiles would do at the same node without playing either.
-        So the policy stages the update here and :meth:`act` commits it,
-        rather than mutating anything itself. Staging again replaces the slot;
-        the engine keeps no opinion about what the callback does.
-        """
+        Picking an action tells you which slice of a seat's range would have
+        acted that way -- but only if it is actually played, and a caller may
+        ask what two profiles would do at one node without playing either. So
+        the policy stages the update and :meth:`act` commits it. Staging again
+        replaces the slot."""
         self._staged = (seat, commit)
 
     def act(self, kind: str, amount: int = 0) -> None:

@@ -20,26 +20,18 @@ from .priors import prior_for
 from .profile import PROFILE_FEATURES
 from .stats import StatBook
 
-#: A Bayes factor above this is strong evidence for one player, below it for two.
-STRONG_EVIDENCE = 4.0
-
 #: Minimum hands each side needs before behavior is worth testing at all.
 MIN_HANDS_FOR_BEHAVIOUR = 60
 
-#: Name similarity required before we even mention a possible merge. Trailing
-#: digits and punctuation already normalize away (``PlayerG`` / ``PlayerG2`` score
-#: 1.0); this bar is for everything else. Play style is not used — agreeing
-#: that two tight-passives are "similar" is not evidence they are one person.
+#: Similarity required before a merge is even mentioned. Trailing digits and
+#: punctuation normalize away first (``PlayerG``/``PlayerG2`` score 1.0).
 HIGH_NAME_SCORE = 0.92
 
-#: Two accounts showing the same screen name are usually one person whose
-#: site handed them a fresh account id -- a reconnect. They can also be two
-#: humans who picked the same nickname, and the test for that is whether they
-#: were ever dealt into a hand *together*, not whether their active periods
-#: overlap: a regular who reconnects every session has accounts spanning the
-#: same months by construction, so an overlap rule suppresses precisely the
-#: merges it exists to make. Co-occurrence is the real discriminator and it is
-#: already enforced, absolutely, by ``SPURIOUS_OVERLAP``.
+#: Two accounts showing one screen name are usually a reconnect, occasionally
+#: two people who picked the same nickname. The discriminator is whether they
+#: were ever dealt in *together*, not whether their active periods overlap -- a
+#: regular who reconnects every session overlaps himself by construction.
+#: Co-occurrence is already enforced absolutely by ``SPURIOUS_OVERLAP``.
 
 
 @dataclass
@@ -66,23 +58,15 @@ def normalize(name: str) -> str:
 def display_key(name: str) -> str:
     """Case- and punctuation-insensitive, but digits intact.
 
-    :func:`normalize` deliberately strips trailing digits so ``PlayerG`` and
-    ``PlayerG2`` compare equal. That is the wrong tool for asking whether two
-    accounts are literally showing the same screen name, where ``Vik`` and
-    ``Vik2`` are different answers.
-    """
+    :func:`normalize` strips trailing digits, which is the wrong tool for
+    "is this literally the same screen name" -- there ``Ghost``/``Ghost2`` differ."""
     return re.sub(r"[^a-z0-9]+", "", name.lower())
 
 
 def name_similarity(a: str, b: str) -> float:
-    """Similarity of two screen names, 0-1.
-
-    Two measures, taking the better of them. ``SequenceMatcher`` rewards shared
-    runs, which catches additions and truncations; edit distance catches
-    transposed and mistyped characters, which is what actually happens to a
-    name being retyped from memory -- ``PlayerK`` reappearing as
-    ``PlaeyrK`` scores 0.73 on shared runs but 0.82 on edit distance.
-    """
+    """Similarity of two screen names, 0-1: the better of shared runs
+    (additions, truncations) and edit distance (transpositions, typos).
+    ``PlayerK``/``PlaeyrK`` scores 0.73 on the first and 0.82 on the second."""
     na, nb = normalize(a), normalize(b)
     if not na or not nb:
         return 0.0
@@ -93,28 +77,22 @@ def name_similarity(a: str, b: str) -> float:
     return max(blocks, edits, _skeleton_score(na, nb), _containment_score(na, nb))
 
 
-#: Shortest stem a name-plus-suffix match will accept. Measured on a real
-#: pool: at 3+ characters the pairs a prefix match newly proposes are things
-#: like ``PlayerC``/``PlayerC10min`` and ``PlayerA``/``PlayerALaptop``; at 1-2
-#: it starts proposing weak account-handle matches for two unrelated names
-#: that merely happen to share a first letter.
+#: Shortest stem a name-plus-suffix match accepts. At 3+ it proposes
+#: ``PlayerA``/``PlayerALaptop``; at 1-2 it matches on a shared first letter.
 MIN_CONTAINED = 3
 
 
 def _containment_score(na: str, nb: str) -> float:
     """Catch a name that is another name with something stuck on the end.
 
-    ``PlayerA`` reappears as ``PlayerALaptop`` and ``PLAYERA10MIN``, ``PlayerB`` as
-    ``PlayerB1hr`` and ``Player B Wang`` -- one person labelling which device or
-    how long they are staying. Neither shared runs nor edit distance sees it:
-    the suffix is most of the longer string, so ``PlayerA``/``PlayerAaa`` scores
-    0.80 and ``PlayerB``/``PlayerB1hr`` 0.80, both under the bar.
+    ``PlayerA``/``PlayerALaptop``, ``PlayerB``/``PlayerB1hr`` -- one person
+    labelling a device or a sitting. Neither other measure sees it: the suffix
+    is most of the longer string, so both score 0.80, under the bar.
 
-    A prefix, deliberately, not a substring: the suffix is something appended,
-    and a substring rule matches the middle of unrelated names. It is evidence
-    for a question and never an answer -- ``PlayerG``/``PlayerG North`` has exactly
-    this shape and is two different people, which only the user can say.
-    """
+    A prefix, not a substring, since the suffix is appended and a substring
+    rule matches the middle of unrelated names. Evidence for a question, never
+    an answer: ``PlayerG``/``PlayerG North`` has the same shape and is two
+    people."""
     short, long = (na, nb) if len(na) <= len(nb) else (nb, na)
     if len(short) < MIN_CONTAINED or short == long or not long.startswith(short):
         return 0.0
@@ -127,19 +105,14 @@ def _skeleton(name: str) -> str:
 
 
 def _skeleton_score(na: str, nb: str) -> float:
-    """Catch the vowel-dropped nickname, which neither other measure can see.
+    """Catch the vowel-dropped nickname, which neither other measure sees.
 
-    ``PlayerD`` against ``PlyrD`` scores 0.73 on shared runs and 0.57 on edit
-    distance, so it sat well under the bar -- but dropping the vowels out of a
-    name is one of the most common ways a person shortens it, and the two are
-    almost always the same human.
+    ``PlayerD``/``PlyrD`` scores 0.73 on shared runs and 0.57 on edit distance,
+    both under the bar, and dropping vowels is how people shorten a name.
 
-    Deliberately conservative. The skeletons have to match exactly and be at
-    least three consonants long: at two, ``Dan`` and ``Dean`` collapse onto the
-    same ``dn`` and the measure starts inventing people. It also returns less
-    than an exact-name match, because it is weaker evidence -- enough to raise
-    the question, never enough to answer it.
-    """
+    Skeletons must match exactly and be three consonants long -- at two,
+    ``Dan`` and ``Dean`` both become ``dn``. Scores below an exact-name match,
+    being weaker evidence."""
     sa, sb = _skeleton(na), _skeleton(nb)
     if len(sa) < 3 or sa != sb:
         return 0.0
@@ -161,13 +134,10 @@ def _levenshtein(a: str, b: str) -> int:
 
 
 def behavior_log_bf(a: StatBook, b: StatBook) -> float | None:
-    """Log Bayes factor for "one player" over "two players".
+    """Log Bayes factor for "one player" over "two"; positive favors a merge.
 
-    Positive favors a merge. Each statistic contributes the difference between
-    the marginal likelihood of the pooled counts and that of the two samples
-    scored separately, so agreeing on a rare tendency counts for far more than
-    agreeing on a common one.
-    """
+    Each statistic contributes pooled marginal likelihood minus separate, so
+    agreeing on a rare tendency counts for far more than on a common one."""
     if a.hands < MIN_HANDS_FOR_BEHAVIOUR or b.hands < MIN_HANDS_FOR_BEHAVIOUR:
         return None
     regime = a.regime or b.regime
@@ -187,13 +157,9 @@ def behavior_log_bf(a: StatBook, b: StatBook) -> float | None:
 
 
 def suggest_links(store, min_name_score: float = HIGH_NAME_SCORE) -> list[Suggestion]:
-    """Candidate merges, most confident first.
-
-    Name match only, and only at a high bar. Behavioral similarity is not
-    offered: two nits looking alike is not evidence they are one person, and
-    a wrong merge corrupts both profiles. Pairs already marked distinct are
-    skipped. Nothing merges automatically.
-    """
+    """Candidate merges, most confident first. Name match only and at a high
+    bar -- two nits looking alike is not evidence, and a wrong merge corrupts
+    both profiles. Distinct pairs are skipped; nothing merges automatically."""
     players = {int(r["id"]): r for r in store.players()}
     aliases: dict[int, list[str]] = {}
     for row in store.conn.execute("SELECT player_id, name FROM aliases"):
@@ -238,8 +204,7 @@ def matched_only_by_containment(a: str, b: str, bar: float) -> bool:
     """True when a name-plus-suffix match is the *only* thing linking two names.
 
     Those are asked, never applied: the shape that makes ``PlayerA`` and
-    ``PlayerALaptop`` one person makes ``PlayerG`` and ``PlayerG North`` two.
-    """
+    ``PlayerALaptop`` one person makes ``PlayerG`` and ``PlayerG North`` two."""
     na, nb = normalize(a), normalize(b)
     if _containment_score(na, nb) < bar:
         return False
@@ -250,11 +215,8 @@ def matched_only_by_containment(a: str, b: str, bar: float) -> bool:
 
 
 def _name_match_reason(a: str, b: str, score: float) -> str:
-    """Explain the match using the aliases that actually scored, not display names.
-
-    Display names can drift (``PlayerJHusband`` while the only alias is still
-    ``PlayerE``); citing those makes a real same-screen-name hit look fake.
-    """
+    """Explain the match from the aliases that scored, not display names --
+    those drift, and citing one makes a real hit look fake."""
     if a == b:
         return f"both appeared as “{a}”"
     if normalize(a) == normalize(b):
@@ -283,11 +245,8 @@ def _when(entry: dict) -> str:
 
 
 def _distinguish(left: dict, right: dict, overlap: int = 0) -> str:
-    """What separates two accounts wearing the same screen name.
-
-    The name is not evidence here -- both sides show the same string -- so the
-    question has to be answered on account id, volume and when each was seen.
-    """
+    """What separates two accounts wearing the same screen name. The name is
+    not evidence, so: account id, volume, and when each was seen."""
     parts = []
     for side in (left, right):
         bits = [f"account {_short_account(side.get('account'))}"]
@@ -301,24 +260,17 @@ def _distinguish(left: dict, right: dict, overlap: int = 0) -> str:
 
 
 def _combine(name_score: float, log_bf: float | None = None) -> tuple[float, str]:
-    """Turn a name score into a probability and a one-line reason.
-
-    ``log_bf`` is accepted for callers that still compute it, but merge
-    suggestions are name-only — play-style agreement is not a reason to merge.
-    """
+    """A name score as a probability and a one-line reason. ``log_bf`` is
+    accepted for callers that compute it, but suggestions are name-only."""
     name_odds = min(3.0, max(-2.0, 8.0 * (name_score - 0.75)))
     confidence = 1.0 / (1.0 + math.exp(-(name_odds + (log_bf or 0.0))))
     return confidence, f"names match ({name_score:.0%})"
 
 
-# ---------------------------------------------------------------------------
-# import-time reconciliation
-# ---------------------------------------------------------------------------
-# Two things go wrong when a session is added to a database, and they are
-# opposites. One account id can pick up a new display name, and two account ids
-# can belong to one person. Both are asked about rather than guessed, because a
-# wrong answer in either direction silently corrupts a profile -- and a profile
-# is the whole product.
+# -- import-time reconciliation ------------------------------------------------
+# Two opposite things go wrong when a session is added: one account id picks up
+# a new display name, or two account ids belong to one person. Both are asked
+# rather than guessed -- a wrong answer either way corrupts a profile.
 
 
 @dataclass
@@ -329,8 +281,7 @@ class Question:
     person" leaves a second question unanswered: what to call the result.
     ``auto`` marks matches safe to apply without asking (same account rename,
     or a clear match to somebody already in the database); the UI only prompts
-    for the rest — typically two session accounts that might be one person.
-    """
+    for the rest — typically two session accounts that might be one person."""
 
     id: str
     kind: str                 # "rename" or "alias"
@@ -392,8 +343,7 @@ def _same_name_clusters(incoming: dict, blocked: dict) -> list[list[tuple[str, s
     Splitting is greedy and conservative: an account joins a run only if it
     co-occurred with nothing already in it, so two people who really do share
     a nickname stay in separate runs instead of being chained together by
-    transitivity.
-    """
+    transitivity."""
     from .db import SPURIOUS_OVERLAP
 
     groups: dict[str, list[tuple[str, str]]] = {}
@@ -427,8 +377,7 @@ def _incoming_co_occurrence(hands) -> dict[frozenset, int]:
     A count rather than a flag. Sitting at a table together is normally proof
     of two different people, but a reconnect can leave a stale seat for a hand
     or two, and treating that as proof makes a legitimate merge permanently
-    impossible.
-    """
+    impossible."""
     pairs: dict[frozenset, int] = {}
     for hand in hands:
         accounts = [(hand.site, s.player_id) for s in hand.seats]
@@ -446,8 +395,7 @@ def session_questions(store, hands, min_name_score: float = HIGH_NAME_SCORE) -> 
     marked ``auto``: same person, keep the database's display name. The UI
     applies those silently and only prompts for leftover cases — usually two
     session accounts that might be one person, i.e. net-new identity questions.
-    Alias prompts require a high name match; play style is not considered.
-    """
+    Alias prompts require a high name match; play style is not considered."""
     incoming = _account_index(hands)
     blocked = _incoming_co_occurrence(hands)
     questions: list[Question] = []
@@ -526,7 +474,7 @@ def session_questions(store, hands, min_name_score: float = HIGH_NAME_SCORE) -> 
             names = [left["name"], right["name"]]
         # Two accounts showing the *same* screen name, never dealt in together,
         # is what a reconnect looks like: the site issues a new account id and
-        # the player retypes nothing. Asking "Are Vik and Vik the same person?"
+        # the player retypes nothing. Asking "Are Ghost and Ghost the same person?"
         # gave the reader two identical strings and no way to answer, so say
         # what actually differs and lead with the likely answer. A merge is
         # still the expensive mistake, so the co-occurrence guard above stays

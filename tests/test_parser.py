@@ -90,8 +90,7 @@ def test_dead_button_falls_forward():
 
     Real rooms leave the button on the dead seat and kill the small blind; this
     approximates it by advancing to the next occupied seat, which keeps every
-    positional statistic well defined.
-    """
+    positional statistic well defined."""
     assert positions_for([2, 4, 6], 3) == {4: "BTN", 6: "SB", 2: "BB"}
 
 
@@ -167,8 +166,7 @@ def _straddled_hand():
     """SB, BB, then a straddle from the third seat at twice the big blind.
 
     The shape every straddled hand in a real export has: opcode 6, the seat
-    after the big blind, exactly 2x it.
-    """
+    after the big blind, exactly 2x it."""
     raw = _minimal_hand(straddleSeat=3)
     raw["players"].append({"seat": 3, "id": "c", "name": "C", "stack": 1000})
     raw["events"] = [
@@ -189,8 +187,7 @@ def test_a_straddle_is_read_as_chips_not_just_a_flag():
     `straddleSeat` in the metadata set a flag, but the event carrying the money
     was unrecognised and skipped -- so the pot came up short by the straddle
     while the award did not. Less went in than came out, which cannot happen at
-    a real table, so the hand was decoded as untrustworthy and thrown away.
-    """
+    a real table, so the hand was decoded as untrustworthy and thrown away."""
     from villain.parsers.pokernow import _parse_hand
     hand = _parse_hand(_straddled_hand(), "table")
     assert hand is not None

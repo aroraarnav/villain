@@ -27,8 +27,7 @@ class _Headers:
 
     ``BaseHTTPRequestHandler`` hands the routing an ``email.message.Message``;
     the handler only ever calls ``.get``, so a case-insensitive dict is the
-    whole contract and pulling in the email machinery would be theatre.
-    """
+    whole contract and pulling in the email machinery would be theatre."""
 
     def __init__(self, values: dict[str, str]):
         self._values = {k.lower(): v for k, v in (values or {}).items()}
@@ -43,8 +42,7 @@ class _BridgeHandler(Handler):
     ``BaseHTTPRequestHandler.__init__`` connects to a client and starts
     serving; there is neither here, so it is bypassed and the three attributes
     the routing reads -- ``path``, ``headers``, ``rfile`` -- are set by hand.
-    ``_send`` is captured into a value instead of written to a socket.
-    """
+    ``_send`` is captured into a value instead of written to a socket."""
 
     def __init__(self, method: str, path: str, headers: dict, body: bytes):
         self.command = method
@@ -81,8 +79,7 @@ def dispatch_json(method: str, path: str, body: str = "") -> dict:
 
     Writes need a same-origin ``Host``/``Origin`` to clear the CSRF guard in
     :meth:`Handler.do_POST`; in the browser the origin is the page itself, so
-    the loopback values are both honest and the only ones that make sense.
-    """
+    the loopback values are both honest and the only ones that make sense."""
     raw = body.encode() if isinstance(body, str) else bytes(body or b"")
     headers = {
         "Host": "127.0.0.1",
@@ -113,8 +110,7 @@ def set_progress(hook=None) -> None:
     caller asks for and every request can trigger. The host arms this around a
     call it is willing to show a bar for; :data:`villain.db.PROGRESS_HOOK`
     stays ``None`` the rest of the time, so nothing pays for a reporter nobody
-    is watching.
-    """
+    is watching."""
     from .. import db
     if hook is None:
         db.PROGRESS_HOOK = None
@@ -135,8 +131,7 @@ def build_hero(progress=None) -> dict:
 
     ``progress(done, total, phase)``. A total of zero means this phase has
     nothing honest to count. Walks over hands send a hand count; fitting
-    sends the cross-validation fold count.
-    """
+    sends the cross-validation fold count."""
     from ..db import Store, consume_cache_dirty
     from .heroview import consume_hero_dirty, hero_payload
     from .jsonutil import dumps

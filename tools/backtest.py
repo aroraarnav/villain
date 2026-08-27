@@ -139,8 +139,7 @@ def main(argv: list[str] | None = None) -> int:
     """Walk leaks forward: found early, checked late.
 
     A research instrument, not part of the product. It lives outside the
-    package so it does not ride into the browser inside the wheel.
-    """
+    package so it does not ride into the browser inside the wheel."""
     import argparse
 
     from villain.db import DEFAULT_PATH, Store

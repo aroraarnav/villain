@@ -25,8 +25,7 @@ def equities(hole_cards: list[list[str]], board: list[str], samples: int = 20_00
              rng: np.random.Generator | None = None) -> list[float]:
     """Fractional pot share for each player, ties split.
 
-    ``hole_cards`` is one two-card list per player; ``board`` is 0-5 cards.
-    """
+    ``hole_cards`` is one two-card list per player; ``board`` is 0-5 cards."""
     if len(hole_cards) < 2:
         return [1.0] * len(hole_cards)
     holes = np.array([card_ids(h) for h in hole_cards], dtype=np.int64)   # (P, 2)

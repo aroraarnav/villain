@@ -72,8 +72,7 @@ class StrengthModel:
     def offset(self, player_id: str, street: int, action: str) -> tuple[float, float]:
         """(shrunk residual, rows) for one player on one street x action cell.
 
-        Negative means weaker than the field.
-        """
+        Negative means weaker than the field."""
         return self.residuals.get((player_id, street, action), (0.0, 0.0))
 
     def lines(self, player_id: str) -> list[tuple[int, str, float, float]]:
@@ -106,8 +105,7 @@ def build_dataset(hands: list[Hand], progress=None) -> list[Row]:
     ``progress`` is called as ``progress(done, total)`` every so often. It
     exists because this walk is minutes long on a real database and the caller
     is a browser tab: without it the only honest thing the interface can say is
-    "working", for the whole of it.
-    """
+    "working", for the whole of it."""
     rows: list[Row] = []
     total = len(hands)
     # Every 200 hands, after the work: reporting before decompress/score made
@@ -172,8 +170,7 @@ def fit(rows: list[Row], random_state: int = 0, progress=None) -> StrengthModel:
 
     ``progress(done, total)`` counts cross-validation folds plus the final
     fit. Those are the steps that take the time; inventing a hand count for
-    them would be a bar that moves for a reason the work does not share.
-    """
+    them would be a bar that moves for a reason the work does not share."""
     if len(rows) < MIN_ROWS:
         raise NotEnoughData(
             f"need {MIN_ROWS} labeled rows to fit a strength model, have {len(rows)}; "
@@ -296,12 +293,9 @@ def strength_by_street(hand: Hand, known: dict) -> dict[tuple[int, Street], floa
     Measured against every holding the board allows, because "top pair" means
     something different on a dry board than on a four-flush one.
 
-    Public because :mod:`villain.hero` needs the same calculation for hero's
-    folds, which this module's own dataset deliberately excludes ("a folded
-    hand has no strength worth predicting" is true when the strength has to
-    be inferred from betting patterns; it is false when the hand is already
-    known).
-    """
+    Public because :mod:`villain.hero` needs it for hero's folds, which this
+    module's dataset excludes -- a folded hand has no strength worth inferring
+    from betting patterns, but hero's is already known."""
     # Pure in (board, known holes, which streets were reached): the same board
     # is scored once, not once per hero feature. Five features each walk hero's
     # hands calling this, so without the cache the ~1,100-holding universe for

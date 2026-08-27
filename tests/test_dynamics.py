@@ -56,8 +56,7 @@ def test_the_baseline_excludes_you():
     Pooled is 45/100 and the slice is 8/40, which leaves 37/60 -- about 62% --
     against everybody else. Reading the slice against the 45% total instead
     would compare a number with something that contains it, and understate
-    every difference exactly when the sample is big enough to be worth having.
-    """
+    every difference exactly when the sample is big enough to be worth having."""
     found = one({"6max": book("6max", {
         STAT: (45, 100),
         VS_HERO + STAT: (8, 40),
@@ -72,8 +71,7 @@ def test_no_baseline_when_you_are_the_only_opponent():
 
     Every decision he made was against you, so "against you" and "in general"
     are the same hands and their difference is a number subtracted from
-    itself.
-    """
+    itself."""
     assert adjustments({"hu": book("hu", {
         STAT: (40, 80),
         VS_HERO + STAT: (40, 80),
@@ -149,8 +147,7 @@ def test_a_table_size_difference_is_not_an_adjustment():
     games -- and you have only played him heads-up. Pooling the raw counts
     would report that he folds 30 points more against you. Measuring each
     regime's slice against *that regime's* baseline leaves nothing, which is
-    correct: he is not doing anything to you, he is playing a shorter table.
-    """
+    correct: he is not doing anything to you, he is playing a shorter table."""
     found = adjustments({
         "6max": book("6max", {STAT: (40, 100)}, hands=300),
         "hu": book("hu", {STAT: (42, 60), VS_HERO + STAT: (21, 30)}, hands=100),

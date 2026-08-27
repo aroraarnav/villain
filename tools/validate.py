@@ -62,8 +62,7 @@ def _halves(store, player_id: int):
     Interleaved rather than cut down the middle, so a player who drifts across
     sessions is not scored on the drift. Splitting the *counts* instead would
     be far cheaper and completely useless: both halves would carry identical
-    rates and agree with each other by construction.
-    """
+    rates and agree with each other by construction."""
     from villain.features import record_hands
     hands = store.player_hands(player_id)
     if len(hands) < 2 * MIN_HALF_HANDS:
@@ -101,8 +100,7 @@ def _best_supported(profile) -> str:
 
     Fixing it needs a target that does not consult the thing being tuned --
     the raw counts against a fixed reference, or a held-out family of features
-    scored on the other half.
-    """
+    scored on the other half."""
     best, best_ll = None, -math.inf
     for arch in ARCHETYPES:
         ll = 0.0
@@ -129,8 +127,7 @@ def predictive_loss(train, test) -> tuple[float, float]:
 
     Returns ``(negative log likelihood, opportunities)`` so the caller can
     weight per opportunity rather than per player; a player with ten times the
-    data should not count ten times as much toward a mean.
-    """
+    data should not count ten times as much toward a mean."""
     _label, _confidence, mix = match(train)
     weights = [(ARCHETYPE_BY_NAME[name], w) for name, w in mix if w > 1e-4]
     if not weights:
@@ -190,8 +187,7 @@ def main(argv: list[str] | None = None) -> int:
     A research instrument, not part of the product: it answers "is the
     labelling any good", which is a question about the tool rather than about
     a player. It lives outside the package so it does not ride into the
-    browser inside the wheel.
-    """
+    browser inside the wheel."""
     import argparse
 
     from villain.db import DEFAULT_PATH, Store

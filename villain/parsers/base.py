@@ -49,8 +49,7 @@ def parse_paths(paths: Iterable[Path]) -> Iterator[tuple[Path, list[Hand]]]:
     """Walk files and directories, yielding (path, hands) for what parses.
 
     Files that no parser claims are skipped silently -- an export directory is
-    usually full of unrelated things.
-    """
+    usually full of unrelated things."""
     for raw in paths:
         p = Path(raw)
         files = sorted(f for f in p.rglob("*") if f.is_file()) if p.is_dir() else [p]

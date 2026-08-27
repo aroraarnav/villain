@@ -61,8 +61,7 @@ def test_heads_up_the_slice_is_the_whole_counter(hands, hero):
     """With one opponent every decision is against them, so the two agree.
 
     The sharpest check available on the counterparty logic: any decision
-    credited to the wrong player shows up here as a mismatch.
-    """
+    credited to the wrong player shows up here as a mismatch."""
     hu = [h for h in hands
           if regime_of(len(h.seats)) == "hu"
           and any(s.player_id == hero for s in h.seats)]
@@ -125,12 +124,9 @@ def test_the_unified_book_drops_them_rather_than_translating(books):
             assert not [s for s in unified.stats if s.startswith(VS_HERO)]
 
 
-def test_the_prior_fit_never_sees_them(tmp_path, hands):
-    from villain.db import Store
+def test_the_prior_fit_never_sees_them(seeded):
 
-    with Store(tmp_path / "v.db") as store:
-        store.add_hands(hands)
-        samples = store.population_samples()
+    samples = seeded.population_samples()
     assert samples, "fixture should produce population samples"
     for _regime, stats in samples.items():
         assert not [s for s in stats if s.startswith(VS_HERO)]

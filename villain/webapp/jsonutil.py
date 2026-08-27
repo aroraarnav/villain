@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import fields, is_dataclass
 from typing import Any
 
 
@@ -26,11 +27,33 @@ def encode(payload: Any) -> bytes:
     return dumps(payload).encode()
 
 
+def as_json(obj: Any, *derived: str) -> dict:
+    """A dataclass as a dict, plus any derived properties named in ``derived``.
+
+    The payload builders used to write the field list out by hand -- eighteen
+    ``"n": cell.n`` pairs for one timing cell. The cost is not the typing: a
+    field added to the dataclass is simply absent from the payload, with
+    nothing failing on either side, so it is found when somebody notices the
+    UI has been rendering ``undefined``. Properties are named explicitly
+    because most of them are prose or formatting the browser does not want."""
+    if not is_dataclass(obj):
+        raise TypeError(f"{type(obj).__name__} is not a dataclass")
+    out = {f.name: getattr(obj, f.name) for f in fields(obj)}
+    out.update({name: getattr(obj, name) for name in derived})
+    return out
+
+
 def _clean(obj: Any) -> Any:
     if obj is None or isinstance(obj, (str, bool, int)):
         return obj
     if isinstance(obj, float):
-        return obj if math.isfinite(obj) else None
+        # Trimmed here so no payload has to. Nothing the browser shows is read
+        # past four decimals -- every rate is rendered as a percentage and every
+        # bb figure to one or two places -- and 92.86041666666667 down a column
+        # of sample sizes was noise in the wire format as well as on screen.
+        # A round() left in a payload builder is therefore a display decision
+        # (`opps` to one place, say), not noise-trimming.
+        return round(obj, 4) if math.isfinite(obj) else None
     if isinstance(obj, dict):
         return {k: _clean(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):

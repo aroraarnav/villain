@@ -99,8 +99,7 @@ class Profile:
         somebody whose frequencies merely look tight.
 
         Measured against one fixed bar rather than each player's own faced sizes;
-        pricing it per-player inverts the signal. docs/decisions.md.
-        """
+        pricing it per-player inverts the signal. docs/decisions.md."""
         errors = []
         for street in ("flop", "turn", "river"):
             est = self.stats.get(f"fold_vs_bet:{street}")
@@ -126,9 +125,31 @@ class Profile:
         parts = [f"{n} {REGIME_LABELS.get(r, r)}" for r, n in self.contributions.items()]
         return ", ".join(parts)
 
+    # Reading a measurement: see the module-level `rate`, `rate_chain`,
+    # `sampled`, `size`, `size_chain` and `size_sd` below. They are functions
+    # rather than methods only because the bot policy is driven by test
+    # doubles and by sim.Villain wrappers as well as by a real Profile, and
+    # all any of them carry is a `stats` and a `means` mapping.
+    def rate(self, stat, default=None, min_opps=0.0):
+        return rate(self, stat, default, min_opps)
+
+    def rate_chain(self, keys, default=None, min_opps=0.0):
+        return rate_chain(self, keys, default, min_opps)
+
+    def sampled(self, stat, min_opps=0.0) -> bool:
+        return sampled(self, stat, min_opps)
+
+    def size(self, key, default=None, min_n=0.0):
+        return size(self, key, default, min_n)
+
+    def size_chain(self, keys, default=None, min_n=0.0):
+        return size_chain(self, keys, default, min_n)
+
+    def size_sd(self, key, min_n=0.0):
+        return size_sd(self, key, min_n)
+
     def get(self, stat: str) -> float | None:
-        e = self.stats.get(stat)
-        return e.value if e else None
+        return self.rate(stat)
 
     def opps(self, stat: str) -> float:
         e = self.stats.get(stat)
@@ -162,8 +183,7 @@ def build_profile(book: StatBook, others: dict[str, StatBook] | None = None,
 
     ``others`` is the same player's books in other regimes, used as a personal
     prior. ``priors`` overrides the population defaults, which is how
-    empirically fitted priors from the database get used.
-    """
+    empirically fitted priors from the database get used."""
     reg = book.regime or regime(book.mean("table_size") or 6.0)
     others = {r: b for r, b in (others or {}).items() if r != reg and b.hands > 0}
     priors = priors or {}
@@ -233,8 +253,7 @@ def build_profiles(by_regime: dict[str, StatBook], min_hands: int = 1,
     """One profile per regime the player has been seen in, busiest first.
 
     Each book is shrunk toward *that* table's fitted prior, never the busiest
-    regime's. docs/decisions.md.
-    """
+    regime's. docs/decisions.md."""
     profiles = []
     for reg, book in by_regime.items():
         if book.hands < min_hands:
@@ -243,6 +262,71 @@ def build_profiles(by_regime: dict[str, StatBook], min_hands: int = 1,
         profiles.append(build_profile(book, others=by_regime, priors=blob))
     profiles.sort(key=lambda p: -p.hands)
     return profiles
+
+
+# -- reading a measurement, with the sample bar that makes it a read -----------
+# Every consumer of a profile asks the same question -- "this rate, but only
+# if enough of it was actually observed" -- and each had written its own
+# answer: nine helpers in botplay, one in sim, and an inline
+# ``est is None or est.opps < N`` in exploits, dynamics and timing. They
+# disagreed on the bar (8, 12, 15, 20, MIN_OPPS), which is a modeling
+# decision that had ended up hiding inside a utility. The bar stays the
+# caller's to choose; the reading does not.
+#
+# These take any object carrying a ``stats``/``means`` mapping, and tolerate
+# None: the hero seat in the simulator has no profile at all, and the bot
+# policy is exercised by test doubles that are not Profiles.
+
+
+def rate(profile, stat: str, default=None, min_opps: float = 0.0):
+    """This frequency, or ``default`` when it is thinner than ``min_opps``."""
+    est = (getattr(profile, "stats", None) or {}).get(stat)
+    return est.value if est is not None and est.opps >= min_opps else default
+
+
+def rate_chain(profile, keys, default=None, min_opps: float = 0.0):
+    """First key with enough sample, else ``default``.
+
+    Position and stack splits are real and measured, but thin. A missing or
+    4-hand ``three_bet:UTG`` must not become the policy -- that is how a
+    pooled 8% turns into a 50% 3-bet off one hand."""
+    for key in keys:
+        if key:
+            hit = rate(profile, key, None, min_opps)
+            if hit is not None:
+                return hit
+    return default
+
+
+def sampled(profile, stat: str, min_opps: float = 0.0) -> bool:
+    """Whether this key is a real number, not a prior we would be overriding."""
+    est = (getattr(profile, "stats", None) or {}).get(stat)
+    return est is not None and est.opps >= min_opps
+
+
+#: ``means`` stores a Meter as three flat keys -- ``k``, ``k#n``, ``k#sd`` --
+#: so every reader had to know the sidecar convention. These three are the
+#: only places that should.
+def size(profile, key: str, default=None, min_n: float = 0.0):
+    """A measured size, used only when it has sample behind it."""
+    means = getattr(profile, "means", None) or {}
+    value = means.get(key)
+    return value if value is not None and means.get(f"{key}#n", 0.0) >= min_n else default
+
+
+def size_chain(profile, keys, default=None, min_n: float = 0.0):
+    for key in keys:
+        if key:
+            hit = size(profile, key, None, min_n)
+            if hit is not None:
+                return hit
+    return default
+
+
+def size_sd(profile, key: str, min_n: float = 0.0):
+    """Measured spread of a size key, or None when the sample is a point."""
+    means = getattr(profile, "means", None) or {}
+    return None if means.get(f"{key}#n", 0.0) < min_n else means.get(f"{key}#sd")
 
 
 def merge_books(by_regime: dict[str, StatBook]) -> StatBook:
@@ -258,9 +342,7 @@ def evidence(profile: Profile) -> list[float]:
     return [profile.stats[f].weight if f in profile.stats else 0.0 for f in PROFILE_FEATURES]
 
 
-# ---------------------------------------------------------------------------
-# one player, one profile
-# ---------------------------------------------------------------------------
+# -- one player, one profile ---------------------------------------------------
 # Splitting statistics by table size is a statistical necessity and a
 # presentational disaster. It is necessary because 55% VPIP is tight heads-up
 # and reckless at a full ring, so pooling the raw counts produces a number that
@@ -372,8 +454,7 @@ def _translate_rate(stat: str, ratio: Ratio, source: str, target: str,
     """Re-express a rate measured in one regime on another regime's scale.
 
     Shrunk first, and against the fitted field rather than the built-in one --
-    both of which are load bearing. docs/decisions.md.
-    """
+    both of which are load bearing. docs/decisions.md."""
     mean, strength = _pop_mean_strength(stat, source, populations)
     shrunk = shrink(ratio.hits, ratio.opps, mean, strength).value
     source_pop = mean

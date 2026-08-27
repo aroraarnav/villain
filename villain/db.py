@@ -137,30 +137,22 @@ DEFAULT_PATH = Path.home() / ".villain" / "villain.db"
 SPURIOUS_OVERLAP = 10
 
 #: Feature / display-stat definition stamp. Bump when existing databases need
-#: a rebuild to grow new counters or fix wrong ones.
-#:
-#: The rebuild runs inline inside ``Store()``, and the web layer opens a
-#: ``Store`` per request, so on a real database (71k hands, about a minute)
-#: the next page waits for the whole thing. That is only acceptable once: the
-#: stamp has to survive the request that wrote it, or every later open does
-#: the minute again. See :data:`PROGRESS_HOOK` and :func:`consume_cache_dirty`.
+#: a rebuild. It runs inline inside ``Store()`` and the web layer opens one per
+#: request, so a 71k-hand database makes the next page wait about a minute --
+#: acceptable once, so the stamp must survive the request that wrote it. See
+#: :data:`PROGRESS_HOOK` and :func:`consume_cache_dirty`.
 DEFINITIONS_VERSION = "2026-08-24.sim-plays-the-rest-of-the-book"
 
-#: Set by a host that can show a progress bar. Called as
-#: ``hook(done, total, phase)`` while a rebuild works; ``total`` of zero means
-#: the phase cannot be counted, only reported as still going.
-#:
-#: A module-level hook rather than a parameter because the rebuild that needs
-#: it is the one nobody asked for: the migration inside ``Store()``, reached
-#: from any of seventeen request handlers. Threading an argument through all
-#: of them to reach one automatic call is how that migration would stay the
-#: single path with no feedback.
+#: Set by a host that can show a progress bar: ``hook(done, total, phase)``,
+#: where ``total`` of zero means the phase cannot be counted. Module-level
+#: rather than a parameter because the rebuild that needs it is the migration
+#: inside ``Store()``, reached from seventeen handlers that would all have to
+#: thread it through.
 PROGRESS_HOOK = None
 
-#: True after ``_ensure_definitions`` rebuilt books and the host has not yet
-#: been told the file changed. The hosted page keys its upload off ``wrote``,
-#: which is a property of the *route*, so a GET that migrated looked like a
-#: read -- the stamp stayed in this process, the next visit rebuilt 71k hands.
+#: True after ``_ensure_definitions`` rebuilt books and the host has not been
+#: told. The hosted page keys its upload off ``wrote``, a property of the
+#: route, so a GET that migrated reads as a read and the stamp never lands.
 _CACHE_DIRTY = False
 
 #: Two request threads can both see a stale stamp and each start a full
@@ -184,10 +176,10 @@ def _report(done: int, total: int, phase: str) -> None:
         pass                      # a broken reporter must not break a rebuild
 
 
-#: Prefix for a seat whose account resolves to no player -- the person was
-#: deleted, but the hand they sat in is still the source of truth for everyone
-#: else at that table. A site account can be any string, so the marker has to be
-#: something a real (integer) player id can never start with.
+#: Prefix for a seat whose account resolves to no player: they were deleted,
+#: but the hand is still evidence for everyone else at the table. A site
+#: account is any string, so the marker must be one no integer id can start
+#: with.
 UNATTRIBUTED = "?"
 
 
@@ -234,11 +226,9 @@ class Store:
         self.conn = sqlite3.connect(self.path, timeout=30)
         self.conn.row_factory = sqlite3.Row
         # WAL lets the CLI and UI read while the other writes; without it a
-        # concurrent open surfaces as a bare "database is locked" 500. Skip it
-        # in the browser: the hosted app copies one file (``villain.db``), and
-        # a WAL left beside it is a second file nobody uploads -- so the
-        # definitions stamp from a GET never reached IndexedDB and the next
-        # visit rebuilt every hand again.
+        # concurrent open is a bare "database is locked" 500. Skipped in the
+        # browser, which copies one file: a WAL beside it is a second file
+        # nobody uploads, so the stamp never lands and every visit rebuilds.
         if sys.platform != "emscripten":
             self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA busy_timeout=5000")
@@ -297,40 +287,31 @@ class Store:
             if n_hands:
                 self.rebuild()
                 rebuilt = True
-            # Stamp before the prior fit, and commit it: a fit that throws must
-            # not leave the version unwritten, or the next Store() rebuilds the
-            # whole database again -- a minute, every request, forever.
+            # Stamp before the fit and commit it: a fit that throws must not
+            # leave the version unwritten, or every later Store() rebuilds.
             self.conn.execute(
                 "INSERT OR REPLACE INTO meta (key, value) VALUES ('definitions_version', ?)",
                 (DEFINITIONS_VERSION,))
             self.conn.commit()
             if rebuilt:
                 _CACHE_DIRTY = True
-                # The fitted population is a cache too, and it was not covered
-                # here. A definitions bump that adds a feature refreshed the
-                # stat books but left the priors without it, so the new feature
-                # silently fell back to the built-in online default -- measuring
-                # a home game against a field it does not play in. Adding
-                # raise_share this way changed 26 of 68 real labels before
-                # anyone ran `villain fit`. Refitting alone is enough: the
-                # prior is applied when a profile is read, not stored in the
-                # books, so no second rebuild is needed.
+                # The fitted population is a cache too. A definitions bump
+                # that refreshed the books but not the priors left the new
+                # feature on the built-in online default -- a home game
+                # measured against a field it does not play in, which moved 26
+                # of 68 real labels. Refitting alone is enough: the prior is
+                # applied when a profile is read, not stored in the books.
                 try:
                     self.fit_priors()
                 except Exception:
                     pass              # books and stamp are current; do not loop
 
     def _repair_distinct_pairs(self) -> None:
-        """Restore the ``a < b`` invariant that a past merge could break.
+        """Restore the ``a < b`` invariant a bare UPDATE could break.
 
-        Earlier versions re-pointed these rows with a bare UPDATE, which could
-        leave ``a > b``. Such a row is invisible to :meth:`shared_hands`, which
-        looks the pair up sorted -- so a constraint saying two accounts were
-        dealt in together silently stopped applying, and the merge it was there
-        to prevent became possible. Rows left pointing at a player that no
-        longer exists go too; they can never match anything and only confuse a
-        later repair.
-        """
+        An inverted row is invisible to :meth:`shared_hands`, which looks the
+        pair up sorted, so the constraint silently stops applying and the merge
+        it prevents becomes possible. Rows pointing at a deleted player go too."""
         live = {r["id"] for r in self.conn.execute("SELECT id FROM players")}
         rows = self.conn.execute("SELECT a, b, hands FROM distinct_pairs").fetchall()
         fixed: dict[tuple[int, int], int] = {}
@@ -349,9 +330,8 @@ class Store:
             [(a, b, n) for (a, b), n in fixed.items()])
 
     def close(self) -> None:
-        # The .db file is what we copy, export, and (in the browser) upload.
-        # WAL left sitting beside it is a second file nobody copies, so a
-        # checkpoint here is what makes the one file actually complete.
+        # The .db file is what gets copied, exported and uploaded; a WAL
+        # beside it is a second file nobody copies.
         try:
             self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         except sqlite3.Error:
@@ -362,9 +342,8 @@ class Store:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
-        # Roll back on the way out of a failed block. Committing regardless
-        # meant a parse failure halfway through ``villain import`` left the
-        # files before it, and half of the one that broke, permanently stored.
+        # Roll back out of a failed block: committing regardless leaves a
+        # half-imported file permanently stored.
         if exc_type is None:
             self.conn.commit()
         else:
@@ -378,8 +357,7 @@ class Store:
         """Internal player id for a site account, creating one if needed.
 
         ``alias_key`` overrides the storage key, which is how a shared account
-        id gets split into two identities.
-        """
+        id gets split into two identities."""
         key = alias_key or account
         row = self.conn.execute(
             "SELECT player_id FROM aliases WHERE site = ? AND account = ?",
@@ -425,8 +403,7 @@ class Store:
         callers merging many accounts at once. One rebuild re-extracts every
         hand the player appears in, so doing it per link made a 36-account
         reconnect run re-read the same 7,000 hands thirty-five times; the
-        caller is expected to rebuild once when it is done.
-        """
+        caller is expected to rebuild once when it is done."""
         if keep == absorb:
             return
         overlap = self.shared_hands(keep, absorb)
@@ -451,15 +428,13 @@ class Store:
             self.conn.execute(f"DELETE FROM {table} WHERE player_id IN (?, ?)",
                               (keep, absorb))
         self.conn.execute("DELETE FROM players WHERE id = ?", (absorb,))
-        # Inherit the absorbed player's distinctness constraints.
         # Re-point every constraint the absorbed player carried onto ``keep``.
-        # A bare UPDATE cannot do this: the table's whole contract is that ``a
-        # < b`` (mark_distinct inserts sorted, shared_hands looks up sorted),
-        # and renaming one column of a sorted pair can invert it. An inverted
-        # row is invisible to shared_hands, which silently drops the constraint
-        # -- and that is exactly how two accounts dealt into the same hand
-        # became mergeable. UPDATE OR IGNORE also discarded, rather than
-        # summed, the overlap when both players already had a row.
+        # A bare UPDATE cannot: the table's contract is ``a < b`` (inserted
+        # sorted, looked up sorted), and renaming one column of a sorted pair
+        # can invert it. An inverted row is invisible to shared_hands, which
+        # silently drops the constraint -- two accounts dealt into the same
+        # hand become mergeable. UPDATE OR IGNORE also discards, rather than
+        # sums, the overlap when both players already had a row.
         rows = self.conn.execute(
             "SELECT a, b, hands FROM distinct_pairs WHERE a = ? OR b = ?",
             (absorb, absorb)).fetchall()
@@ -486,8 +461,7 @@ class Store:
 
         Merges used to be one-way; undoing a bad link meant deleting the
         database. The hands stay put — only the alias pointer moves — then both
-        profiles are rebuilt from the stored hand log.
-        """
+        profiles are rebuilt from the stored hand log."""
         row = self.conn.execute(
             "SELECT name FROM aliases WHERE site = ? AND account = ? AND player_id = ?",
             (site, account, player_id)).fetchone()
@@ -554,13 +528,10 @@ class Store:
         declared to be a *different* person from whoever already owns that
         account id.
 
-        ``defer_rebuild`` records the players this batch touched and returns
-        without rebuilding, leaving the caller to call :meth:`rebuild_pending`
-        once. A rebuild costs a pass over every hand those players appear in,
-        which on a real database is most of it -- so doing one per file turned
-        an import of N files into N full rebuilds. Importing a directory is the
-        normal case, not the exception.
-        """
+        ``defer_rebuild`` records the players touched and returns, leaving the
+        caller to call :meth:`rebuild_pending` once -- a rebuild passes over
+        every hand those players appear in, so one per file makes an N-file
+        import N full rebuilds, and a directory is the normal case."""
         report = report or ImportReport()
         fresh: list[Hand] = []
         for hand in hands:
@@ -611,12 +582,9 @@ class Store:
         # the difference of two counts gives exactly.
         before_all = self.conn.execute("SELECT COUNT(*) c FROM players").fetchone()["c"]
 
-        # Accumulate in memory and write once. Per-seat and per-hand statements
-        # meant roughly two million writes for an 80k-hand import -- an alias
-        # UPDATE for every seat of every hand, and a distinct_pairs upsert for
-        # every *pair* of seats -- each one walking an index that grows as it
-        # goes. The totals are the same either way; only the number of round
-        # trips to SQLite changes, and that was the entire cost.
+        # Accumulate in memory and write once. Per-seat statements meant ~2M
+        # writes for an 80k-hand import, each walking a growing index. Same
+        # totals either way; only the round trips to SQLite change.
         known: dict[tuple[str, str], int] = {}
         alias_seen: dict[tuple[str, str], tuple[int, int, str]] = {}
         pair_counts: dict[tuple[int, int], int] = {}
@@ -665,8 +633,7 @@ class Store:
         merge must not rewrite what was recorded, and a test enforces it. Any
         caller that wants to line these up with per-player statistics has to
         resolve the ids itself -- :meth:`player_hands` does, and anything
-        joining hands to a player id should follow it rather than this.
-        """
+        joining hands to a player id should follow it rather than this."""
         if player_id is None:
             rows = self.conn.execute(
                 "SELECT payload FROM hands ORDER BY started_at").fetchall()
@@ -691,8 +658,7 @@ class Store:
 
         When ``only`` is set, hands that never seat those players are skipped so
         a single-player rebuild (e.g. after a merge) does not rescan the whole
-        database through the feature pipeline.
-        """
+        database through the feature pipeline."""
         alias_rows = list(self.conn.execute(
             "SELECT site, account, player_id FROM aliases"))
         alias_map = {(r["site"], r["account"]): int(r["player_id"]) for r in alias_rows}
@@ -703,8 +669,7 @@ class Store:
             Order matters: ``"<account>#<name>"`` is the more specific claim.
             Checking the bare account first would hand every split hand back to
             whoever owned the account originally, which is exactly the merge
-            the user declined.
-            """
+            the user declined."""
             hit = alias_map.get((site, split_key(account, name)))
             if hit is not None:
                 return hit
@@ -733,11 +698,10 @@ class Store:
             }
             if not wanted_ids:
                 return 0
-            # Via a temp table, not an IN clause. A bulk import touches every
-            # player, so the id list is the whole hands table -- and SQLite
-            # caps how many variables one statement may bind, so the IN form
-            # failed outright with "too many SQL variables" on exactly the
-            # large imports that most need the narrowing.
+            # Via a temp table, not an IN clause: a bulk import touches every
+            # player, and SQLite caps bound variables per statement, so IN
+            # fails with "too many SQL variables" on exactly the large imports
+            # that most need the narrowing.
             self.conn.execute("DROP TABLE IF EXISTS temp.rebuild_ids")
             self.conn.execute(
                 "CREATE TEMP TABLE rebuild_ids (hand_id TEXT PRIMARY KEY)")
@@ -747,12 +711,10 @@ class Store:
             query = ("SELECT h.site, h.payload FROM hands h"
                      " JOIN temp.rebuild_ids r ON r.hand_id = h.hand_id"
                      " ORDER BY h.started_at")
-        # Two phases worth reporting, because they are the two that take the
-        # time: decoding every stored hand, then walking them for features.
-        # Counted in hands rather than percent so the bar cannot claim a
-        # fraction the work does not have -- and counted against the narrowed
-        # set when ``only`` is given, or a single-player rebuild reports
-        # itself against the whole database.
+        # The two phases that take the time: decoding every stored hand, then
+        # walking them for features. Counted in hands rather than percent so
+        # the bar cannot claim a fraction the work does not have, and against
+        # the narrowed set when ``only`` is given.
         n_total = (len(wanted_ids) if wanted_keys is not None
                    else self.conn.execute(
                        "SELECT COUNT(*) AS c FROM hands").fetchone()["c"])
@@ -766,14 +728,12 @@ class Store:
             for seat in hand.seats:
                 pid = resolve(hand.site, seat.player_id, seat.name)
                 if pid is None:
-                    # A seat whose account maps to nobody -- the player it
-                    # belonged to was deleted. It has to stay in the hand:
-                    # everybody else's read depends on how many were dealt in
-                    # and what this seat did. It just gets booked to nobody, so
-                    # it is keyed with a prefix no player id can collide with
-                    # and dropped below. Leaving the raw account here instead
-                    # booked stats under a site account string and then blew up
-                    # on int() at the write.
+                    # A seat whose account maps to nobody: its player was
+                    # deleted. It stays in the hand -- everybody else's read
+                    # depends on how many were dealt in and what it did -- but
+                    # is booked to nobody, under a prefix no player id can
+                    # collide with, and dropped below. The raw account instead
+                    # books stats under a site string and fails int() on write.
                     seat.player_id = UNATTRIBUTED + str(seat.player_id)
                     continue
                 names[str(pid)] = seat.name or names.get(str(pid), "")
@@ -827,8 +787,7 @@ class Store:
         database full of hands that every profile query reads as "no such
         player". That rendered as an empty roster with no error at all, which
         is the worst way for it to present: indistinguishable from a database
-        nobody has imported into yet. Callers surface this instead of guessing.
-        """
+        nobody has imported into yet. Callers surface this instead of guessing."""
         hands = self.conn.execute("SELECT COUNT(*) c FROM hands").fetchone()["c"]
         if not hands:
             return 0
@@ -861,37 +820,55 @@ class Store:
                 book.meters[row["stat"]] = Meter(row["n"], row["total"], row["sumsq"])
         return out
 
-    def population_samples(self, stat_filter=None) -> dict[str, dict[str, list[tuple[float, float]]]]:
-        """Every player's (hits, opps) per stat, per regime -- input to a prior fit."""
+    #: Counters that describe a seat or a raw action rather than a decision,
+    #: plus the against-you slices. A ``vs:`` counter is one player's behavior
+    #: against one opponent, so its spread across players measures the
+    #: opponent as much as the pool.
+    POOL_SKIP = ("seat:", "saw:", "act:", VS_HERO)
+
+    def _ratio_samples(self, min_opps: float = 0.0, skip: tuple[str, ...] = (),
+                       stat_filter=None):
+        """``(regime, stat, hits, opps)`` for every player-stat in the pool.
+
+        Three reducers read this table -- a prior fit, a between-player spread
+        and a normal-range band -- and each used to open its own scan and
+        re-assemble the derived features for itself, staying level with the
+        others by a comment naming them. They had already drifted on which
+        stats they skip. The reducers genuinely differ; the traversal does not.
+
+        Derived features are assembled from raw action counters and never
+        stored as ratio rows, so a scan of this table alone never sees them --
+        which left aggression:* (importance 4.0, the matcher's heaviest block)
+        on the built-in defaults however much pool there was to fit."""
         from .profile import DERIVED
-        out: dict[str, dict[str, list[tuple[float, float]]]] = defaultdict(lambda: defaultdict(list))
         raw: dict[tuple[str, int], dict[str, tuple[float, float]]] = defaultdict(dict)
-        for row in self.conn.execute(
-                "SELECT regime, player_id, stat, hits, opps FROM ratios"):
+        sql = "SELECT regime, player_id, stat, hits, opps FROM ratios"
+        args: tuple = ()
+        if min_opps:
+            sql += " WHERE opps >= ?"
+            args = (min_opps,)
+        for row in self.conn.execute(sql, args):
             raw[(row["regime"], row["player_id"])][row["stat"]] = (row["hits"], row["opps"])
-            # A vs: counter is one player's behavior against one opponent, so
-            # the spread across players measures the opponent as much as the
-            # pool. Fitting a population from it would feed that back into
-            # everyone's shrinkage.
-            if row["stat"].startswith(VS_HERO):
+            if row["stat"].startswith(skip):
                 continue
             if stat_filter and not stat_filter(row["stat"]):
                 continue
-            out[row["regime"]][row["stat"]].append((row["hits"], row["opps"]))
-        # Derived features are assembled from raw action counters and never
-        # stored as their own ratio rows, so a prior fit over the ratios table
-        # never saw them -- leaving aggression:* (combined importance 4.0, the
-        # heaviest block in the matcher) measured against the built-in online
-        # defaults no matter how much of your own pool there was to fit.
+            yield row["regime"], row["stat"], row["hits"], row["opps"]
         for (regime, _pid), stats in raw.items():
             for stat, (num_keys, den_keys) in DERIVED.items():
                 if stat_filter and not stat_filter(stat):
                     continue
                 den = sum(stats.get(k, (0.0, 0.0))[0] for k in den_keys)
-                if den <= 0:
+                if den <= 0 or den < min_opps:
                     continue
-                num = sum(stats.get(k, (0.0, 0.0))[0] for k in num_keys)
-                out[regime][stat].append((num, den))
+                yield regime, stat, sum(stats.get(k, (0.0, 0.0))[0] for k in num_keys), den
+
+    def population_samples(self, stat_filter=None) -> dict[str, dict[str, list[tuple[float, float]]]]:
+        """Every player's (hits, opps) per stat, per regime -- input to a prior fit."""
+        out: dict[str, dict[str, list[tuple[float, float]]]] = defaultdict(lambda: defaultdict(list))
+        for regime, stat, hits, opps in self._ratio_samples(
+                skip=(VS_HERO,), stat_filter=stat_filter):
+            out[regime][stat].append((hits, opps))
         return {r: dict(v) for r, v in out.items()}
 
     # -- sessions ---------------------------------------------------------
@@ -906,8 +883,7 @@ class Store:
 
         Nothing records a session id -- the hands are the source of truth and a
         sitting is just a run of them close together in time. Deriving it means
-        no migration and no second thing to keep correct.
-        """
+        no migration and no second thing to keep correct."""
         rows = list(self.conn.execute(
             "SELECT hand_id, started_at FROM hands ORDER BY started_at"))
         out: list[dict] = []
@@ -957,13 +933,11 @@ class Store:
             for seat in hand.seats:
                 pid = alias_map.get((hand.site, split_key(seat.player_id, seat.name))) \
                     or alias_map.get((hand.site, seat.player_id))
-                # Marked, not left as the raw account -- the same convention
-                # :meth:`rebuild` uses, and for the same reason. Deleting a
-                # player leaves their seats resolving to nobody (the hands
-                # stay; only the aliases go), and a site account string is
-                # indistinguishable from a player id to anything downstream:
-                # ``session_detail`` called int() on one and took the whole
-                # sitting down with it.
+                # Marked, not left as the raw account -- :meth:`rebuild`'s
+                # convention, for its reason. Deleting a player leaves their
+                # seats resolving to nobody, and a site account string is
+                # indistinguishable from a player id downstream, where an
+                # int() on one takes the whole sitting down.
                 seat.player_id = (str(pid) if pid is not None
                                   else UNATTRIBUTED + str(seat.player_id))
             hands.append(hand)
@@ -988,8 +962,7 @@ class Store:
         The baseline is the player's other hands, not this sitting's -- comparing
         a session against a total that contains it shrinks every difference
         toward nothing, and the more of their history this sitting is, the more
-        it hides.
-        """
+        it hides."""
         from .priors import REGIME_LABELS
         books = self.session_books(session["hand_ids"])
         names = {str(r["id"]): r["display_name"] for r in self.players()}
@@ -1069,8 +1042,7 @@ class Store:
         """Variance a *single* player's log-odds carries purely from sampling.
 
         The delta-method variance of ``logit(k/n)`` is ``1 / (n p (1-p))``.
-        Subtracting its average is what turns raw scatter into a spread.
-        """
+        Subtracting its average is what turns raw scatter into a spread."""
         p = min(max(rate, 0.02), 0.98)
         return 1.0 / max(opps * p * (1.0 - p), 1e-9)
 
@@ -1093,42 +1065,18 @@ class Store:
         feature and leaves them looking far more separable than they are,
         which is the same preflop-versus-postflop imbalance this measurement
         exists to remove, reintroduced one level down. Subtract it, and what
-        is left is how much players genuinely differ.
-        """
+        is left is how much players genuinely differ."""
         import math
         import statistics
 
         from .priors import logit
-        from .profile import DERIVED
         lo, hi = self.SPREAD_BOUNDS
         by: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
         noise: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
-        raw: dict[tuple[str, int], dict[str, tuple[float, float]]] = {}
-        for row in self.conn.execute(
-                "SELECT regime, player_id, stat, hits, opps FROM ratios WHERE opps >= 40"):
-            raw.setdefault((row["regime"], row["player_id"]), {})[row["stat"]] = (
-                row["hits"], row["opps"])
-            if row["stat"].startswith(("seat:", "saw:", "act:", VS_HERO)):
-                continue
-            rate = row["hits"] / row["opps"]
-            by[row["regime"]][row["stat"]].append(logit(min(max(rate, 0.005), 0.995)))
-            noise[row["regime"]][row["stat"]].append(
-                self._logit_noise(rate, row["opps"]))
-        # aggression:* is assembled from the raw action counters and never
-        # stored as a ratio row of its own, so scanning this table alone left
-        # it the one feature block with no fitted spread -- and therefore the
-        # one block still measured in the built-in constant, roughly twice the
-        # scatter this pool actually shows. `maniac`, whose entire identity is
-        # aggression, is the archetype that paid for it. Same assembly as
-        # :meth:`_observed_ranges` and :meth:`population_samples`.
-        for (regime, _pid), stats in raw.items():
-            for stat, (num_keys, den_keys) in DERIVED.items():
-                den = sum(stats.get(k, (0.0, 0.0))[0] for k in den_keys)
-                if den < 40:
-                    continue
-                num = sum(stats.get(k, (0.0, 0.0))[0] for k in num_keys)
-                by[regime][stat].append(logit(min(max(num / den, 0.005), 0.995)))
-                noise[regime][stat].append(self._logit_noise(num / den, den))
+        for regime, stat, hits, opps in self._ratio_samples(40, self.POOL_SKIP):
+            rate = hits / opps
+            by[regime][stat].append(logit(min(max(rate, 0.005), 0.995)))
+            noise[regime][stat].append(self._logit_noise(rate, opps))
         out: dict[str, dict[str, float]] = {}
         for regime, stats in by.items():
             for stat, vals in stats.items():
@@ -1145,31 +1093,10 @@ class Store:
 
         Robust percentiles rather than min and max: one player on a thin
         sample should not be able to stretch the band, and the point of the
-        band is to say what is *normal* here, not what is possible.
-        """
-        from .profile import DERIVED
-
-        by: dict[str, dict[str, list[float]]] = {}
-        raw: dict[tuple[str, int], dict[str, tuple[float, float]]] = {}
-        for row in self.conn.execute(
-                "SELECT regime, player_id, stat, hits, opps FROM ratios WHERE opps >= 40"):
-            raw.setdefault((row["regime"], row["player_id"]), {})[row["stat"]] = (
-                row["hits"], row["opps"])
-            if row["stat"].startswith(("seat:", "saw:", "act:", VS_HERO)):
-                continue
-            by.setdefault(row["regime"], {}).setdefault(row["stat"], []).append(
-                row["hits"] / row["opps"])
-        # aggression:* is assembled from raw action counters and never stored
-        # as a ratio of its own, so a band read off this table alone had no
-        # entry for it -- and `maniac`, whose whole identity is aggression,
-        # was the archetype that needed one most.
-        for (regime, _pid), stats in raw.items():
-            for stat, (num_keys, den_keys) in DERIVED.items():
-                den = sum(stats.get(k, (0.0, 0.0))[0] for k in den_keys)
-                if den < 40:
-                    continue
-                num = sum(stats.get(k, (0.0, 0.0))[0] for k in num_keys)
-                by.setdefault(regime, {}).setdefault(stat, []).append(num / den)
+        band is to say what is *normal* here, not what is possible."""
+        by: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+        for regime, stat, hits, opps in self._ratio_samples(40, self.POOL_SKIP):
+            by[regime][stat].append(hits / opps)
         out: dict[str, dict[str, tuple[float, float]]] = {}
         for regime, stats in by.items():
             for stat, vals in stats.items():
@@ -1214,8 +1141,7 @@ class Store:
 
         One dict because it travels as one thing all the way to
         :func:`villain.priors.spread_of`; the prefix keeps the two kinds of
-        entry apart without a second parameter on every call in between.
-        """
+        entry apart without a second parameter on every call in between."""
         out: dict = {}
         for row in self.conn.execute(
                 "SELECT stat, mean, strength, spread, floor, ceiling"
@@ -1255,8 +1181,7 @@ class Store:
         """The single profile for a player, pooled across table sizes.
 
         This is the default everywhere. Splitting by table size is how the
-        statistics stay meaningful, not how anybody wants to read them.
-        """
+        statistics stay meaningful, not how anybody wants to read them."""
         from .profile import build_unified, primary_regime
         books = self.books(player_id)
         if not books:
@@ -1278,8 +1203,7 @@ class Store:
         omitted, every hand -- for callers (like the hand-strength model) that
         need every seat resolved to the id used elsewhere, not just one
         player's. Prefer this over :meth:`stored_hands`, whose ids are the raw
-        site accounts on purpose.
-        """
+        site accounts on purpose."""
         accounts = {
             (r["site"], r["account"]): int(r["player_id"])
             for r in self.conn.execute("SELECT site, account, player_id FROM aliases")
@@ -1292,11 +1216,10 @@ class Store:
         query = "SELECT site, payload FROM hands ORDER BY started_at"
         if player_id is not None:
             # Pick the hand ids out of the seat index first. Asking for one
-            # player used to decompress and parse every hand in the database
-            # and throw almost all of them away -- and `villain validate` does
-            # that once per player, which on this database was eight million
-            # hand parses and eleven minutes. The seat table is small and
-            # uncompressed; `rebuild` has always narrowed this way.
+            # player otherwise decompresses every hand in the database and
+            # throws almost all away -- once per player under `villain
+            # validate`, which was 8M parses and eleven minutes. The seat
+            # table is small and uncompressed; `rebuild` narrows this way.
             mine = {key for key, pid in accounts.items() if pid == player_id}
             wanted = {
                 row["hand_id"]
@@ -1324,11 +1247,9 @@ class Store:
         total = (len(wanted) if player_id is not None else
                  self.conn.execute("SELECT COUNT(*) c FROM hands").fetchone()["c"])
         out = []
-        # Report after the work, not before it. Calling progress at at=0 and
-        # then again at total once the loop returns made a bar that jumped to
-        # full the moment the last row was fetched, while gzip+parse of that
-        # last batch -- and everything the caller does next -- still had to
-        # run. Every 200, after decompressing, tracks the wait itself.
+        # Report after the work, not before it: reporting at 0 and again at
+        # total jumps the bar to full while the last batch's gzip+parse still
+        # has to run. Every 200, after decompressing, tracks the real wait.
         if progress is not None:
             progress(0, total)
         for at, row in enumerate(self.conn.execute(query)):
@@ -1347,20 +1268,14 @@ class Store:
     def delete_player(self, player_id: int) -> dict:
         """Forget one person. Their hands stay exactly where they are.
 
-        A hand belongs to a table, not to a player: five other people sat in it
-        and their samples are built from the same rows. So this deletes the
-        identity and everything derived from it -- the player, the accounts
-        pointing at them, their notes, their books -- and leaves the hand log
-        untouched. Their seats simply stop resolving to anybody.
+        A hand belongs to a table, not a player -- five others sat in it and
+        their samples are the same rows -- so this deletes the identity and
+        everything derived from it and leaves the hand log alone. Their seats
+        stop resolving to anybody, and :meth:`rebuild` returns None for an
+        unknown account, so they do not reappear. Re-importing that account
+        creates a fresh player, which is the right answer.
 
-        That is not a leak. :meth:`rebuild` maps seats through ``aliases`` and
-        returns None for an account it does not know, so a deleted player does
-        not reappear on the next rebuild. Importing hands with that account
-        again *does* create a fresh player, which is the right answer: you told
-        the tool to forget them, not to refuse to ever see them again.
-
-        Raises LookupError if there is no such player.
-        """
+        Raises LookupError if there is no such player."""
         row = self.conn.execute(
             "SELECT display_name FROM players WHERE id = ?", (player_id,)).fetchone()
         if row is None:
@@ -1387,8 +1302,7 @@ class Store:
         There is no undo. Hands are the source of truth for everything else, so
         once they are gone every profile, alias and merge decision goes with
         them -- re-importing the original exports rebuilds the statistics, but
-        not the identity decisions made along the way.
-        """
+        not the identity decisions made along the way."""
         counts = {
             "hands": self.conn.execute("SELECT COUNT(*) c FROM hands").fetchone()["c"],
             "players": self.conn.execute("SELECT COUNT(*) c FROM players").fetchone()["c"],

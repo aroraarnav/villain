@@ -27,6 +27,24 @@ def act(street, seat, kind, amount=0, to_amount=0, pot_before=0, to_call=0,
                   think_ms=think_ms)
 
 
+def blinds(bb=10):
+    """The two forced posts every hand below opens with.
+
+    Named because they are never what a test is about: written out, four of the
+    seven lines of a c-bet fixture were the blinds and the open, and the two
+    lines that made the case were the ones easiest to miss."""
+    return [act(Street.PREFLOP, 1, Act.POST_SB, bb // 2, bb // 2),
+            act(Street.PREFLOP, 2, Act.POST_BB, bb, bb, pot_before=bb // 2)]
+
+
+def srp():
+    """Blinds, then a single-raised pot: seat 1 raises to 30, seat 2 calls."""
+    return blinds() + [
+        act(Street.PREFLOP, 1, Act.RAISE, 25, 30, pot_before=15, to_call=5),
+        act(Street.PREFLOP, 2, Act.CALL, 20, 30, pot_before=40, to_call=20),
+    ]
+
+
 def test_ratio_and_meter_merge_is_additive():
     a, b = Ratio(3, 10), Ratio(2, 5)
     a.merge(b)
@@ -66,8 +84,7 @@ def test_stack_buckets(bb, expected):
 def test_vpip_and_pfr_on_a_known_hand():
     """BTN raises, BB folds: BTN has VPIP and PFR, BB has neither."""
     hand = build_hand([
-        act(Street.PREFLOP, 1, Act.POST_SB, 5, 5),
-        act(Street.PREFLOP, 2, Act.POST_BB, 10, 10, pot_before=5),
+        *blinds(),
         act(Street.PREFLOP, 1, Act.RAISE, 25, 30, pot_before=15, to_call=5),
         act(Street.PREFLOP, 2, Act.FOLD, pot_before=40, to_call=20),
     ])
@@ -85,10 +102,7 @@ def test_vpip_and_pfr_on_a_known_hand():
 def test_cbet_and_fold_to_cbet_denominators():
     """The preflop raiser c-bets; the caller folding counts as fold-to-cbet."""
     hand = build_hand([
-        act(Street.PREFLOP, 1, Act.POST_SB, 5, 5),
-        act(Street.PREFLOP, 2, Act.POST_BB, 10, 10, pot_before=5),
-        act(Street.PREFLOP, 1, Act.RAISE, 25, 30, pot_before=15, to_call=5),
-        act(Street.PREFLOP, 2, Act.CALL, 20, 30, pot_before=40, to_call=20),
+        *srp(),
         act(Street.FLOP, 2, Act.CHECK, pot_before=60),
         act(Street.FLOP, 1, Act.BET, 30, 30, pot_before=60),
         act(Street.FLOP, 2, Act.FOLD, pot_before=90, to_call=30),
@@ -115,13 +129,9 @@ def test_retaking_the_lead_ends_the_delayed_cbet_run():
     fire the river as well"). The flag never cleared, so every later street
     stayed delayed and both cbet:turn and cbet:river lost the opportunity --
     while the other seat was already being booked fold_to_cbet:river against
-    the very same bet.
-    """
+    the very same bet."""
     hand = build_hand([
-        act(Street.PREFLOP, 1, Act.POST_SB, 5, 5),
-        act(Street.PREFLOP, 2, Act.POST_BB, 10, 10, pot_before=5),
-        act(Street.PREFLOP, 1, Act.RAISE, 25, 30, pot_before=15, to_call=5),
-        act(Street.PREFLOP, 2, Act.CALL, 20, 30, pot_before=40, to_call=20),
+        *srp(),
         act(Street.FLOP, 2, Act.CHECK, pot_before=60),
         act(Street.FLOP, 1, Act.CHECK, pot_before=60),
         act(Street.TURN, 2, Act.CHECK, pot_before=60),
@@ -145,10 +155,7 @@ def test_retaking_the_lead_ends_the_delayed_cbet_run():
 def test_a_second_check_with_the_lead_is_still_a_delayed_cbet():
     """The counterpart: never bet, so every later street stays delayed."""
     hand = build_hand([
-        act(Street.PREFLOP, 1, Act.POST_SB, 5, 5),
-        act(Street.PREFLOP, 2, Act.POST_BB, 10, 10, pot_before=5),
-        act(Street.PREFLOP, 1, Act.RAISE, 25, 30, pot_before=15, to_call=5),
-        act(Street.PREFLOP, 2, Act.CALL, 20, 30, pot_before=40, to_call=20),
+        *srp(),
         act(Street.FLOP, 2, Act.CHECK, pot_before=60),
         act(Street.FLOP, 1, Act.CHECK, pot_before=60),
         act(Street.TURN, 2, Act.CHECK, pot_before=60),
@@ -167,10 +174,7 @@ def test_a_second_check_with_the_lead_is_still_a_delayed_cbet():
 def test_fold_vs_raise_is_facing_a_raise_not_a_bet():
     """The original bettor folding to a raise is fold_vs_raise, not fold_vs_bet."""
     hand = build_hand([
-        act(Street.PREFLOP, 1, Act.POST_SB, 5, 5),
-        act(Street.PREFLOP, 2, Act.POST_BB, 10, 10, pot_before=5),
-        act(Street.PREFLOP, 1, Act.RAISE, 25, 30, pot_before=15, to_call=5),
-        act(Street.PREFLOP, 2, Act.CALL, 20, 30, pot_before=40, to_call=20),
+        *srp(),
         act(Street.FLOP, 2, Act.CHECK, pot_before=60),
         act(Street.FLOP, 1, Act.BET, 30, 30, pot_before=60),
         act(Street.FLOP, 2, Act.RAISE, 90, 90, pot_before=90, to_call=30),
@@ -185,8 +189,7 @@ def test_fold_vs_raise_is_facing_a_raise_not_a_bet():
 
 def test_check_raise_requires_a_check_first():
     hand = build_hand([
-        act(Street.PREFLOP, 1, Act.POST_SB, 5, 5),
-        act(Street.PREFLOP, 2, Act.POST_BB, 10, 10, pot_before=5),
+        *blinds(),
         act(Street.PREFLOP, 1, Act.CALL, 5, 10, pot_before=15, to_call=5),
         act(Street.PREFLOP, 2, Act.CHECK, to_amount=10, pot_before=20),
         act(Street.FLOP, 2, Act.CHECK, pot_before=20),
@@ -201,8 +204,7 @@ def test_check_raise_requires_a_check_first():
 
 def test_three_bet_denominator_is_facing_a_raise():
     hand = build_hand([
-        act(Street.PREFLOP, 1, Act.POST_SB, 5, 5),
-        act(Street.PREFLOP, 2, Act.POST_BB, 10, 10, pot_before=5),
+        *blinds(),
         act(Street.PREFLOP, 1, Act.RAISE, 25, 30, pot_before=15, to_call=5),
         act(Street.PREFLOP, 2, Act.RAISE, 80, 90, pot_before=40, to_call=20),
         act(Street.PREFLOP, 1, Act.FOLD, pot_before=130, to_call=60),
@@ -243,11 +245,9 @@ def test_vpip_and_pfr_are_counted_once_per_hand():
 
     Counting each preflop decision separately inflated both numerator and
     denominator, which made samples look larger than they were and quietly
-    raised the confidence attached to every read built on them.
-    """
+    raised the confidence attached to every read built on them."""
     hand = build_hand([
-        act(Street.PREFLOP, 1, Act.POST_SB, 5, 5),
-        act(Street.PREFLOP, 2, Act.POST_BB, 10, 10, pot_before=5),
+        *blinds(),
         act(Street.PREFLOP, 1, Act.CALL, 5, 10, pot_before=15, to_call=5),
         act(Street.PREFLOP, 2, Act.RAISE, 30, 40, pot_before=20, to_call=0),
         act(Street.PREFLOP, 1, Act.CALL, 30, 40, pot_before=50, to_call=30),
@@ -264,8 +264,7 @@ def test_vpip_and_pfr_are_counted_once_per_hand():
 def test_a_player_who_never_acts_gets_no_vpip_opportunity():
     """A big blind that everybody folds to never had a decision to make."""
     hand = build_hand([
-        act(Street.PREFLOP, 1, Act.POST_SB, 5, 5),
-        act(Street.PREFLOP, 2, Act.POST_BB, 10, 10, pot_before=5),
+        *blinds(),
         act(Street.PREFLOP, 1, Act.FOLD, pot_before=15, to_call=5),
     ])
     books = {}
@@ -278,8 +277,7 @@ def test_tank_and_snap_split_by_street():
     from villain.features import SNAP_MS, TANK_MS
 
     hand = build_hand([
-        act(Street.PREFLOP, 1, Act.POST_SB, 5, 5),
-        act(Street.PREFLOP, 2, Act.POST_BB, 10, 10, pot_before=5),
+        *blinds(),
         act(Street.PREFLOP, 1, Act.RAISE, 25, 30, pot_before=15, to_call=5,
             think_ms=SNAP_MS - 100),
         act(Street.PREFLOP, 2, Act.CALL, 20, 30, pot_before=40, to_call=20,
@@ -320,8 +318,7 @@ def test_timing_tells_use_share_and_outcomes_not_folklore():
     # Snap-check flop, then fold the turn bet → fold_next hits.
     for i in range(10):
         hand = build_hand([
-            act(Street.PREFLOP, 1, Act.POST_SB, 5, 5),
-            act(Street.PREFLOP, 2, Act.POST_BB, 10, 10, pot_before=5),
+            *blinds(),
             act(Street.PREFLOP, 1, Act.RAISE, 25, 30, pot_before=15, to_call=5,
                 think_ms=2_000),
             act(Street.PREFLOP, 2, Act.CALL, 20, 30, pot_before=40, to_call=20,
@@ -338,8 +335,7 @@ def test_timing_tells_use_share_and_outcomes_not_folklore():
     # Normal-pace check flop, call the turn → fold_next misses.
     for i in range(10):
         hand = build_hand([
-            act(Street.PREFLOP, 1, Act.POST_SB, 5, 5),
-            act(Street.PREFLOP, 2, Act.POST_BB, 10, 10, pot_before=5),
+            *blinds(),
             act(Street.PREFLOP, 1, Act.RAISE, 25, 30, pot_before=15, to_call=5,
                 think_ms=2_000),
             act(Street.PREFLOP, 2, Act.CALL, 20, 30, pot_before=40, to_call=20,
@@ -375,8 +371,7 @@ def test_aggression_denominator_includes_checks():
     books = {}
     for i, kind in enumerate((Act.CHECK, Act.BET)):
         hand = build_hand([
-            act(Street.PREFLOP, 1, Act.POST_SB, 5, 5),
-            act(Street.PREFLOP, 2, Act.POST_BB, 10, 10, pot_before=5),
+            *blinds(),
             act(Street.PREFLOP, 1, Act.CALL, 5, 10, pot_before=15, to_call=5),
             act(Street.PREFLOP, 2, Act.CHECK, to_amount=10, pot_before=20),
             act(Street.FLOP, 2, Act.CHECK, pot_before=20),
@@ -401,8 +396,7 @@ def test_aggression_denominator_includes_checks():
 def test_fold_vs_bet_counts_once_per_street():
     """Facing bet → raise → facing re-raise → fold is one opportunity for each."""
     hand = build_hand([
-        act(Street.PREFLOP, 1, Act.POST_SB, 5, 5),
-        act(Street.PREFLOP, 2, Act.POST_BB, 10, 10, pot_before=5),
+        *blinds(),
         act(Street.PREFLOP, 1, Act.CALL, 5, 10, pot_before=15, to_call=5),
         act(Street.PREFLOP, 2, Act.CHECK, to_amount=10, pot_before=20),
         act(Street.FLOP, 2, Act.CHECK, pot_before=20),
@@ -423,10 +417,7 @@ def test_fold_vs_bet_counts_once_per_street():
 
 def test_fold_vs_bet_splits_hu_and_position():
     hand = build_hand([
-        act(Street.PREFLOP, 1, Act.POST_SB, 5, 5),
-        act(Street.PREFLOP, 2, Act.POST_BB, 10, 10, pot_before=5),
-        act(Street.PREFLOP, 1, Act.RAISE, 25, 30, pot_before=15, to_call=5),
-        act(Street.PREFLOP, 2, Act.CALL, 20, 30, pot_before=40, to_call=20),
+        *srp(),
         act(Street.FLOP, 2, Act.CHECK, pot_before=60),
         act(Street.FLOP, 1, Act.BET, 30, 30, pot_before=60),
         act(Street.FLOP, 2, Act.FOLD, pot_before=90, to_call=30),
@@ -485,8 +476,7 @@ def test_splitting_the_batch_does_not_change_the_books():
     ``record_hands`` splits the expensive pass across processes on a large
     import. That is only safe because every hand is independent once the pace
     cutoffs are frozen -- this asserts it directly rather than trusting it,
-    by chunking by hand instead of by process.
-    """
+    by chunking by hand instead of by process."""
     from tests.conftest import FIXTURE
     from villain.features import merge_books, record_hand, record_hands
     from villain.parsers import parse_file

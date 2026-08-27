@@ -110,8 +110,7 @@ def import_export(store, path: Path, report=None):
     Duplicate hands and same-person accounts are handled exactly as they are
     for a hand history off disk, because it is the same code doing it. The
     rebuild is deferred to the end: one pass over the merged database rather
-    than one per batch.
-    """
+    than one per batch."""
     from .db import ImportReport
 
     report = report or ImportReport()

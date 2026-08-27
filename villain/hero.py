@@ -42,11 +42,11 @@ HERO_VISIBILITY = 0.90
 MIN_HERO_HANDS = 100
 
 #: Same margin :mod:`villain.exploits` uses before calling a deviation a leak
-#: rather than noise -- consistent standard, not a coincidence. Used by
-#: FoldGrade specifically: folds have a strongly negative mean edge (hero's
-#: folded hands run ~0.26 weaker than the bet they faced, on the live
-#: database), so a loose margin rarely fires by chance. See
-#: MISSED_VALUE_MARGIN for why checks need a different bar.
+#: rather than noise -- consistent standard, not a coincidence. It is the FOLD
+#: bar specifically: folds have a strongly negative mean edge (hero's folded
+#: hands run ~0.26 weaker than the bet they faced, on the live database), so a
+#: loose margin rarely fires by chance. See :class:`GradeKind` for why checks
+#: need a wider one.
 MARGIN = 0.05
 
 RANK_ORDER = "23456789TJQKA"
@@ -61,8 +61,7 @@ def find_hero(store, min_hands: int = MIN_HERO_HANDS, progress=None,
     regardless of outcome rather than almost only at showdown.
 
     ``min_hands`` is overridable for testing against small fixtures; it exists so
-    a villain who showed a few hands in a short sample cannot look like hero.
-    """
+    a villain who showed a few hands in a short sample cannot look like hero."""
     seen: dict[int, int] = {}
     total: dict[int, int] = {}
     # `hands` lets a caller that has already loaded them hand them over. A cold
@@ -130,8 +129,7 @@ def hero_of(hands) -> str | None:
     Resolved from the seat rather than a stored account id, so the answer follows
     a player through renames and merges. Returns ``None`` rather than guessing: a
     wrong answer here does not fail loudly, it quietly relabels one opponent's
-    decisions as your own.
-    """
+    decisions as your own."""
     hands = list(hands)
     stated = Counter(
         hand.seat(hand.hero_seat).player_id
@@ -170,15 +168,12 @@ def texture_label(board: list[str]) -> str:
     """"wet" or "dry" -- a chosen two-way split of :func:`villain.reads.texture`,
     not a derived one. Suited or connected boards carry live draws and are wet.
     Coarse on purpose: a finer split needs more hands per bucket than most
-    players have to spend.
-    """
+    players have to spend."""
     _paired, suited, connected, _high = texture(board)
     return "wet" if (suited or connected) else "dry"
 
 
-# ---------------------------------------------------------------------------
-# preflop range: counted, not modeled
-# ---------------------------------------------------------------------------
+# -- preflop range: counted, not modeled ---------------------------------------
 
 @dataclass
 class PositionRange:
@@ -214,8 +209,7 @@ def preflop_range(hands: list, hero_id: int) -> dict[str, PositionRange]:
     Simplified on purpose: "what did you do with this hand from this seat", not
     split by whether you were opening or responding to a raise. An open-raise
     chart and a vs-raise chart are genuinely different objects, and collapsing
-    them is a real limitation rather than an oversight.
-    """
+    them is a real limitation rather than an oversight."""
     by_position: dict[str, PositionRange] = {}
     for hand in hands:
         seat = next((s for s in hand.seats if s.player_id == str(hero_id)), None)
@@ -248,8 +242,7 @@ def preflop_range(hands: list, hero_id: int) -> dict[str, PositionRange]:
 def combined_grid(ranges: dict[str, PositionRange]) -> dict[str, tuple[int, int]]:
     """Every hand class summed across position: (times played, times dealt).
 
-    The one-chart summary; a real range chart is 13 of these, one per position.
-    """
+    The one-chart summary; a real range chart is 13 of these, one per position."""
     dealt: dict[str, int] = {}
     played: dict[str, int] = {}
     for pos in ranges.values():
@@ -260,9 +253,7 @@ def combined_grid(ranges: dict[str, PositionRange]) -> dict[str, tuple[int, int]
     return {cls: (played.get(cls, 0), n) for cls, n in dealt.items()}
 
 
-# ---------------------------------------------------------------------------
-# fold grades: was this specific fold right, given the hand you actually had
-# ---------------------------------------------------------------------------
+# -- fold grades: was this specific fold right, given the hand you actually had ---
 #
 # Graded against what a bet like this usually represents, not against a
 # random hand. Somebody chose to bet, and a betting range is stronger than
@@ -277,8 +268,7 @@ def fit_population_model(store, progress=None, hands=None) -> StrengthModel:
     hero's folds against what the bet actually represents.
 
     The walk over hands can be counted; fitting the trees cannot, and says so by
-    reporting no total.
-    """
+    reporting no total."""
     if hands is None:
         loading = (lambda done, total: progress(done, total, "loading")) if progress else None
         hands = store.player_hands(progress=loading)
@@ -296,8 +286,7 @@ def _hero_spots(hands: list, hero_id: int, progress=None):
     street. Written out five times that preamble drifted -- the board check, the
     two-card check and the ``str(hero_id)`` comparison are load bearing together,
     and a fix applied to folds but missed on checks silently changes a
-    denominator rather than raising.
-    """
+    denominator rather than raising."""
     total = len(hands)
     every = 200
     if progress is not None:
@@ -313,17 +302,46 @@ def _hero_spots(hands: list, hero_id: int, progress=None):
         progress(total, total)
 
 
+@dataclass(frozen=True)
+class GradeKind:
+    """The whole difference between grading a fold and grading a check.
+
+    Same population model, same "did the hand outrank what this line usually
+    represents" comparison; they were written as two parallel class pairs,
+    which put `edge`, `by_street`, `by_texture` and `worst` in the file twice
+    and left the web layer reading `mistakes`/`missed` off one report or the
+    other through getattr. What actually differs is a bar, a noun for the line
+    being compared against, and whether a price was faced -- so that is what
+    this holds, on the precedent :class:`TellKind` already sets below.
+
+    ``margin`` is not shared. Folds have a strongly negative mean edge, so a
+    tight bar rarely fires on noise; checks measure -0.03 mean against a 0.24
+    stdev, and at 0.05 fully 40% of them cross. 0.20 is roughly the 80th
+    percentile of the real distribution and brings that to 19%."""
+    margin: float
+    line: str                 # "a bet like that one" / "a check on that line"
+    priced: bool              # a fold faces pot odds; a check never does
+
+
+FOLD = GradeKind(margin=MARGIN, line="a bet like that one", priced=True)
+CHECK = GradeKind(margin=0.20, line="a check on that line", priced=False)
+
+
 @dataclass
-class FoldGrade:
+class Grade:
+    kind: GradeKind
     hand_id: str
     street: int
     hole_cards: tuple[str, ...]
     board: list[str]
     strength: float           # hero's percentile on this street, 0-1
-    faced_strength: float     # population model's estimate for a bet like this one
-    required_equity: float    # pot-odds price faced -- context, see `mistake`
+    faced_strength: float     # what the population model expects of this line
     pot_before_bb: float
-    to_call_bb: float
+    #: Pot-odds price faced, and the call it was faced with. Both zero for a
+    #: check, which by definition faces no bet -- which is exactly why the
+    #: two flagging rules collapse into one below.
+    required_equity: float = 0.0
+    to_call_bb: float = 0.0
 
     @property
     def texture(self) -> str:
@@ -331,17 +349,19 @@ class FoldGrade:
 
     @property
     def edge(self) -> float:
-        """Percentile points hero's hand outranked what this bet typically
+        """Percentile points hero's hand outranked what this line typically
         represents in this database. The comparison that matters -- see the
         module note above for why raw percentile-vs-random is not it."""
         return self.strength - self.faced_strength
 
     @property
-    def mistake(self) -> bool:
-        # Both bars, not either: outranking what the bet usually represents
+    def flagged(self) -> bool:
+        # Both bars, not either: outranking what the line usually represents
         # is not the same as having the raw equity to profit from calling at
         # this specific price, and a hand can clear one without the other.
-        return self.edge > MARGIN and self.strength > self.required_equity
+        # For a check `required_equity` is 0 and the second bar is free,
+        # which is the honest reading -- there was no price to beat.
+        return self.edge > self.kind.margin and self.strength > self.required_equity
 
     def worth(self) -> float:
         """Rank-only: how much edge, on how much money. Not a bb figure --
@@ -352,63 +372,62 @@ class FoldGrade:
     @property
     def summary(self) -> str:
         """Row-length form of `in_words` -- the full sentence explains itself
-        once (in a tooltip); a worst-folds list of five does not need it
-        spelled out five times."""
-        return (f"you {self.strength:.0%} · usual {self.faced_strength:.0%} "
-                f"· needed {self.required_equity:.0%}")
+        once (in a tooltip); a worst list of five does not need it spelled out
+        five times."""
+        line = f"you {self.strength:.0%} · usual {self.faced_strength:.0%}"
+        return line + (f" · needed {self.required_equity:.0%}"
+                       if self.kind.priced else "")
 
     @property
     def in_words(self) -> str:
         """One sentence with the numbers in it, matching the precedent
-        villain.exploits.Leak.in_words sets. Three raw percentiles with no verb read
-        as noise.
-        """
-        return (f"Beat {self.strength:.0%} of the hands you could have held there; "
-                f"a bet like that one usually comes from a hand beating only "
-                f"{self.faced_strength:.0%} -- and calling only needed "
-                f"{self.required_equity:.0%} to show a profit.")
+        villain.exploits.Leak.in_words sets. Three raw percentiles with no
+        verb read as noise."""
+        said = (f"Beat {self.strength:.0%} of the hands you could have held there; "
+                f"{self.kind.line} usually comes from a hand beating only "
+                f"{self.faced_strength:.0%}")
+        return said + (f" -- and calling only needed {self.required_equity:.0%} "
+                       f"to show a profit." if self.kind.priced else ".")
 
 
 @dataclass
-class FoldReport:
-    grades: list[FoldGrade]
+class GradeReport:
+    grades: list[Grade]
 
     @property
     def graded(self) -> int:
         return len(self.grades)
 
     @property
-    def mistakes(self) -> list[FoldGrade]:
-        return [g for g in self.grades if g.mistake]
+    def flagged(self) -> list[Grade]:
+        return [g for g in self.grades if g.flagged]
 
     @property
-    def mistake_rate(self) -> float | None:
-        return len(self.mistakes) / self.graded if self.graded else None
+    def rate(self) -> float | None:
+        return len(self.flagged) / self.graded if self.graded else None
+
+    def _tally(self, key) -> dict:
+        """``key(grade) -> (flagged, graded)``, the shape both breakdowns want."""
+        out: dict = {}
+        for g in self.grades:
+            m, n = out.get(key(g), (0, 0))
+            out[key(g)] = (m + int(g.flagged), n + 1)
+        return out
 
     def by_street(self) -> dict[int, tuple[int, int]]:
-        """street -> (mistakes, graded)."""
-        out: dict[int, tuple[int, int]] = {}
-        for g in self.grades:
-            m, n = out.get(g.street, (0, 0))
-            out[g.street] = (m + int(g.mistake), n + 1)
-        return out
+        return self._tally(lambda g: g.street)
 
     def by_texture(self) -> dict[str, tuple[int, int]]:
-        """"wet"/"dry" -> (mistakes, graded)."""
-        out: dict[str, tuple[int, int]] = {}
-        for g in self.grades:
-            m, n = out.get(g.texture, (0, 0))
-            out[g.texture] = (m + int(g.mistake), n + 1)
-        return out
+        return self._tally(lambda g: g.texture)
 
-    def worst(self, limit: int = 5) -> list[FoldGrade]:
-        return sorted(self.mistakes, key=lambda g: -g.worth())[:limit]
+    def worst(self, limit: int = 5) -> list[Grade]:
+        return sorted(self.flagged, key=lambda g: -g.worth())[:limit]
 
 
 def fold_grades(hands: list, hero_id: int, model: StrengthModel,
-                progress=None) -> FoldReport:
+                progress=None) -> GradeReport:
     """Grade every postflop fold hero made against the hand hero actually held."""
-    grades: list[FoldGrade] = []
+    grades: list[Grade] = []
     for hand, seat, strengths in _hero_spots(hands, hero_id, progress):
         view = HandView(hand)
         current_street = Street.PREFLOP
@@ -423,8 +442,8 @@ def fold_grades(hands: list, hero_id: int, model: StrengthModel,
                 to_call = decision.action.to_call
                 pot_before = decision.action.pot_before
                 if strength is not None and to_call > 0 and hand.big_blind:
-                    grades.append(FoldGrade(
-                        hand_id=hand.hand_id, street=int(decision.street),
+                    grades.append(Grade(
+                        FOLD, hand_id=hand.hand_id, street=int(decision.street),
                         hole_cards=seat.hole_cards, board=hand.board_at(decision.street),
                         strength=strength,
                         faced_strength=_predict_strength(model, hand, last_aggro),
@@ -434,7 +453,7 @@ def fold_grades(hands: list, hero_id: int, model: StrengthModel,
                     ))
             if act.is_aggressive:
                 last_aggro = decision
-    return FoldReport(grades=grades)
+    return GradeReport(grades=grades)
 
 
 def _predict_strength(model: StrengthModel, hand, decision: Decision) -> float:
@@ -447,8 +466,7 @@ def _predict_strength(model: StrengthModel, hand, decision: Decision) -> float:
     unknown, so the honest question is what the typical, mostly showdown-selected
     training row looks like. That sample skews toward calling ranges, so the
     estimate runs a little strong -- the safe direction, since it under-flags
-    hero's folds and missed value rather than over-flagging them.
-    """
+    hero's folds and missed value rather than over-flagging them."""
     act = decision.action.act
     features = [
         0.0, float(decision.street),
@@ -464,101 +482,10 @@ def _predict_strength(model: StrengthModel, hand, decision: Decision) -> float:
     return model.predict(features)
 
 
-# ---------------------------------------------------------------------------
-# missed value: was this check strong enough that betting made more money
-# ---------------------------------------------------------------------------
-#
-# The mirror of fold grading, on the same model. A check faces no bet, so
-# there is no pot-odds bar here; the only question is whether the hand beat
-# what a check on that line usually is.
-#
-# MARGIN is not reused. Folds have a strongly negative mean edge, so a tight
-# margin rarely fires on noise; checks measure -0.03 mean against a 0.24
-# stdev, and at 0.05 fully 40% of them cross. 0.20 is roughly the 80th
-# percentile of the real distribution and brings that to 19%.
-MISSED_VALUE_MARGIN = 0.20
-
-
-@dataclass
-class MissedValue:
-    hand_id: str
-    street: int
-    hole_cards: tuple[str, ...]
-    board: list[str]
-    strength: float           # hero's percentile on this street, 0-1
-    faced_strength: float     # population model's estimate for a check on this line
-    pot_before_bb: float
-
-    @property
-    def texture(self) -> str:
-        return texture_label(self.board)
-
-    @property
-    def edge(self) -> float:
-        """Percentile points hero's hand outranked what a check on this line
-        typically represents in this database."""
-        return self.strength - self.faced_strength
-
-    @property
-    def missed(self) -> bool:
-        return self.edge > MISSED_VALUE_MARGIN
-
-    def worth(self) -> float:
-        """Rank-only, same caveat as FoldGrade.worth: how much edge, on how
-        much money, not a real bb figure."""
-        return self.edge * self.pot_before_bb
-
-    @property
-    def summary(self) -> str:
-        """Row-length form of `in_words` -- see FoldGrade.summary."""
-        return f"you {self.strength:.0%} · usual {self.faced_strength:.0%}"
-
-    @property
-    def in_words(self) -> str:
-        return (f"Beat {self.strength:.0%} of the hands you could have held there; "
-                f"a check on that line usually comes from a hand beating only "
-                f"{self.faced_strength:.0%}.")
-
-
-@dataclass
-class MissedValueReport:
-    grades: list[MissedValue]
-
-    @property
-    def graded(self) -> int:
-        return len(self.grades)
-
-    @property
-    def missed(self) -> list[MissedValue]:
-        return [g for g in self.grades if g.missed]
-
-    @property
-    def missed_rate(self) -> float | None:
-        return len(self.missed) / self.graded if self.graded else None
-
-    def by_street(self) -> dict[int, tuple[int, int]]:
-        """street -> (missed, graded)."""
-        out: dict[int, tuple[int, int]] = {}
-        for g in self.grades:
-            m, n = out.get(g.street, (0, 0))
-            out[g.street] = (m + int(g.missed), n + 1)
-        return out
-
-    def by_texture(self) -> dict[str, tuple[int, int]]:
-        out: dict[str, tuple[int, int]] = {}
-        for g in self.grades:
-            m, n = out.get(g.texture, (0, 0))
-            out[g.texture] = (m + int(g.missed), n + 1)
-        return out
-
-    def worst(self, limit: int = 5) -> list[MissedValue]:
-        return sorted(self.missed, key=lambda g: -g.worth())[:limit]
-
-
 def missed_value(hands: list, hero_id: int, model: StrengthModel,
-                 progress=None) -> MissedValueReport:
+                 progress=None) -> GradeReport:
     """Grade every postflop check hero made against the hand hero actually held."""
-    grades: list[MissedValue] = []
+    grades: list[Grade] = []
     for hand, seat, strengths in _hero_spots(hands, hero_id, progress):
         for decision in HandView(hand).decisions():
             if (decision.seat != seat.seat or decision.street is Street.PREFLOP
@@ -567,19 +494,17 @@ def missed_value(hands: list, hero_id: int, model: StrengthModel,
             strength = strengths.get((seat.seat, decision.street))
             if strength is None or not hand.big_blind:
                 continue
-            grades.append(MissedValue(
-                hand_id=hand.hand_id, street=int(decision.street),
+            grades.append(Grade(
+                CHECK, hand_id=hand.hand_id, street=int(decision.street),
                 hole_cards=seat.hole_cards, board=hand.board_at(decision.street),
                 strength=strength,
                 faced_strength=_predict_strength(model, hand, decision),
                 pot_before_bb=decision.action.pot_before / hand.big_blind,
             ))
-    return MissedValueReport(grades=grades)
+    return GradeReport(grades=grades)
 
 
-# ---------------------------------------------------------------------------
-# tells: does something visible about hero's bet change with the hand behind it
-# ---------------------------------------------------------------------------
+# -- tells: does something visible about hero's bet change with the hand behind it ---
 # Two of these, asked the same way of the same decisions -- bet size, and think
 # time. They were written as two parallel class pairs, which meant `gap` and
 # `tells` existed twice character-for-character and the web layer needed a
@@ -629,8 +554,7 @@ class TellKind:
     ``phrase`` renders the two averages into the sentence and ``warning`` the
     clause after it -- the only parts that cannot be shared, since a size reads as
     a percentage of pot and a think time as seconds, and only timing has a
-    direction worth naming.
-    """
+    direction worth naming."""
     gap_bar: float
     verb: str
     phrase: Callable[[float, float], str]
@@ -668,8 +592,7 @@ class Tell:
 
         Sign is meaningful and differs by kind: a positive size gap means hero bets
         bigger with the better half; a negative timing gap means hero thinks longer
-        with the worse half, the classic tank-as-bluff tell.
-        """
+        with the worse half, the classic tank-as-bluff tell."""
         pair = self.by_street.get(street)
         if not pair:
             return None
@@ -693,8 +616,7 @@ class Tell:
         """One sentence for a street with enough data to compare, or None.
 
         ``lead=False`` drops the "On the {street}, " opener, for a caller that already
-        shows the street as its own label beside the sentence.
-        """
+        shows the street as its own label beside the sentence."""
         pair = self.by_street.get(street)
         if not pair:
             return None
@@ -719,8 +641,7 @@ def _aggression_tell(hands: list, hero_id: int, kind: TellKind,
     Scoped to bets and raises for both kinds: "does hero's aggression carry a
     tell" is narrower and more answerable than grading every action type. It is
     answerable at all only because hero's strength is known on every action, not
-    just the ones that reached showdown.
-    """
+    just the ones that reached showdown."""
     by_street: dict[int, tuple[Bucket, Bucket]] = {
         int(s): (Bucket("top half"), Bucket("bottom half"))
         for s in (Street.FLOP, Street.TURN, Street.RIVER)
@@ -743,8 +664,7 @@ def _aggression_tell(hands: list, hero_id: int, kind: TellKind,
 def sizing_tell(hands: list, hero_id: int, progress=None) -> Tell:
     """Does hero bet bigger with better hands? The mirror of fold grading, asked
     of hero's aggression. A real gap means an observant opponent could read hand
-    strength off bet size alone, without ever seeing a card.
-    """
+    strength off bet size alone, without ever seeing a card."""
     return _aggression_tell(hands, hero_id, SIZING,
                             lambda d: d.bet_fraction, progress)
 
@@ -752,16 +672,13 @@ def sizing_tell(hands: list, hero_id: int, progress=None) -> Tell:
 def timing_tell(hands: list, hero_id: int, progress=None) -> Tell:
     """Does hero take longer to act with one half of the strength range than the
     other? A snap bet and a tanked one are different information if they
-    correlate with strength.
-    """
+    correlate with strength."""
     return _aggression_tell(
         hands, hero_id, TIMING,
         lambda d: min((d.action.think_ms or 0) / 1000.0, THINK_CAP_S), progress)
 
 
-# ---------------------------------------------------------------------------
-# range narrowing: does hero's continuing range actually get stronger
-# ---------------------------------------------------------------------------
+# -- range narrowing: does hero's continuing range actually get stronger -------
 # Purely descriptive -- no model, no comparison to a bar. A continuing range
 # is supposed to narrow to the hands that held up, so average hand strength
 # among hands still live should trend upward street by street. Whether it
@@ -782,8 +699,7 @@ def range_narrowing(hands: list, hero_id: int, progress=None) -> list[StreetStre
     "Still live" uses HandView.saw, reconstructed from who folded when rather
     than from who happened to act -- the same building block the rest of the
     stats engine uses to avoid counting a player who folded before a street was
-    dealt.
-    """
+    dealt."""
     totals: dict[int, list[float]] = {int(s): [] for s in (Street.FLOP, Street.TURN, Street.RIVER)}
     for hand, seat, strengths in _hero_spots(hands, hero_id, progress):
         view = HandView(hand)

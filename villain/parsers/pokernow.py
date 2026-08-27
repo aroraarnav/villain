@@ -69,8 +69,7 @@ def _cards(raw) -> tuple[str, ...]:
     PokerNow writes ``None`` in place of a card the player kept hidden, which
     happens when somebody shows just one card at the end of a hand. That is
     information rather than corruption -- the reveal is recorded, but a partial
-    hand can never be evaluated, so it is never treated as a holding.
-    """
+    hand can never be evaluated, so it is never treated as a holding."""
     if not raw:
         return ()
     return tuple(c for c in raw

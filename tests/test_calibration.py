@@ -32,8 +32,7 @@ def _seats(*stacks):
 def _play_preflop(opener, defender, n, seed=0):
     """Deal HU hands; yield (level, opener_kind) at each opener decision after
     the first, and the first-in kind. ``level`` is ``hand.raises`` before they
-    act.
-    """
+    act."""
     rng = np.random.default_rng(seed)
     for i in range(n):
         h = Hand(_seats(400, 400), button=0, sb=1, bb=2,
@@ -218,8 +217,7 @@ def _cold_caller_facing_a_three_bet(seed):
 
     Three-handed the button acts first preflop, so the order is 0 (BTN),
     1 (SB), 2 (BB) and the 3-bet lands while seat 1 still owes action -- which
-    is the whole point: seat 1 never raised anything.
-    """
+    is the whole point: seat 1 never raised anything."""
     h = Hand(_seats(400, 400, 400), button=0, sb=1, bb=2,
              rng=np.random.default_rng(seed))
     h.act("raise", 6)                       # seat 0 opens
@@ -241,8 +239,7 @@ def test_a_cold_caller_does_not_inherit_the_openers_fold_to_three_bet():
     features.py gates it on ``d.seat == opener``. Lending it to a player who
     merely called the open turns a 30%-folding opener into a blind that
     cold-calls a 3-bet with a third of its range -- a spot the statistic never
-    described and nobody plays that way.
-    """
+    described and nobody plays that way."""
     station = _Prof(rfi=0.4, three_bet=0.02, cold_call=0.35,
                     fold_to_three_bet=0.10)        # continues 90% *as the opener*
     rng = np.random.default_rng(11)

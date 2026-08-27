@@ -21,7 +21,7 @@ from ..model import hand_from_dict, hand_to_dict
 from ..parsers import parse_file
 from ..profile import build_unified, primary_regime
 from .heroview import _to_you
-from .payloads import profile_payload
+from .payloads import profile_payload, roster_row
 
 SESSIONS: dict[str, dict] = {}
 #: Live practice games, held in memory only. Keyed by an opaque token.
@@ -41,12 +41,9 @@ def _reap_sessions() -> None:
 
 
 def parse_upload(filename: str, content: str):
-    """Parse an uploaded file by writing it somewhere a parser can sniff it.
-
-    The parser registry works off file paths so it can identify a format from
-    the extension and the first few bytes; a temporary file keeps that contract
-    intact rather than adding a second, divergent code path for uploads.
-    """
+    """Parse an uploaded file by writing it where a parser can sniff it. The
+    registry works off paths -- extension plus first bytes -- and a temp file
+    keeps that contract rather than adding a second path for uploads."""
     suffix = Path(filename).suffix or ".json"
     with tempfile.NamedTemporaryFile("w", suffix=suffix, delete=False) as fh:
         fh.write(content)
@@ -58,13 +55,9 @@ def parse_upload(filename: str, content: str):
 
 
 def database_merges(store: Store, hands: list) -> dict:
-    """Accounts this session shares that the database already calls one player.
-
-    So a merge made anywhere shows up everywhere. Answering at upload and
-    merging later from the suggestions panel are the same decision, and a
-    session that ignored the second would contradict the database it was about
-    to be saved into.
-    """
+    """Accounts this session shares that the database already calls one
+    player, so a merge made anywhere shows up everywhere -- answering at upload
+    and merging later are the same decision."""
     alias = {(r["site"], r["account"]): (int(r["player_id"]), r["name"])
              for r in store.conn.execute(
                  "SELECT site, account, player_id, name FROM aliases")}
@@ -96,12 +89,9 @@ def database_merges(store: Store, hands: list) -> dict:
 
 
 def merged_hands(session: dict, extra: dict | None = None) -> list:
-    """The session's hands with confirmed same-person accounts pooled.
-
-    Applied to a copy. The stored hands must keep the account ids the site
-    actually wrote, because identity is a decision layered on top of them and
-    decisions get revised; the hands themselves are evidence and do not.
-    """
+    """The session's hands with confirmed same-person accounts pooled, on a
+    copy: stored hands keep the ids the site wrote, because identity is a
+    revisable decision layered on them and the hands are evidence."""
     merges = dict(session.get("merges") or {})
     merges.update(extra or {})
     if not merges:
@@ -116,12 +106,9 @@ def merged_hands(session: dict, extra: dict | None = None) -> list:
 
 
 def session_identity_labels(session: dict) -> dict[str, dict]:
-    """For each pooled display name, session aliases and a database name if linked.
-
-    After auto-merge the roster title is often already the database name; the
-    muted line still needs the other side so you can see what is merging with
-    what.
-    """
+    """Per pooled display name: session aliases, and the database name if
+    linked. After auto-merge the title is often already the database name, and
+    the muted line still has to show what is merging with what."""
     answers = session.get("answers") or {}
     by_keep: dict[str, dict] = {}
     for question in session.get("questions") or []:
@@ -148,15 +135,10 @@ def session_identity_labels(session: dict) -> dict[str, dict]:
 def _conflicting_pairs(session: dict) -> list[list[str]]:
     """Accounts in this batch that provably are not the same person.
 
-    Two accounts dealt into the same hand more than a glitch's worth of times
-    are two people, and `Store.link` refuses to merge them. The dialog needs to
-    know: it can then show a whole knot of similar names together -- which is
-    the only way to make sense of one -- while keeping the pairs that cannot
-    merge in separate columns and saying why, instead of accepting the drop and
-    failing afterwards.
-
-    Only pairs among accounts the dialog is about, which is a handful.
-    """
+    Dealt into the same hand more than a glitch's worth of times, so
+    `Store.link` refuses them. The dialog needs to know, so it can show a whole
+    knot of similar names together while keeping those pairs apart and saying
+    why, rather than accepting the drop and failing after. Handful-sized."""
     from ..db import SPURIOUS_OVERLAP
     from ..identity import _incoming_co_occurrence
 
@@ -183,17 +165,11 @@ def _conflicting_pairs(session: dict) -> list[list[str]]:
 def session_brief(token: str) -> dict:
     """What an upload needs to know, without profiling anything.
 
-    :func:`session_payload` builds the whole preview -- every statistic for
-    every hand in the session, all-in equities included -- because the session
-    *view* shows profiles before you save. An import does not: it needs the
-    token, the counts, and the identity questions, and then it commits, which
-    computes all of that again from the stored hands.
-
-    On a small session the duplicate pass costs nothing worth naming. On a
-    71,000-hand import it was eighty seconds of native CPU, and the browser is
-    an order of magnitude slower than that -- a quarter of an hour of work
-    thrown away, under a progress message that said "matching players".
-    """
+    :func:`session_payload` builds the whole preview because the session *view*
+    shows profiles before you save. An import needs only the token, the counts
+    and the questions, then commits and computes it all again from the stored
+    hands -- 80s of native CPU on a 71k import, an order of magnitude worse in
+    the browser, under a bar that said "matching players"."""
     session = SESSIONS[token]
     return {
         "token": token,
@@ -204,13 +180,19 @@ def session_brief(token: str) -> dict:
             session.get("questions") or [])],
         # Pairs already settled as the same person. Not asked about, but sent
         # anyway: they are the edges that join two clusters of accounts, and
-        # without them the dialog showed "tin/tintin" and "Tins white gf/Tin"
+        # without them the dialog showed "ghost/ghostly" and "Ghosts partner/Ghost"
         # as two unrelated questions when the four are one knot.
         "linked": [question_payload(q) for q in (session.get("questions") or [])
                    if q.auto],
         # Pairs that can never be one person, so the dialog can keep them apart
         # rather than accepting a merge the database will refuse.
         "conflicts": _conflicting_pairs(session),
+        # Whether a *person* has answered, not whether the session carries
+        # answers at all. Auto-applied merges live in the same dict, so the
+        # plain truthiness test made every upload look already-answered the
+        # moment reconnect runs started being applied -- and the UI, which
+        # only opens the dialog when a session is unanswered, silently
+        # skipped every question that still needed a human.
         "answered": bool(set(session.get("answers") or {})
                          - {q.id for q in (session.get("questions") or []) if q.auto}),
         "auto_merged": len(auto_answers(session.get("questions") or [])),
@@ -287,7 +269,6 @@ def session_payload(token: str, store: Store | None = None) -> dict:
     profile_payloads = []
     for player_key, profile in keyed:
         enrich(profile)
-        top = profile.tags[0] if profile.tags else None
         link = labels.get(profile.name) or {}
         db_name = link.get("db_name")
         session_names = [n for n in (link.get("session_names") or [])
@@ -295,21 +276,10 @@ def session_payload(token: str, store: Store | None = None) -> dict:
         if db_name and db_name != profile.name and profile.name not in session_names:
             session_names = [profile.name] + session_names
         is_hero = hero_key is not None and player_key == hero_key
-        row = {
-            "player_id": None, "name": profile.name, "is_hero": is_hero,
+        row = roster_row(profile) | {
+            "player_id": None, "is_hero": is_hero,
             "db_name": db_name if db_name else None,
             "session_names": session_names,
-            "regime": profile.regime, "regime_label": profile.regime_label,
-            "table_mix": profile.table_mix,
-            "hands": profile.hands, "sample_quality": profile.sample_quality,
-            "archetype": profile.archetype, "confidence": profile.archetype_confidence,
-            "skill": (None if not profile.skill.measured else profile.skill.base),
-            "skill_tier": profile.skill.tier,
-            "skill_confidence": profile.skill.confidence,
-            "skill_measured": profile.skill.measured,
-            "exploitability": profile.skill.exploitability,
-            "top_leak": top.headline if top else None,
-            "leak_count": len(profile.tags),
         }
         rows.append(row)
         pp = profile_payload(profile)
@@ -319,36 +289,10 @@ def session_payload(token: str, store: Store | None = None) -> dict:
         if is_hero:                       # blue identity + second-person voice
             pp = _to_you(pp)
         profile_payloads.append(pp)
-    return {
-        "token": token,
-        "files": session["files"],
-        "hands": len(session["hands"]),
-        "players": rows,
-        "profiles": profile_payloads,
-        "saved": session.get("saved", False),
-        "questions": [question_payload(q) for q in askable_questions(
-            session.get("questions") or [])],
-        # Pairs already settled as the same person. Not asked about, but sent
-        # anyway: they are the edges that join two clusters of accounts, and
-        # without them the dialog showed "tin/tintin" and "Tins white gf/Tin"
-        # as two unrelated questions when the four are one knot.
-        "linked": [question_payload(q) for q in (session.get("questions") or [])
-                   if q.auto],
-        # Pairs that can never be one person, so the dialog can keep them apart
-        # rather than accepting a merge the database will refuse.
-        "conflicts": _conflicting_pairs(session),
-        # Whether a *person* has answered, not whether the session carries
-        # answers at all. Auto-applied merges live in the same dict, so the
-        # plain truthiness test made every upload look already-answered the
-        # moment reconnect runs started being applied -- and the UI, which
-        # only opens the dialog when a session is unanswered, silently
-        # skipped every question that still needed a human.
-        "answered": bool(set(session.get("answers") or {})
-                         - {q.id for q in (session.get("questions") or []) if q.auto}),
-        "auto_merged": len(auto_answers(session.get("questions") or [])),
-        "merges": [{"from": k[1], "to": v["name"]}
-                   for k, v in (session.get("merges") or {}).items()],
-    }
+    # The brief is the whole answer bar the two keys profiling adds, and it was
+    # copied out here in full -- so the note explaining `answered` existed
+    # twice, and had already been corrected in only one of them.
+    return session_brief(token) | {"players": rows, "profiles": profile_payloads}
 
 
 def question_payload(question) -> dict:
@@ -371,8 +315,7 @@ def apply_answers(session: dict, answers: dict) -> None:
 
     Pairs that sat together more than a reconnect glitch are never pooled
     here — ``commit_session`` would refuse the link, and showing a merged
-    profile the save step cannot keep is worse than leaving them apart.
-    """
+    profile the save step cannot keep is worse than leaving them apart."""
     from ..db import SPURIOUS_OVERLAP
     from ..identity import _incoming_co_occurrence
 
@@ -413,8 +356,7 @@ def commit_session(store: Store, token: str, answers: dict) -> dict:
     Order matters. Hands are stored first so that every account exists as a
     player, then declined renames are re-keyed, then accepted aliases are
     merged. Doing the merges first would mean linking players that do not exist
-    yet.
-    """
+    yet."""
     session = SESSIONS[token]
     questions = {q.id: q for q in session.get("questions", [])}
     answers = answers or session.get("answers") or {}

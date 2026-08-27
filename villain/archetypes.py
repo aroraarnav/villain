@@ -312,22 +312,15 @@ PROTOTYPE_RESCALE = True
 def prototype_scale(arch: Archetype, profile: Profile | None) -> float:
     """How far a prototype must shrink for every target to be humanly posted.
 
-    The traits were authored as multiples of a spread -- "folds 2.2 spreads
-    less than the field" -- without checking the frequency that implies, and
-    the spread constant is roughly twice the pool's real scatter on postflop
-    features. The two errors compound: ``station`` demands a turn fold of
-    0.258 where the tightest player in a 63-player pool folds 0.353, so nobody
-    could be a station however they played.
+    Traits are authored as multiples of a spread constant that runs about
+    twice the pool's real postflop scatter, so a prototype can demand a
+    frequency nobody posts: ``station`` wants a 0.258 turn fold where the
+    tightest of 63 players folds 0.353.
 
-    One factor for the whole vector, not a clamp per feature. A prototype is a
-    shape -- which frequencies deviate, and how far relative to each other --
-    and clamping the ones that stick out flattens exactly the features that
-    made it distinctive. Scaling moves it toward the field while keeping it
-    recognizably itself.
-
-    Player-blind: the factor depends on the pool's observed range and the
-    prototype's own traits, never on any individual's numbers.
-    """
+    One factor for the whole vector, not a clamp per feature: a prototype is a
+    shape, and clamping the features that stick out flattens what made it
+    distinctive. Player-blind -- the factor comes from the pool's range and the
+    prototype's traits, never from an individual."""
     if not PROTOTYPE_RESCALE or profile is None or not profile.priors:
         return 1.0
     scale = 1.0
@@ -355,8 +348,7 @@ def target_frequency(arch: Archetype, feature: str, table_regime: str,
     Pass ``profile`` to measure against that player's fitted population rather
     than the built-in one. A prototype is a deviation *from the field*, so with
     a fitted pool the same deviation has to be applied to the fitted mean or
-    the label is describing a different field than the numbers are.
-    """
+    the label is describing a different field than the numbers are."""
     pop = profile.population(feature) if profile is not None \
         else population_mean(feature, table_regime)
     spread = spread_of(feature, table_regime,
@@ -424,8 +416,7 @@ def match(profile: Profile) -> tuple[str, float, list[tuple[str, float]]]:
     on whichever plan the counts support. Two archetypes that fit equally well
     produce two middling numbers, which is the honest answer: players do sit
     between buckets, and a forced label invites a plan the evidence cannot
-    carry.
-    """
+    carry."""
     # One shared support set: every feature the player has real data on.
     observed = []
     for feature in PROFILE_FEATURES:
@@ -486,8 +477,7 @@ def _log_beta_binomial(hits: float, opps: float, mean: float,
     """Log marginal likelihood of ``hits``/``opps`` under a Beta(mean) prior.
 
     The binomial coefficient is dropped: it is identical across archetypes and
-    only the differences matter.
-    """
+    only the differences matter."""
     # Read the module constant at call time: binding it as a default would
     # freeze it at import, silently ignoring anything that tries to fit it.
     if concentration is None:

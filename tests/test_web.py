@@ -54,11 +54,10 @@ def test_session_payload_is_json_serialisable(session):
     json.dumps(session_payload(session))
 
 
-def test_commit_stores_the_session(session, tmp_path):
-    with Store(tmp_path / "v.db") as store:
-        result = commit_session(store, session, {})
-        assert result["hands_new"] == len(SESSIONS[session]["hands"])
-        assert store.conn.execute("SELECT COUNT(*) c FROM hands").fetchone()["c"] > 0
+def test_commit_stores_the_session(session, store):
+    result = commit_session(store, session, {})
+    assert result["hands_new"] == len(SESSIONS[session]["hands"])
+    assert store.conn.execute("SELECT COUNT(*) c FROM hands").fetchone()["c"] > 0
 
 
 def test_committing_twice_adds_nothing(session, tmp_path):
@@ -73,7 +72,7 @@ def test_committing_twice_adds_nothing(session, tmp_path):
 
 # -- the questions ----------------------------------------------------------
 
-def test_similar_names_raise_an_alias_question(session, tmp_path):
+def test_similar_names_raise_an_alias_question(session, store):
     """Two accounts that look like one person are asked about, not merged."""
     hands = SESSIONS[session]["hands"]
     twin = copy.deepcopy(hands[:3])
@@ -82,8 +81,7 @@ def test_similar_names_raise_an_alias_question(session, tmp_path):
         for seat in hand.seats:
             seat.player_id = seat.player_id + "X"
             seat.name = seat.name + "2"
-    with Store(tmp_path / "v.db") as store:
-        questions = session_questions(store, hands + twin)
+    questions = session_questions(store, hands + twin)
     alias = [q for q in questions if q.kind == "alias"]
     assert alias
     session_only = [q for q in alias
@@ -95,15 +93,14 @@ def test_similar_names_raise_an_alias_question(session, tmp_path):
     assert all(not q.auto for q in session_only)
 
 
-def test_same_name_overlapping_time_is_not_offered_as_one(session, tmp_path):
+def test_same_name_overlapping_time_is_not_offered_as_one(session, store):
     """Same name, same months, never at the same table: one person.
 
     A site that hands out a fresh account id per session makes one regular
     look like dozens of accounts, and their active windows all overlap by
     construction -- they are the same person playing all season. Overlapping
     windows are therefore not evidence of two humans; being dealt into a hand
-    together is, and that is tested separately below.
-    """
+    together is, and that is tested separately below."""
     from villain.webapp import SESSIONS
 
     hands = copy.deepcopy(SESSIONS[session]["hands"])
@@ -122,8 +119,7 @@ def test_same_name_overlapping_time_is_not_offered_as_one(session, tmp_path):
             if seat.name == target_name:
                 seat.player_id = alt_account
 
-    with Store(tmp_path / "v.db") as store:
-        questions = session_questions(store, hands + twin)
+    questions = session_questions(store, hands + twin)
 
     runs = [q for q in questions if q.id.startswith("reconnects:")]
     covering = [q for q in runs
@@ -132,7 +128,7 @@ def test_same_name_overlapping_time_is_not_offered_as_one(session, tmp_path):
     assert covering[0].auto, "a reconnect run applies without asking"
 
 
-def test_one_run_replaces_a_question_per_pair(session, tmp_path):
+def test_one_run_replaces_a_question_per_pair(session, store):
     """Six accounts under one name is one decision, not fifteen."""
     from villain.webapp import SESSIONS
 
@@ -149,8 +145,7 @@ def test_one_run_replaces_a_question_per_pair(session, tmp_path):
                     seat.player_id = f"{base}-alt{n}"
         batch += twin
 
-    with Store(tmp_path / "v.db") as store:
-        questions = session_questions(store, batch)
+    questions = session_questions(store, batch)
 
     runs = [q for q in questions if q.id.startswith("reconnects:")]
     mine = [q for q in runs if any(m["account"] == base for m in q.members)]
@@ -163,39 +158,34 @@ def test_one_run_replaces_a_question_per_pair(session, tmp_path):
                 <= {base} | {f"{base}-alt{n}" for n in range(5)}]
 
 
-def test_regular_opponents_are_never_offered_as_one(session, tmp_path):
+def test_regular_opponents_are_never_offered_as_one(session, store):
     """A pair that shares more than a glitch's worth of hands is two people.
 
     A single shared hand is tolerated on purpose -- a reconnect can leave a
     stale seat -- but the question then says so, so the user is never asked to
-    overrule the evidence without being shown it.
-    """
+    overrule the evidence without being shown it."""
     from villain.db import SPURIOUS_OVERLAP
     hands = SESSIONS[session]["hands"]
-    with Store(tmp_path / "v.db") as store:
-        for q in session_questions(store, hands):
-            if q.kind != "alias":
-                continue
-            names = {q.left["name"], q.right["name"]}
-            shared = sum(1 for h in hands if names <= {s.name for s in h.seats})
-            assert shared <= SPURIOUS_OVERLAP
-            if shared:
-                assert "seated together" in q.detail
+    for q in session_questions(store, hands):
+        if q.kind != "alias":
+            continue
+        names = {q.left["name"], q.right["name"]}
+        shared = sum(1 for h in hands if names <= {s.name for s in h.seats})
+        assert shared <= SPURIOUS_OVERLAP
+        if shared:
+            assert "seated together" in q.detail
 
 
-def test_same_account_new_name_raises_a_rename_question(session, tmp_path):
+def test_same_account_new_name_raises_a_rename_question(session, seeded):
     """The PokerNow case: one account id, a different display name."""
-    db = tmp_path / "v.db"
     hands = SESSIONS[session]["hands"]
-    with Store(db) as store:
-        store.add_hands(hands)
-        later = copy.deepcopy(hands)
-        for hand in later:
-            hand.hand_id += "-later"
-            for seat in hand.seats:
-                if seat.name == "player1":
-                    seat.name = "player1 renamed"
-        questions = session_questions(store, later)
+    later = copy.deepcopy(hands)
+    for hand in later:
+        hand.hand_id += "-later"
+        for seat in hand.seats:
+            if seat.name == "player1":
+                seat.name = "player1 renamed"
+    questions = session_questions(seeded, later)
     renames = [q for q in questions if q.kind == "rename"]
     assert len(renames) == 1
     assert renames[0].default is True, "a shared account id defaults to one person"
@@ -204,62 +194,53 @@ def test_same_account_new_name_raises_a_rename_question(session, tmp_path):
     assert "player1" in renames[0].left["name"]
 
 
-def test_declining_a_rename_splits_the_identity(tmp_path, hands):
+def test_declining_a_rename_splits_the_identity(seeded, hands):
     """Answering 'different people' must keep the two apart from then on."""
-    db = tmp_path / "v.db"
     token = "split-token"
-    with Store(db) as store:
-        store.add_hands(hands)
-        later = copy.deepcopy(hands)
-        for hand in later:
-            hand.hand_id += "-later"
-            for seat in hand.seats:
-                if seat.name == "player1":
-                    seat.name = "someone else"
-        SESSIONS[token] = {"hands": later, "files": [], "created": 0.0,
-                           "questions": store and session_questions(store, later)}
-        rename = next(q for q in SESSIONS[token]["questions"] if q.kind == "rename")
-        commit_session(store, token, {rename.id: False})
-        names = {r["display_name"]: r["hands"] for r in store.players()}
+    later = copy.deepcopy(hands)
+    for hand in later:
+        hand.hand_id += "-later"
+        for seat in hand.seats:
+            if seat.name == "player1":
+                seat.name = "someone else"
+    SESSIONS[token] = {"hands": later, "files": [], "created": 0.0,
+                       "questions": seeded and session_questions(seeded, later)}
+    rename = next(q for q in SESSIONS[token]["questions"] if q.kind == "rename")
+    commit_session(seeded, token, {rename.id: False})
+    names = {r["display_name"]: r["hands"] for r in seeded.players()}
     SESSIONS.pop(token, None)
     assert "someone else" in names
     assert "player1" in names
     assert names["someone else"] > 0, "the split identity must own its own hands"
 
 
-def test_accepting_a_rename_pools_the_hands(tmp_path, hands):
-    db = tmp_path / "v.db"
+def test_accepting_a_rename_pools_the_hands(seeded, hands):
     token = "rename-token"
-    with Store(db) as store:
-        store.add_hands(hands)
-        before = {r["display_name"]: r["hands"] for r in store.players()}
-        later = copy.deepcopy(hands)
-        for hand in later:
-            hand.hand_id += "-later"
-            for seat in hand.seats:
-                if seat.name == "player1":
-                    seat.name = "player1 v2"
-        SESSIONS[token] = {"hands": later, "files": [], "created": 0.0,
-                           "questions": session_questions(store, later)}
-        rename = next(q for q in SESSIONS[token]["questions"] if q.kind == "rename")
-        # Default keeps the database name; hands still pool onto that player.
-        commit_session(store, token, {rename.id: {"same": True, "name": rename.default_name}})
-        after = {r["display_name"]: r["hands"] for r in store.players()}
+    before = {r["display_name"]: r["hands"] for r in seeded.players()}
+    later = copy.deepcopy(hands)
+    for hand in later:
+        hand.hand_id += "-later"
+        for seat in hand.seats:
+            if seat.name == "player1":
+                seat.name = "player1 v2"
+    SESSIONS[token] = {"hands": later, "files": [], "created": 0.0,
+                       "questions": session_questions(seeded, later)}
+    rename = next(q for q in SESSIONS[token]["questions"] if q.kind == "rename")
+    # Default keeps the database name; hands still pool onto that player.
+    commit_session(seeded, token, {rename.id: {"same": True, "name": rename.default_name}})
+    after = {r["display_name"]: r["hands"] for r in seeded.players()}
     SESSIONS.pop(token, None)
     assert "player1 v2" not in after, "reconnect name must not replace the DB display"
     assert after["player1"] == before["player1"] * 2
 
 
-def test_roster_hides_rounding_error_profiles(tmp_path, hands):
+def test_roster_hides_rounding_error_profiles(seeded):
     """A one-hand book is a rounding error, not a profile.
 
     The exception is a player who has nothing bigger: they still get a single
-    row, because vanishing from the roster entirely is worse than a thin read.
-    """
+    row, because vanishing from the roster entirely is worse than a thin read."""
     from collections import defaultdict
-    with Store(tmp_path / "v.db") as store:
-        store.add_hands(hands)
-        rows = roster_payload(store)
+    rows = roster_payload(seeded)
     assert rows
     by_player = defaultdict(list)
     for row in rows:
@@ -268,11 +249,9 @@ def test_roster_hides_rounding_error_profiles(tmp_path, hands):
         assert all(c >= MIN_ROSTER_HANDS for c in counts) or len(counts) == 1
 
 
-def test_profile_payload_carries_chart_references(tmp_path, hands):
-    with Store(tmp_path / "v.db") as store:
-        store.add_hands(hands)
-        player = max(store.players(), key=lambda r: r["hands"] or 0)
-        payload = profile_payload(store.profiles(int(player["id"]))[0])
+def test_profile_payload_carries_chart_references(seeded):
+    player = max(seeded.players(), key=lambda r: r["hands"] or 0)
+    payload = profile_payload(seeded.profiles(int(player["id"]))[0])
     assert payload["rows"]
     for row in payload["rows"]:
         assert 0 <= row["lo"] <= row["value"] <= row["hi"] <= 1
@@ -337,42 +316,33 @@ def test_api_json_does_not_emit_nan():
     assert json.loads(body) == {"top_leak_severity": None, "leak_count": 1}
 
 
-def test_roster_json_is_strict(tmp_path, hands):
+def test_roster_json_is_strict(seeded):
     from villain.webapp.jsonutil import dumps
-    with Store(tmp_path / "v.db") as store:
-        store.add_hands(hands)
-        json.dumps(json.loads(dumps({"players": roster_payload(store)})),
-                   allow_nan=False)
+    json.dumps(json.loads(dumps({"players": roster_payload(seeded)})),
+               allow_nan=False)
 
 
-def test_reset_empties_the_database(tmp_path, hands):
-    db = tmp_path / "v.db"
-    with Store(db) as store:
-        store.add_hands(hands)
-        removed = store.reset()
-        assert removed["hands"] == len(hands)
-        assert store.players() == []
-        assert store.conn.execute("SELECT COUNT(*) c FROM hands").fetchone()["c"] == 0
+def test_reset_empties_the_database(seeded, hands):
+    removed = seeded.reset()
+    assert removed["hands"] == len(hands)
+    assert seeded.players() == []
+    assert seeded.conn.execute("SELECT COUNT(*) c FROM hands").fetchone()["c"] == 0
 
 
-def test_database_is_reusable_after_reset(tmp_path, hands):
-    db = tmp_path / "v.db"
-    with Store(db) as store:
-        store.add_hands(hands)
-        store.reset()
-        report = store.add_hands(hands)
-        assert report.hands_new == len(hands), "reset must clear the dedupe index too"
-        assert store.players()
+def test_database_is_reusable_after_reset(seeded, hands):
+    seeded.reset()
+    report = seeded.add_hands(hands)
+    assert report.hands_new == len(hands), "reset must clear the dedupe index too"
+    assert seeded.players()
 
 
 # -- identity settled at upload --------------------------------------------
 
-def test_merge_answers_pool_the_session_before_it_is_saved(session, tmp_path):
+def test_merge_answers_pool_the_session_before_it_is_saved(session, store):
     """The point of asking at upload: the session you read is already pooled."""
     from villain.identity import session_questions
     from villain.webapp import SESSIONS, apply_answers, session_payload
-    with Store(tmp_path / "v.db") as store:
-        questions = session_questions(store, SESSIONS[session]["hands"])
+    questions = session_questions(store, SESSIONS[session]["hands"])
     alias = [q for q in questions if q.kind == "alias"]
     if not alias:
         pytest.skip("fixture has no same-person candidates")
@@ -388,11 +358,10 @@ def test_merge_answers_pool_the_session_before_it_is_saved(session, tmp_path):
     assert sum(after.values()) == sum(before.values()), "no hands lost in the merge"
 
 
-def test_the_chosen_name_is_honoured(session, tmp_path):
+def test_the_chosen_name_is_honoured(session, store):
     from villain.identity import session_questions
     from villain.webapp import SESSIONS, apply_answers, session_payload
-    with Store(tmp_path / "v.db") as store:
-        questions = session_questions(store, SESSIONS[session]["hands"])
+    questions = session_questions(store, SESSIONS[session]["hands"])
     alias = [q for q in questions if q.kind == "alias"]
     if not alias:
         pytest.skip("fixture has no same-person candidates")
@@ -406,53 +375,47 @@ def test_the_chosen_name_is_honoured(session, tmp_path):
     assert q.default_name not in names
 
 
-def test_declining_leaves_the_session_untouched(session, tmp_path):
+def test_declining_leaves_the_session_untouched(session, store):
     from villain.identity import session_questions
     from villain.webapp import SESSIONS, apply_answers, session_payload
-    with Store(tmp_path / "v.db") as store:
-        SESSIONS[session]["questions"] = session_questions(store, SESSIONS[session]["hands"])
+    SESSIONS[session]["questions"] = session_questions(store, SESSIONS[session]["hands"])
     before = {r["name"] for r in session_payload(session)["players"]}
     apply_answers(SESSIONS[session], {})
     assert {r["name"] for r in session_payload(session)["players"]} == before
 
 
-def test_stored_hands_keep_the_original_account_ids(session, tmp_path):
+def test_stored_hands_keep_the_original_account_ids(session, store):
     """Identity is a layer on top of the hands; the hands stay as recorded."""
     from villain.identity import session_questions
     from villain.webapp import SESSIONS, apply_answers, commit_session
-    with Store(tmp_path / "v.db") as store:
-        questions = session_questions(store, SESSIONS[session]["hands"])
-        SESSIONS[session]["questions"] = questions
-        alias = [q for q in questions if q.kind == "alias"]
-        if not alias:
-            pytest.skip("fixture has no same-person candidates")
-        original = {s.player_id for h in SESSIONS[session]["hands"] for s in h.seats}
-        apply_answers(SESSIONS[session],
-                      {alias[0].id: {"same": True, "name": alias[0].names[0]}})
-        commit_session(store, session, {})
-        stored = {s.player_id for h in store.stored_hands() for s in h.seats}
+    questions = session_questions(store, SESSIONS[session]["hands"])
+    SESSIONS[session]["questions"] = questions
+    alias = [q for q in questions if q.kind == "alias"]
+    if not alias:
+        pytest.skip("fixture has no same-person candidates")
+    original = {s.player_id for h in SESSIONS[session]["hands"] for s in h.seats}
+    apply_answers(SESSIONS[session],
+                  {alias[0].id: {"same": True, "name": alias[0].names[0]}})
+    commit_session(store, session, {})
+    stored = {s.player_id for h in store.stored_hands() for s in h.seats}
     assert stored == original, "merging must not rewrite the recorded account ids"
 
 
-def test_questions_offer_a_name_to_keep(session, tmp_path):
+def test_questions_offer_a_name_to_keep(session, store):
     from villain.identity import session_questions
     from villain.webapp import SESSIONS
-    with Store(tmp_path / "v.db") as store:
-        for q in session_questions(store, SESSIONS[session]["hands"]):
-            assert q.names, f"{q.id} offers no name choice"
-            assert q.default_name in q.names
+    for q in session_questions(store, SESSIONS[session]["hands"]):
+        assert q.names, f"{q.id} offers no name choice"
+        assert q.default_name in q.names
 
 
-def test_roster_always_names_the_biggest_leak_it_can(tmp_path, hands):
+def test_roster_always_names_the_biggest_leak_it_can(seeded):
     """"None clears the bar" left the weakest player looking like the safest.
 
     The column falls back through what is known -- priced leak, unconfirmed
-    read, weakest rated area -- and says which kind of claim it is making.
-    """
+    read, weakest rated area -- and says which kind of claim it is making."""
     from villain.webapp import roster_payload
-    with Store(tmp_path / "v.db") as store:
-        store.add_hands(hands)
-        rows = roster_payload(store)
+    rows = roster_payload(seeded)
     assert rows
     for row in rows:
         if row["top_leak"] is None:
@@ -464,21 +427,18 @@ def test_roster_always_names_the_biggest_leak_it_can(tmp_path, hands):
                 or "not a measured frequency" in row["top_leak_note"]
 
 
-def test_a_rated_weakness_is_never_presented_as_a_measured_leak(tmp_path, hands):
+def test_a_rated_weakness_is_never_presented_as_a_measured_leak(seeded):
     from villain.webapp import roster_payload
-    with Store(tmp_path / "v.db") as store:
-        store.add_hands(hands)
-        for row in roster_payload(store):
-            if row["top_leak_status"] == "confirmed":
-                assert row["top_leak_severity"] > 0
-            elif row["top_leak_status"] is not None:
-                assert row["top_leak_severity"] == 0.0
+    for row in roster_payload(seeded):
+        if row["top_leak_status"] == "confirmed":
+            assert row["top_leak_severity"] > 0
+        elif row["top_leak_status"] is not None:
+            assert row["top_leak_severity"] == 0.0
 
 
 def test_a_database_merge_shows_up_in_a_loaded_session(tmp_path, hands):
     """The same people, so the same answer. A session that ignored a merge made
-    in the database would contradict the database it is about to be saved into.
-    """
+    in the database would contradict the database it is about to be saved into."""
     import copy
 
     from villain.webapp import SESSIONS, database_merges, session_payload
@@ -531,13 +491,11 @@ ADJUSTED = {
 }
 
 
-def test_the_payload_points_evidence_at_the_slice(tmp_path, hands):
+def test_the_payload_points_evidence_at_the_slice(seeded):
     """Not at the pooled counter: the hands shown have to be the hands the
     read is about."""
-    with Store(tmp_path / "v.db") as store:
-        store.add_hands(hands)
-        player_id = _seeded(store, ADJUSTED)
-        payload = profile_payload(store.profile(player_id), player_id)
+    player_id = _seeded(seeded, ADJUSTED)
+    payload = profile_payload(seeded.profile(player_id), player_id)
     assert payload["adjustments"]
     for a in payload["adjustments"]:
         assert a["evidence_stat"] == "vs:" + a["stat"]
@@ -558,8 +516,7 @@ def test_auto_merges_do_not_swallow_the_questions_that_need_a_human(session, tmp
     The UI opens the identity dialog only for an unanswered session. Auto
     answers share the dict human answers live in, so counting them as "the
     user has answered" hid every remaining question behind merges the user
-    never saw.
-    """
+    never saw."""
     from villain.identity import auto_answers, session_questions
     from villain.webapp import SESSIONS, apply_answers, session_payload
 
@@ -588,8 +545,7 @@ def test_a_name_plus_suffix_match_is_asked_and_never_auto_merged(session, tmp_pa
     It used to be raised and immediately auto-answered, which made the shape
     that makes ``PlayerA``/``PlayerALaptop`` one person silently pool
     ``PlayerG``/``PlayerG North``, who are two. A wrong merge costs an unlink
-    and a rebuild; a wrong question costs a click.
-    """
+    and a rebuild; a wrong question costs a click."""
     from villain.identity import matched_only_by_containment
 
     hands = SESSIONS[session]["hands"]
@@ -623,46 +579,37 @@ def test_a_name_plus_suffix_match_is_asked_and_never_auto_merged(session, tmp_pa
 
 # --- every POST route says whether it writes ---------------------------------
 
-def _routed_post_paths() -> set[str]:
-    """The routes ``do_POST`` actually answers, read out of its own source.
-
-    Reading the source is not elegant, and it is the only thing that fails when
-    somebody adds a route and forgets to say whether it writes. A list of routes
-    maintained beside the handler by hand is the thing under test here, not the
-    thing to test it with.
-    """
-    import inspect
-    import re
-
-    from villain.webapp.server import Handler
-    src = inspect.getsource(Handler.do_POST)
-    routes = set(re.findall(r'route == "(/api/[^"]+)"', src))
-    for suffix in re.findall(
-            r'route\.startswith\("/api/session/"\) and route\.endswith\("(/[^"]+)"\)', src):
-        routes.add(f"/api/session/<token>{suffix}")
-    return routes
-
-
-def test_every_post_route_is_classified_as_writing_or_not():
+def test_every_post_route_says_whether_it_writes():
     """The hosted app uploads the database after a write and not otherwise.
 
     It asks the server which is which. A route the server does not classify is
     reported as "changed nothing", so the import that went through it works on
     this laptop and is never saved to the account -- found, if ever, on a second
     device that is missing a session.
-    """
-    from villain.webapp.server import READING_POST_ROUTES, WRITING_POST_ROUTES
 
-    routed = _routed_post_paths()
-    assert routed, "the handler should answer at least one POST route"
-    declared = WRITING_POST_ROUTES | READING_POST_ROUTES
-    assert routed - declared == set(), (
-        "these POST routes do not say whether they change the database: "
-        f"{sorted(routed - declared)}")
-    assert declared - routed == set(), (
-        "these routes are classified but no longer served: "
-        f"{sorted(declared - routed)}")
-    assert not (WRITING_POST_ROUTES & READING_POST_ROUTES)
+    This used to re-read ``do_POST``'s source with a regex, because a frozenset
+    kept beside the handler by hand was the thing under test. Registration now
+    carries the answer, so what is left to check is that every route went
+    through it."""
+    import inspect
+
+    from villain.webapp.server import POST_ROUTES, Handler
+
+    # A POST handler is exactly a Handler method taking a request body. Asking
+    # the signature rather than the name means a handler cannot dodge this by
+    # being called something else.
+    handlers = {
+        name for name, attr in vars(Handler).items()
+        if inspect.isfunction(attr) and name != "do_POST"
+        and "body" in inspect.signature(attr).parameters
+    }
+    registered = {route.handler.__name__ for route in POST_ROUTES.values()}
+    assert handlers, "no POST handlers found -- the check below would be vacuous"
+    assert handlers == registered, (
+        "these POST handlers are not registered, so nothing says whether they "
+        f"write: {sorted(handlers ^ registered)}")
+    assert any(r.writes for r in POST_ROUTES.values())
+    assert not all(r.writes for r in POST_ROUTES.values())
 
 
 def test_writes_to_disk_resolves_a_real_session_token():
@@ -675,15 +622,12 @@ def test_writes_to_disk_resolves_a_real_session_token():
     assert not writes_to_disk("/api/upload")
 
 
-def test_the_bridge_reports_whether_a_call_wrote(tmp_path, hands):
+def test_the_bridge_reports_whether_a_call_wrote(seeded, db):
     """What the hosted page keys its upload off. A read that claims to have
     written costs a needless upload; a write that claims not to loses data."""
     from villain.webapp import browser
 
-    db = tmp_path / "v.db"
-    with Store(db) as store:
-        store.add_hands(hands)
-        victim = next(int(r["id"]) for r in store.players())
+    victim = next(int(r["id"]) for r in seeded.players())
     browser.set_db(str(db))
 
     read = browser.dispatch_json("GET", "/api/roster")
@@ -705,18 +649,15 @@ def test_the_bridge_reports_whether_a_call_wrote(tmp_path, hands):
     assert missing["wrote"] is False, "a refused write did not write"
 
 
-def test_a_definitions_rebuild_is_reported_as_a_write(tmp_path, hands):
+def test_a_definitions_rebuild_is_reported_as_a_write(seeded, db):
     """The hosted page only uploads when `wrote` is true. A GET that migrated
     the cache used to report false, so the stamp never reached IndexedDB and
     the next visit rebuilt every hand again."""
     from villain.webapp import browser
 
-    db = tmp_path / "v.db"
-    with Store(db) as store:
-        store.add_hands(hands)
-        store.conn.execute(
-            "INSERT OR REPLACE INTO meta (key, value) VALUES ('definitions_version', 'old')")
-        store.conn.commit()
+    seeded.conn.execute(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('definitions_version', 'old')")
+    seeded.conn.commit()
     browser.set_db(str(db))
 
     first = browser.dispatch_json("GET", "/api/roster")
@@ -759,62 +700,54 @@ def test_a_cold_hero_build_is_reported_as_a_write(tmp_path, hands):
 
 # --- the roster cache ---------------------------------------------------------
 
-def test_the_roster_is_rebuilt_when_the_hands_change(tmp_path, hands):
+def test_the_roster_is_rebuilt_when_the_hands_change(hands, store):
     """Serving a stale roster is worse than rebuilding it: the Database tab is
     the first thing anybody looks at after an import, and it would show the
     database as it was before."""
     from villain.webapp.payloads import roster_payload
 
-    db = tmp_path / "v.db"
-    with Store(db) as store:
-        store.add_hands(hands[:10])
-        first = roster_payload(store)
-        assert roster_payload(store) == first, "an unchanged database is a hit"
+    store.add_hands(hands[:10])
+    first = roster_payload(store)
+    assert roster_payload(store) == first, "an unchanged database is a hit"
 
-        store.add_hands(hands[10:])
-        after = roster_payload(store)
+    store.add_hands(hands[10:])
+    after = roster_payload(store)
     assert after != first, "adding hands has to invalidate the roster"
 
 
-def test_refitting_priors_invalidates_the_roster(tmp_path, hands):
+def test_refitting_priors_invalidates_the_roster(seeded):
     """The hole a row-count key would leave. `fit_priors` rewrites the same
     number of rows with different values, and every profile is read through
     them -- so a cache that only counted rows would serve pre-fit reads for as
     long as the process lived."""
     from villain.webapp.payloads import _roster_fingerprint
 
-    db = tmp_path / "v.db"
-    with Store(db) as store:
-        store.add_hands(hands)
-        before = _roster_fingerprint(store)
-        store.conn.execute(
-            "INSERT INTO fitted_priors"
-            " (regime, stat, mean, strength, players, fitted_at)"
-            " VALUES ('hu', 'test:stat', 0.5, 1.0, 9, 0)")
-        store.conn.commit()
-        seeded = _roster_fingerprint(store)
-        assert seeded != before
+    before = _roster_fingerprint(seeded)
+    seeded.conn.execute(
+        "INSERT INTO fitted_priors"
+        " (regime, stat, mean, strength, players, fitted_at)"
+        " VALUES ('hu', 'test:stat', 0.5, 1.0, 9, 0)")
+    seeded.conn.commit()
+    inserted = _roster_fingerprint(seeded)
+    assert inserted != before
 
-        # Same row count, different value -- what a refit does.
-        store.conn.execute(
-            "UPDATE fitted_priors SET strength = strength + 1"
-            " WHERE stat = 'test:stat'")
-        store.conn.commit()
-        assert _roster_fingerprint(store) != seeded
+    # Same row count, different value -- what a refit does.
+    seeded.conn.execute(
+        "UPDATE fitted_priors SET strength = strength + 1"
+        " WHERE stat = 'test:stat'")
+    seeded.conn.commit()
+    assert _roster_fingerprint(seeded) != inserted
 
 
-def test_the_roster_hands_out_a_copy(tmp_path, hands):
+def test_the_roster_hands_out_a_copy(seeded):
     """A caller that sorts or annotates its rows in place must not be editing
     what the next caller gets."""
     from villain.webapp.payloads import roster_payload
 
-    db = tmp_path / "v.db"
-    with Store(db) as store:
-        store.add_hands(hands)
-        rows = roster_payload(store)
-        assert rows, "fixture should produce a roster"
-        rows[0]["name"] = "scribbled over"
-        again = roster_payload(store)
+    rows = roster_payload(seeded)
+    assert rows, "fixture should produce a roster"
+    rows[0]["name"] = "scribbled over"
+    again = roster_payload(seeded)
     assert again[0]["name"] != "scribbled over"
 
 
@@ -837,8 +770,7 @@ def test_a_cross_origin_page_cannot_read_the_roster(tmp_path, hands):
 
     Only writes were checked, so any tab open in the same browser could fetch
     the roster off localhost and read every player's name -- or point an <img>
-    at it, which sends no Origin but does send a Referer.
-    """
+    at it, which sends no Origin but does send a Referer."""
     db = tmp_path / "v.db"
     with Store(db) as store:
         store.add_hands(hands)
@@ -888,8 +820,7 @@ def test_a_read_that_only_holds_at_one_table_size_survives(tmp_path):
     One player folds to turn bets 31% of the time heads-up against the hero
     and 54% against everybody else, while six-handed the same gap runs the
     other way. Averaged they cancel and nothing is reported, which is how the
-    strongest against-you read in the database went missing.
-    """
+    strongest against-you read in the database went missing."""
     from villain.dynamics import REGIME_MIN_OPPS, adjustments
     from villain.stats import VS_HERO, Ratio, StatBook
 
@@ -914,23 +845,21 @@ def test_a_read_that_only_holds_at_one_table_size_survives(tmp_path):
     assert hu.gap < 0, "heads-up he folds less, not more"
 
 
-def test_the_against_you_read_is_detail_only(tmp_path):
+def test_the_against_you_read_is_detail_only(store):
     """The roster is how everybody plays the field; one reference per list.
 
     Mixing "how they play the table" with "how they play you" in one column is
-    how the field read stopped meaning anything in the first place.
-    """
+    how the field read stopped meaning anything in the first place."""
     from tests.conftest import FIXTURE
     from villain.analyze import as_dict
     from villain.parsers import parse_file
     from villain.webapp import roster_payload
 
-    with Store(tmp_path / "v.db") as store:
-        store.add_hands(parse_file(FIXTURE))
-        rows = roster_payload(store)
-        assert rows, "need at least one player to check"
-        assert all("versus" not in row for row in rows)
-        detail = as_dict(store.profile(rows[0]["player_id"]))
+    store.add_hands(parse_file(FIXTURE))
+    rows = roster_payload(store)
+    assert rows, "need at least one player to check"
+    assert all("versus" not in row for row in rows)
+    detail = as_dict(store.profile(rows[0]["player_id"]))
     assert "versus" in detail, "the detailed view carries it"
 
 
@@ -995,22 +924,20 @@ def test_threads_work_is_false_when_they_cannot_start(no_threads):
     assert no_threads.threads_work() is False
 
 
-def test_hero_begin_refuses_rather_than_claiming_a_build(tmp_path, no_threads):
+def test_hero_begin_refuses_rather_than_claiming_a_build(no_threads, store):
     """False, not True: the caller has to know to build it itself."""
-    with Store(tmp_path / "v.db") as store:
-        assert no_threads.hero_begin(store) is False
+    assert no_threads.hero_begin(store) is False
 
 
-def test_a_failed_thread_start_does_not_wedge_the_flag(tmp_path, no_threads):
+def test_a_failed_thread_start_does_not_wedge_the_flag(no_threads, store):
     """The bug this exists for. A wedged flag is permanent: status reads
     'building' forever and the tab polls an answer that never comes."""
-    with Store(tmp_path / "v.db") as store:
-        no_threads.hero_begin(store)
-        assert no_threads._HERO_BUILDING == set()
-        assert no_threads.hero_status(store) != "building"
+    no_threads.hero_begin(store)
+    assert no_threads._HERO_BUILDING == set()
+    assert no_threads.hero_status(store) != "building"
 
 
-def test_the_flag_survives_a_start_that_fails_midway(tmp_path, monkeypatch):
+def test_the_flag_survives_a_start_that_fails_midway(monkeypatch, store):
     """Same guarantee when threads exist in principle but this start fails."""
     from villain.webapp import heroview
     monkeypatch.setattr(heroview, "_THREADS_WORK", True)
@@ -1020,40 +947,35 @@ def test_the_flag_survives_a_start_that_fails_midway(tmp_path, monkeypatch):
         raise RuntimeError("resource unavailable")
 
     monkeypatch.setattr(heroview.threading.Thread, "start", refuse)
-    with Store(tmp_path / "v.db") as store:
-        assert heroview.hero_begin(store) is False
-        assert heroview._HERO_BUILDING == set()
+    assert heroview.hero_begin(store) is False
+    assert heroview._HERO_BUILDING == set()
     heroview._THREADS_WORK = None
 
 
 # --- tabs that have nothing to show yet -------------------------------------
 
 
-def test_a_new_database_offers_neither_hero_nor_simulate(tmp_path):
+def test_a_new_database_offers_neither_hero_nor_simulate(store):
     from villain.webapp.payloads import tab_availability
-    with Store(tmp_path / "v.db") as store:
-        tabs = tab_availability(store)
+    tabs = tab_availability(store)
     assert tabs["hero"]["ok"] is False
     assert tabs["play"]["ok"] is False
     # The reason has to name the fix; "no hero found" tells a newcomer nothing.
     assert "Import" in tabs["hero"]["why"]
 
 
-def test_hands_without_an_identifiable_hero_open_simulate_but_not_hero(tmp_path, hands, monkeypatch):
+def test_hands_without_an_identifiable_hero_open_simulate_but_not_hero(monkeypatch, seeded):
     """The three states are distinct, and the middle one is the interesting
     case: there are hands and opponents to play, but nothing in them says
     which seat was yours, so Hero alone stays shut -- with a reason about
     whose cards are visible rather than about the database being empty.
 
     Simulate's sample bar is tested separately; here it is dropped to 1 so
-    the fixture can stand in for a measured opponent.
-    """
+    the fixture can stand in for a measured opponent."""
     from villain.webapp import payloads
     monkeypatch.setattr(payloads, "MIN_SIM_HANDS", 1)
-    with Store(tmp_path / "v.db") as store:
-        store.add_hands(hands)
-        store.rebuild()
-        tabs = payloads.tab_availability(store)
+    seeded.rebuild()
+    tabs = payloads.tab_availability(seeded)
     assert tabs["play"]["ok"] is True
     assert tabs["play"]["why"] is None
     assert tabs["hero"]["ok"] is False
@@ -1061,38 +983,33 @@ def test_hands_without_an_identifiable_hero_open_simulate_but_not_hero(tmp_path,
     assert "nothing in this database" not in tabs["hero"]["why"]
 
 
-def test_a_hero_and_opponents_open_both(tmp_path, hands, monkeypatch):
+def test_a_hero_and_opponents_open_both(monkeypatch, seeded):
     """Hero detection needs more hands than the fixture has, so it is stubbed:
     what is under test is the availability logic, not find_hero."""
     from villain.webapp import payloads
     monkeypatch.setattr(payloads, "MIN_SIM_HANDS", 1)
-    with Store(tmp_path / "v.db") as store:
-        store.add_hands(hands)
-        store.rebuild()
-        monkeypatch.setattr("villain.webapp.heroview._cached_hero_id", lambda s: 1)
-        tabs = payloads.tab_availability(store)
+    seeded.rebuild()
+    monkeypatch.setattr("villain.webapp.heroview._cached_hero_id", lambda s: 1)
+    tabs = payloads.tab_availability(seeded)
     assert tabs["hero"]["ok"] is True
     assert tabs["hero"]["why"] is None
     assert tabs["play"]["ok"] is True
 
 
-def test_simulate_stays_closed_until_an_opponent_is_measured(tmp_path, hands):
+def test_simulate_stays_closed_until_an_opponent_is_measured(seeded):
     """Five hands is the prior with a name attached; the sim needs a real sample."""
     from villain.webapp.payloads import MIN_SIM_HANDS, tab_availability
-    with Store(tmp_path / "v.db") as store:
-        store.add_hands(hands)
-        store.rebuild()
-        tabs = tab_availability(store)
+    seeded.rebuild()
+    tabs = tab_availability(seeded)
     assert tabs["play"]["ok"] is False
     assert str(MIN_SIM_HANDS) in tabs["play"]["why"]
 
 
-def test_every_blocked_tab_says_why(tmp_path):
+def test_every_blocked_tab_says_why(store):
     """A dimmed tab with no explanation is worse than one that is merely
     empty -- there is nothing to hover and nothing to do about it."""
     from villain.webapp.payloads import tab_availability
-    with Store(tmp_path / "v.db") as store:
-        tabs = tab_availability(store)
+    tabs = tab_availability(store)
     for name, state in tabs.items():
         if not state["ok"]:
             assert state["why"], f"{name} is blocked without a reason"
@@ -1167,21 +1084,19 @@ def test_a_merge_that_cannot_be_honored_is_never_asked(tmp_path, hands):
 # TypeError on every cold Hero build, and a green test suite.
 
 
-def test_hero_peek_includes_live_progress(tmp_path):
+def test_hero_peek_includes_live_progress(store, db):
     """Local ``villain test`` answers 202 and the page polls peek for the
     counted veil. A peek that only said "building" was a loader with no bar."""
     from villain.webapp import heroview
 
-    db = tmp_path / "v.db"
-    with Store(db) as store:
-        key = (str(store.path), None)
-        heroview._HERO_BUILDING.add(key)
-        heroview._HERO_PROGRESS[key] = (1200, 36000, "measuring")
-        try:
-            status, body, _ = _dispatch(db, "GET", "/api/hero?peek=1")
-        finally:
-            heroview._HERO_BUILDING.discard(key)
-            heroview._HERO_PROGRESS.pop(key, None)
+    key = (str(store.path), None)
+    heroview._HERO_BUILDING.add(key)
+    heroview._HERO_PROGRESS[key] = (1200, 36000, "measuring")
+    try:
+        status, body, _ = _dispatch(db, "GET", "/api/hero?peek=1")
+    finally:
+        heroview._HERO_BUILDING.discard(key)
+        heroview._HERO_PROGRESS.pop(key, None)
     assert status == 200, body
     peek = json.loads(body)
     assert peek["status"] == "building"
@@ -1332,8 +1247,7 @@ def _dispatch(db_path, method, path, body=None):
     """One request through the real routing, with the socket taken out.
 
     Same bridge the in-browser build uses, so a route tested here is the route
-    the hosted page runs -- not a re-implementation of it.
-    """
+    the hosted page runs -- not a re-implementation of it."""
     from villain.webapp import browser
     browser.set_db(str(db_path))
     payload = json.dumps(body or {}).encode()
@@ -1372,8 +1286,7 @@ def test_delete_player_route_refuses_the_hero(tmp_path, hands):
 
     The fixture is twenty heads-up hands and has no hero of its own, so one is
     seeded into the same cache the route consults -- the point under test is
-    the guard, not hero detection.
-    """
+    the guard, not hero detection."""
     from villain.webapp.heroview import _HERO_ID_CACHE, _hand_count
 
     db = tmp_path / "v.db"
@@ -1401,17 +1314,13 @@ def test_delete_player_route_404s_on_an_unknown_id(tmp_path, hands):
 
 
 
-def test_unlink_route_404s_on_an_alias_that_is_not_there(tmp_path, hands):
+def test_unlink_route_404s_on_an_alias_that_is_not_there(seeded, db):
     """The same shape of answer /api/player/delete gives for an unknown id.
 
     ``Store.unlink`` raises LookupError, which only the catch-all caught, so
     asking about an alias that is not on that player came back as a 500 --
-    the tool reporting itself broken instead of answering the question.
-    """
-    db = tmp_path / "v.db"
-    with Store(db) as store:
-        store.add_hands(hands)
-        pid = int(store.players()[0]["id"])
+    the tool reporting itself broken instead of answering the question."""
+    pid = int(seeded.players()[0]["id"])
     status, body, _ = _dispatch(db, "POST", "/api/unlink",
                                 {"player_id": pid, "site": "pokernow",
                                  "account": "no-such-account"})
@@ -1425,11 +1334,11 @@ def test_sim_paces_every_auto_action_the_same():
     A villain's ``think_ms`` could be 400ms next to an 8s tank, folds had a
     shorter wait than everything else, and an armed check/fold fired on the
     same paint as the bet it was answering. One 3s beat, shared by bots and
-    the auto-act, is what makes the action readable.
-    """
-    from pathlib import Path
-    app = (Path(__file__).resolve().parent.parent
-           / "villain" / "webapp" / "assets" / "app.js").read_text()
+    the auto-act, is what makes the action readable."""
+    # The assembled asset, not a source file: /static/app.js is concatenated
+    # from villain/webapp/assets/app/*.js, and what ships is what to assert on.
+    from villain.webapp.assets import static
+    app = static("app.js")[0].decode()
     assert "const SIM_DELAY = 3000" in app
     clock = app[app.index("function armSimClock"):app.index("function renderTable")]
     assert "think_ms" not in clock
@@ -1450,8 +1359,7 @@ def test_simulate_stays_in_the_viewport_on_a_phone():
     The seats sit on the rim, the action bar sits under them, and the log
     used to stack underneath as a document. A phone then had to scroll to
     find its own cards. The sim stays locked to the viewport; the layout
-    inside it has to fit.
-    """
+    inside it has to fit."""
     from pathlib import Path
     css = (Path(__file__).resolve().parent.parent
            / "villain" / "webapp" / "assets" / "app.css").read_text()
@@ -1461,15 +1369,12 @@ def test_simulate_stays_in_the_viewport_on_a_phone():
     assert ".spinner.sm" in css
 
 
-def test_a_sitting_still_renders_after_a_player_is_deleted(tmp_path, hands):
+def test_a_sitting_still_renders_after_a_player_is_deleted(seeded, db):
     """End to end: /api/session-detail is what a delete used to take down."""
-    db = tmp_path / "v.db"
-    with Store(db) as store:
-        store.add_hands(hands)
-        from villain.webapp.heroview import _cached_hero_id
-        hero_id = _cached_hero_id(store)
-        victim = next(int(r["id"]) for r in store.players() if int(r["id"]) != hero_id)
-        sessions = [s["id"] for s in store.sessions()]
+    from villain.webapp.heroview import _cached_hero_id
+    hero_id = _cached_hero_id(seeded)
+    victim = next(int(r["id"]) for r in seeded.players() if int(r["id"]) != hero_id)
+    sessions = [s["id"] for s in seeded.sessions()]
 
     status, _, _ = _dispatch(db, "POST", "/api/player/delete", {"player_id": victim})
     assert status == 200

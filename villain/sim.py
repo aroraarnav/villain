@@ -31,8 +31,7 @@ class Villain:
     describes neither. The sim was handing the policy the pooled profile, so
     a villain defended their big blind at their six-max rate in a heads-up
     match. Seats empty out as people bust, so this is resolved per hand
-    rather than once when the game is made.
-    """
+    rather than once when the game is made."""
 
     def __init__(self, pooled, by_regime: dict | None = None):
         self.pooled = pooled
@@ -189,8 +188,7 @@ class Game:
         The analysis used to be P/L and VPIP -- numbers that do not say
         *what to do next*. These sentences are the profile talking: they
         fold this many flops, they fold this many 3-bets, so this is the
-        work.
-        """
+        work."""
         n = max(self.stats["hands"], 1)
         aggr = (self.stats["post_aggr"] / self.stats["post_acts"]
                 if self.stats["post_acts"] else None)
@@ -290,8 +288,7 @@ class Game:
 
         Folded seats are out: listing a preflop folder's junk (or a river
         folder's tens) as "what they can still hold" is how QT on a ten-high
-        board showed up next to a fold.
-        """
+        board showed up next to a fold."""
         h = self.hand
         rs = getattr(h, "_ranges", None)
         if rs is None:
@@ -312,8 +309,7 @@ def _made_name(hole, board) -> str | None:
     """Category of this hole on this board: pair, flush, full house, …
 
     Needs five cards, so nothing until the flop. The evaluator already
-    scores a 5- or 6-card board; we do not pad.
-    """
+    scores a 5- or 6-card board; we do not pad."""
     if not hole or len(board) < 3:
         return None
     seven = np.concatenate([
@@ -324,7 +320,5 @@ def _made_name(hole, board) -> str | None:
 
 
 def _stat(profile, key: str, min_opps: float = 20.0) -> float | None:
-    est = getattr(profile, "stats", {}).get(key) if profile is not None else None
-    if est is None or getattr(est, "opps", 0) < min_opps:
-        return None
-    return float(est.value)
+    value = None if profile is None else profile.rate(key, None, min_opps)
+    return None if value is None else float(value)

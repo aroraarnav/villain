@@ -88,13 +88,10 @@ def test_in_words_states_the_direction_correctly(synth_profile):
     assert "less often than" in low.in_words
 
 
-def test_analyze_export_carries_the_language(tmp_path, hands):
+def test_analyze_export_carries_the_language(seeded):
     from villain.analyze import as_dict
-    from villain.db import Store
-    with Store(tmp_path / "v.db") as store:
-        store.add_hands(hands)
-        player = max(store.players(), key=lambda r: r["hands"] or 0)
-        payload = as_dict(store.profiles(int(player["id"]))[0])
+    player = max(seeded.players(), key=lambda r: r["hands"] or 0)
+    payload = as_dict(seeded.profiles(int(player["id"]))[0])
     assert "combinations" in payload and "plan" in payload
     json.dumps(payload)
     for leak in payload["leaks"]:
@@ -127,8 +124,7 @@ def test_pooling_measures_style_not_raw_frequency():
 
     Someone playing exactly the 3-max average translates to the heads-up
     average, not to the same raw percentage -- that is the whole point of
-    pooling in log-odds against each table's own population.
-    """
+    pooling in log-odds against each table's own population."""
     from villain.priors import population_mean
     from villain.profile import _translate_rate
     from villain.stats import Ratio
@@ -263,8 +259,7 @@ def test_a_small_threshold_keeps_a_reachable_trigger():
 
     ``no_three_bet`` (0.05) and ``never_check_raises`` (0.04) had their
     triggers pushed to 0.00 and -0.01 -- below any frequency that exists, so
-    neither could fire on any player at any sample size.
-    """
+    neither could fire on any player at any sample size."""
     from villain.exploits import MARGIN, trigger_for
 
     for threshold in (0.04, 0.05):
@@ -300,8 +295,7 @@ def test_no_rule_asks_for_a_frequency_nobody_could_post(tmp_path):
     the pool's highest is 0.245, and every timing rule sat above its own
     ceiling. The pool-derived ones are now held inside the band players
     actually occupy -- including the margin the trigger adds on top, which is
-    where two of them escaped it on the second pass.
-    """
+    where two of them escaped it on the second pass."""
     from villain.exploits import MARGIN, POOL_HIGH, POOL_LOW, pool_bar, trigger_for
     from villain.profile import Profile
 

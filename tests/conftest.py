@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from villain.archetypes import ARCHETYPE_BY_NAME, target_frequency
+from villain.db import Store
 from villain.parsers import parse_file
 from villain.profile import PROFILE_FEATURES, build_profile
 from villain.stats import StatBook
@@ -30,6 +31,34 @@ def _reset_db_module_hooks():
 @pytest.fixture(scope="session")
 def hands():
     return parse_file(FIXTURE)
+
+
+@pytest.fixture
+def db(tmp_path):
+    """Where a test database lives. A fixture rather than a literal because
+    tests that must observe a close-and-reopen need the path, not the
+    connection, and they were writing ``tmp_path / "v.db"`` twice to get it."""
+    return tmp_path / "v.db"
+
+
+@pytest.fixture
+def store(db):
+    """An open, empty store.
+
+    Sixty-eight tests opened one, and fifty-nine of them wanted nothing from
+    the ``with`` block but the store -- two lines and an indent level around
+    the assertions that were the point. The eight that genuinely test a
+    close-and-reopen keep their own blocks; that is what they are for."""
+    with Store(db) as open_store:
+        yield open_store
+
+
+@pytest.fixture
+def seeded(store, hands):
+    """``store`` with the parser fixture's hands in it -- forty-four tests
+    opened with exactly that pair of lines."""
+    store.add_hands(hands)
+    return store
 
 
 @pytest.fixture

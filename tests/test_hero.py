@@ -4,18 +4,17 @@ import pytest
 
 from villain.db import Store
 from villain.hero import (
+    CHECK,
+    FOLD,
     MARGIN,
     MIN_TELL_HANDS,
-    MISSED_VALUE_MARGIN,
     SIZING,
     SIZING_TELL_GAP,
     TIMING,
     TIMING_TELL_GAP,
     Bucket,
-    FoldGrade,
-    FoldReport,
-    MissedValue,
-    MissedValueReport,
+    Grade,
+    GradeReport,
     StreetStrength,
     Tell,
     combined_grid,
@@ -113,7 +112,7 @@ def test_fold_grades_produces_well_formed_grades(stored):
     hero_id = find_hero(stored, min_hands=10)
     hero_hands = stored.player_hands(hero_id)
     report = fold_grades(hero_hands, hero_id, _StubModel())
-    assert isinstance(report, FoldReport)
+    assert isinstance(report, GradeReport)
     for g in report.grades:
         assert 0.0 <= g.strength <= 1.0
         assert g.faced_strength == 0.5
@@ -131,11 +130,11 @@ def test_combined_grid_sums_every_position(stored):
         assert 0 <= played <= dealt
 
 
-# -- FoldGrade arithmetic -----------------------------------------------------
+# -- fold grades: the priced comparison -----------------------------------------------------
 
 def _grade(strength, faced_strength, required_equity, pot_before_bb=10.0, to_call_bb=5.0):
-    return FoldGrade(
-        hand_id="h", street=1, hole_cards=("Ah", "Kh"), board=["2c", "7d", "9s"],
+    return Grade(
+        FOLD, hand_id="h", street=1, hole_cards=("Ah", "Kh"), board=["2c", "7d", "9s"],
         strength=strength, faced_strength=faced_strength,
         required_equity=required_equity,
         pot_before_bb=pot_before_bb, to_call_bb=to_call_bb,
@@ -147,21 +146,21 @@ def test_edge_is_strength_minus_what_the_bet_represents():
     assert g.edge == pytest.approx(0.25)
 
 
-def test_mistake_needs_both_bars_cleared():
+def test_a_fold_is_flagged_only_when_both_bars_clear():
     # Clears the model comparison but not the raw price: not a mistake.
     priced_out = _grade(strength=0.40, faced_strength=0.20, required_equity=0.50)
     assert priced_out.edge > MARGIN
-    assert not priced_out.mistake
+    assert not priced_out.flagged
 
     # Clears the price but is no stronger than what the bet usually is:
     # not a mistake either.
     unremarkable = _grade(strength=0.60, faced_strength=0.58, required_equity=0.30)
     assert unremarkable.strength > unremarkable.required_equity
-    assert not unremarkable.mistake
+    assert not unremarkable.flagged
 
     # Clears both: a real mistake.
     real = _grade(strength=0.80, faced_strength=0.55, required_equity=0.30)
-    assert real.mistake
+    assert real.flagged
 
 
 def test_worst_ranks_by_worth_not_by_edge_alone():
@@ -170,17 +169,17 @@ def test_worst_ranks_by_worth_not_by_edge_alone():
                        pot_before_bb=5.0, to_call_bb=2.0)
     big_pot = _grade(strength=0.80, faced_strength=0.55, required_equity=0.30,
                      pot_before_bb=50.0, to_call_bb=20.0)
-    report = FoldReport(grades=[small_pot, big_pot])
+    report = GradeReport(grades=[small_pot, big_pot])
     assert report.worst(2) == [big_pot, small_pot]
 
 
-def test_mistake_rate_and_by_street_ignore_non_mistakes():
+def test_rate_and_by_street_ignore_unflagged_grades():
     ok = _grade(strength=0.40, faced_strength=0.45, required_equity=0.30)
     bad = _grade(strength=0.90, faced_strength=0.50, required_equity=0.30)
-    report = FoldReport(grades=[ok, bad])
+    report = GradeReport(grades=[ok, bad])
     assert report.graded == 2
-    assert report.mistakes == [bad]
-    assert report.mistake_rate == pytest.approx(0.5)
+    assert report.flagged == [bad]
+    assert report.rate == pytest.approx(0.5)
     assert report.by_street() == {1: (1, 2)}
 
 
@@ -253,7 +252,7 @@ def test_texture_label(board, expected):
     assert texture_label(board) == expected
 
 
-# -- FoldGrade.in_words ---------------------------------------------------------
+# -- the sentence a grade renders itself as ---------------------------------------------------------
 
 def test_fold_grade_in_words_states_both_numbers():
     g = _grade(strength=0.80, faced_strength=0.55, required_equity=0.30)
@@ -268,13 +267,13 @@ def test_fold_grade_summary_is_shorter_than_in_words():
 
 
 def test_fold_report_by_texture_matches_by_street_shape():
-    wet = FoldGrade(hand_id="a", street=1, hole_cards=("Ah", "Kh"),
-                    board=["2c", "5c", "9c"], strength=0.9, faced_strength=0.5,
-                    required_equity=0.3, pot_before_bb=10.0, to_call_bb=5.0)
-    dry = FoldGrade(hand_id="b", street=1, hole_cards=("Ah", "Kh"),
-                    board=["Ac", "8d", "2h"], strength=0.4, faced_strength=0.45,
-                    required_equity=0.3, pot_before_bb=10.0, to_call_bb=5.0)
-    report = FoldReport(grades=[wet, dry])
+    wet = Grade(FOLD, hand_id="a", street=1, hole_cards=("Ah", "Kh"),
+                board=["2c", "5c", "9c"], strength=0.9, faced_strength=0.5,
+                required_equity=0.3, pot_before_bb=10.0, to_call_bb=5.0)
+    dry = Grade(FOLD, hand_id="b", street=1, hole_cards=("Ah", "Kh"),
+                board=["Ac", "8d", "2h"], strength=0.4, faced_strength=0.45,
+                required_equity=0.3, pot_before_bb=10.0, to_call_bb=5.0)
+    report = GradeReport(grades=[wet, dry])
     assert wet.texture == "wet" and dry.texture == "dry"
     assert report.by_texture() == {"wet": (1, 1), "dry": (0, 1)}
 
@@ -282,32 +281,41 @@ def test_fold_report_by_texture_matches_by_street_shape():
 # -- missed_value -----------------------------------------------------------
 
 def _missed(strength, faced_strength, pot_before_bb=10.0):
-    return MissedValue(
-        hand_id="h", street=1, hole_cards=("Ah", "Kh"), board=["2c", "7d", "9s"],
+    return Grade(
+        CHECK, hand_id="h", street=1, hole_cards=("Ah", "Kh"), board=["2c", "7d", "9s"],
         strength=strength, faced_strength=faced_strength, pot_before_bb=pot_before_bb,
     )
 
 
 def test_missed_value_needs_the_bigger_margin():
-    """MISSED_VALUE_MARGIN is deliberately wider than MARGIN -- see the module
-    comment. A gap that would count as a fold mistake should not automatically
-    count as missed value."""
+    """CHECK's margin is deliberately wider than FOLD's -- see GradeKind. A
+    gap that would count as a fold mistake should not automatically count as
+    missed value."""
     small_edge = _missed(strength=0.70, faced_strength=0.55)   # edge 0.15 > MARGIN(0.05)
     assert small_edge.edge > MARGIN
-    assert small_edge.edge < MISSED_VALUE_MARGIN
-    assert not small_edge.missed
+    assert small_edge.edge < CHECK.margin
+    assert not small_edge.flagged
 
-    big_edge = _missed(strength=0.90, faced_strength=0.50)     # edge 0.40 > MISSED_VALUE_MARGIN
-    assert big_edge.missed
+    big_edge = _missed(strength=0.90, faced_strength=0.50)     # edge 0.40 > CHECK.margin
+    assert big_edge.flagged
 
 
-def test_missed_value_report_aggregates_like_fold_report():
+def test_a_check_faces_no_price_so_only_the_margin_gates_it():
+    """The second bar in `flagged` is pot odds, and a check faces none. It
+    stays in the shared rule because required_equity is 0 for a CHECK, which
+    is the honest reading rather than a special case."""
+    g = _missed(strength=0.90, faced_strength=0.50)
+    assert g.required_equity == 0.0 and g.to_call_bb == 0.0
+    assert g.worth() == pytest.approx(g.edge * g.pot_before_bb)
+
+
+def test_missed_value_report_aggregates_like_a_fold_report():
     ok = _missed(strength=0.40, faced_strength=0.45)
     bad = _missed(strength=0.90, faced_strength=0.50)
-    report = MissedValueReport(grades=[ok, bad])
+    report = GradeReport(grades=[ok, bad])
     assert report.graded == 2
-    assert report.missed == [bad]
-    assert report.missed_rate == pytest.approx(0.5)
+    assert report.flagged == [bad]
+    assert report.rate == pytest.approx(0.5)
     assert report.by_street() == {1: (1, 2)}
 
 
@@ -327,7 +335,7 @@ def test_missed_value_produces_well_formed_grades(stored):
     hero_id = find_hero(stored, min_hands=10)
     hero_hands = stored.player_hands(hero_id)
     report = missed_value(hero_hands, hero_id, _StubModel())
-    assert isinstance(report, MissedValueReport)
+    assert isinstance(report, GradeReport)
     for g in report.grades:
         assert 0.0 <= g.strength <= 1.0
         assert g.faced_strength == 0.5

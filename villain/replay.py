@@ -16,8 +16,7 @@ def replay(hand: Hand, focus: str | None = None) -> dict:
 
     ``focus`` is a player key whose actions get marked, so the hand can be read
     from one player's point of view -- which is how it is always being read
-    when it arrives from a piece of evidence.
-    """
+    when it arrives from a piece of evidence."""
     bb = hand.big_blind or 1
     seats = [
         {"seat": s.seat, "name": s.name, "position": s.position,

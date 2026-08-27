@@ -33,7 +33,7 @@ include = ["villain*"]
 # not importable modules. Without this they are left out of a wheel, and the
 # in-browser build (villain.webapp.browser) would import a UI it cannot serve.
 [tool.setuptools.package-data]
-"villain.webapp" = ["assets/*"]
+"villain.webapp" = ["assets/*", "assets/app/*.js"]
 # The interface's words, as data rather than Python. Same reasoning as the
 # assets above: without this line the wheel installs without them and the
 # app raises on import -- in the browser only, where nothing else looks.

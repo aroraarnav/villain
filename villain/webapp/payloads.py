@@ -16,6 +16,7 @@ from ..db import Store
 from ..exploits import RULES, find_watchlist
 from ..skill import weaknesses
 from ..timing import timing_tells
+from .jsonutil import as_json
 
 DISPLAY_STATS = [
     ("vpip", "VPIP", "hands played"),
@@ -58,13 +59,12 @@ def _references(stat: str, _regime: str, profile) -> dict:
     The tick has to be the same field the estimate was shrunk toward. After
     ``villain fit`` that is ``profile.population`` (the pool), not the built-in
     online mean: drawing the online number next to a home-game posterior is how
-    most of a loose pool read "high vs field".
-    """
-    out = {"population": round(profile.population(stat), 4)}
+    most of a loose pool read "high vs field"."""
+    out = {"population": profile.population(stat)}
     rule = _THRESHOLD_RULES.get(stat)
     if rule is not None:
         try:
-            out["breakeven"] = round(rule.threshold(profile), 4)
+            out["breakeven"] = rule.threshold(profile)
             out["breakeven_label"] = ("bluff breaks even"
                                       if stat.startswith(("fold_vs_bet", "fold_to_cbet"))
                                       else "exploit threshold")
@@ -87,12 +87,12 @@ def profile_payload(profile, player_id: int | None = None) -> dict:
             continue
         payload["rows"].append({
             "stat": stat, "label": label, "denominator": denominator,
-            "value": round(est.value, 4), "lo": round(est.lo, 4), "hi": round(est.hi, 4),
-            "raw": None if est.raw is None else round(est.raw, 4),
+            "value": est.value, "lo": est.lo, "hi": est.hi,
+            "raw": est.raw,
             # Opportunity counts are fractional inside the model (pooling
             # across table sizes), but a sample size rendered as
             # 92.86041666666667 is noise on screen.
-            "opps": round(est.opps, 1), "weight": round(est.weight, 3),
+            "opps": round(est.opps, 1), "weight": est.weight,
             **_references(stat, profile.regime, profile),
         })
     arch = ARCHETYPE_BY_NAME.get(profile.archetype)
@@ -100,7 +100,7 @@ def profile_payload(profile, player_id: int | None = None) -> dict:
     payload["summary"] = arch.summary if arch else ""
     payload["regime_label"] = profile.regime_label
     payload["deviations"] = [
-        {"feature": f, "z": round(z, 2)}
+        {"feature": f, "z": z}
         for f, z in sorted(deviations(profile).items(), key=lambda kv: -abs(kv[1]))[:10]
     ]
     payload["timing"] = {
@@ -110,31 +110,14 @@ def profile_payload(profile, player_id: int | None = None) -> dict:
                     "think:pf", "think:flop", "think:turn", "think:river")
         if profile.means.get(key)
     }
-    payload["timing_tells"] = [
-        {"pace": c.pace, "street": c.street, "action": c.action,
-         "action_label": c.action_label, "n": c.n, "total": c.total,
-         "share": None if c.share is None else round(c.share, 3),
-         "won": None if c.won is None else round(c.won, 3),
-         "won_base": None if c.won_base is None else round(c.won_base, 3),
-         "wtsd": None if c.wtsd is None else round(c.wtsd, 3),
-         "wtsd_base": None if c.wtsd_base is None else round(c.wtsd_base, 3),
-         "fold_next": None if c.fold_next is None else round(c.fold_next, 3),
-         "fold_next_base": None if c.fold_next_base is None else round(c.fold_next_base, 3),
-         "fold_next_n": c.fold_next_n,
-         "sd_strength": None if c.sd_strength is None else round(c.sd_strength, 3),
-         "sd_base": None if c.sd_base is None else round(c.sd_base, 3),
-         "sd_n": c.sd_n,
-         "label": c.label, "read": c.read}
-        for c in timing_tells(profile)
-    ]
+    payload["timing_tells"] = [as_json(c, "action_label") for c in timing_tells(profile)]
     from ..gto import compare as _gto_compare
     from ..gto import rating as _gto_rating
     _grows = _gto_compare(profile)
     payload["gto"] = {
         "rating": _gto_rating(_grows),
-        "rows": [{"stat": r.stat, "player": r.player, "target": r.target,
-                  "deviation": round(r.deviation, 4), "fidelity": r.fidelity,
-                  "opps": round(r.opps, 1)} for r in _grows],
+        "rows": [as_json(r, "deviation") | {"opps": round(r.opps, 1)}
+                 for r in _grows],
     }
     return payload
 
@@ -154,6 +137,35 @@ MIN_ROSTER_HANDS = 5
 _ROSTER_CACHE: dict[str, tuple[tuple, list[dict]]] = {}
 
 
+def roster_row(profile) -> dict:
+    """The columns a player occupies in a list of players.
+
+    Both lists build it: the Database tab's roster and the Sessions tab's
+    preview of who was at a sitting. They were written out separately, so the
+    rule that an unmeasured player carries no skill number -- which is what
+    keeps the default sort putting them last instead of in the middle at 50 --
+    existed twice, and the two tabs would have sorted differently the moment
+    one of them changed."""
+    top = profile.tags[0] if profile.tags else None
+    return {
+        "name": profile.name,
+        "regime": profile.regime,
+        "regime_label": profile.regime_label,
+        "table_mix": profile.table_mix,
+        "hands": profile.hands,
+        "sample_quality": profile.sample_quality,
+        "archetype": profile.archetype,
+        "confidence": profile.archetype_confidence,
+        "skill": None if not profile.skill.measured else profile.skill.base,
+        "skill_tier": profile.skill.tier,
+        "skill_confidence": profile.skill.confidence,
+        "skill_measured": profile.skill.measured,
+        "exploitability": profile.skill.exploitability,
+        "top_leak": top.headline if top else None,
+        "leak_count": len(profile.tags),
+    }
+
+
 def _roster_fingerprint(store: Store) -> tuple:
     """Everything the roster is computed from, cheaply enough to check first.
 
@@ -165,8 +177,7 @@ def _roster_fingerprint(store: Store) -> tuple:
 
     Measured against the live database: 4ms, versus 1,440ms to rebuild -- so
     this is checked on every request rather than invalidated by hand from the
-    routes that write. An invalidation hook is a thing to forget; this is not.
-    """
+    routes that write. An invalidation hook is a thing to forget; this is not."""
     hands, players = store.conn.execute(
         "SELECT (SELECT COUNT(*) FROM hands), (SELECT COUNT(*) FROM players)"
     ).fetchone()
@@ -222,48 +233,28 @@ def _build_roster(store: Store) -> list[dict]:
                         note = (f"scores {weak[0].score:.0f}/100 here"
                                 + (f" ({weak[0].note})" if weak[0].note else "")
                                 + " -- from the rating, not a measured frequency")
-            rows.append({
+            rows.append(roster_row(profile) | {
                 "player_id": int(player["id"]),
                 "name": profile.name or player["display_name"],
                 "aliases": player["aliases"],
-                "regime": profile.regime,
-                "regime_label": profile.regime_label,
-                "table_mix": profile.table_mix,
-                "hands": profile.hands,
-                "sample_quality": profile.sample_quality,
-                "archetype": profile.archetype,
-                "confidence": profile.archetype_confidence,
-                # Unmeasured rows carry no skill number so the default sort
-                # (high first) puts them last rather than in the middle at 50.
-                "skill": (None if not profile.skill.measured
-                          else profile.skill.base),
-                "skill_tier": profile.skill.tier,
-                "skill_confidence": profile.skill.confidence,
-                "skill_measured": profile.skill.measured,
-                "exploitability": profile.skill.exploitability,
                 "gto": _gto_rating(_gto_compare(profile)),
                 "top_leak": headline,
                 "top_leak_status": status,
                 "top_leak_note": note,
                 "top_leak_severity": round(top.severity, 2) if top else 0.0,
-                "leak_count": len(profile.tags),
                 "last_seen": profile.last_seen,
             })
     rows.sort(key=lambda r: (-r["hands"],))
     return rows
 
 
-# ---------------------------------------------------------------------------
-# uploaded sessions, held in memory until saved
-# ---------------------------------------------------------------------------
+# -- uploaded sessions, held in memory until saved -----------------------------
 # A session is deliberately not written anywhere. You can drop a file in, read
 # the table, and close the tab without the database gaining a single hand.
 
 
 
-# ---------------------------------------------------------------------------
-# which tabs can be opened yet
-# ---------------------------------------------------------------------------
+# -- which tabs can be opened yet ----------------------------------------------
 
 #: A player needs this many hands before the simulator can act from a measured
 #: profile rather than from the prior alone -- below it, every villain plays the
@@ -283,8 +274,7 @@ def tab_availability(store: Store) -> dict[str, dict]:
 
     Reasons name the fix, not the deficiency -- "import an export you played
     in" rather than "no hero found" -- because every one of these is reached by
-    someone who has just arrived and has no idea what the tool wanted.
-    """
+    someone who has just arrived and has no idea what the tool wanted."""
     # Local, not top-level: heroview imports this module, so importing it back
     # at module scope is a cycle.
     from .heroview import _cached_hero_id

@@ -155,8 +155,7 @@ def _limped_to(button_stack=200, limpers=1, seed=1):
 
     ``seed`` varies the deal: a fixed one hands the button the same holding
     every trial, so a rate measured over it is one hand's decision repeated
-    rather than a frequency.
-    """
+    rather than a frequency."""
     h = Hand(_seats(200, 200, button_stack), button=2, sb=1, bb=2,
              rng=np.random.default_rng(seed))
     for _ in range(limpers):
@@ -219,8 +218,7 @@ def _raised_flop(hole, bet=20, raise_to=60, level=2):
 
     Postflop the engine carries no separate "bet" verb -- the first aggressive
     action into an unbet pot is a raise from zero, which is what the policy
-    itself emits.
-    """
+    itself emits."""
     h = Hand(_seats(400, 400), button=0, sb=1, bb=2, rng=np.random.default_rng(2))
     h.act("call")                          # limped preflop
     h.act("check")
@@ -327,8 +325,7 @@ def test_a_bigger_bet_is_continued_against_tighter(street_idx, name):
     """A pooled fold frequency is measured at the sizes they usually face.
 
     Applied unchanged it made the bot's threshold identical at every size --
-    MDF and pot odds were computed and then never bound.
-    """
+    MDF and pot odds were computed and then never bound."""
     prof = _sized_profile()
     small = _facing(street_idx, 0.33, prof)
     big = _facing(street_idx, 1.75, prof)
@@ -349,8 +346,7 @@ def test_the_bet_depth_in_the_reason_matches_the_action_named():
 
     An earlier line said "3-bets ... at 2-bet depth" in one sentence. The
     label names the action; the explanation names the frequency, not a
-    depth that contradicts it.
-    """
+    depth that contradicts it."""
     profile = _Prof(three_bet=0.99, four_bet=0.99, five_bet=0.99)
     rng = np.random.default_rng(0)
     seen = 0
@@ -379,7 +375,7 @@ def test_the_bet_depth_in_the_reason_matches_the_action_named():
 
 # -- the sim plays the table it is actually at --------------------------------
 
-def test_a_villain_uses_the_book_for_the_table_size():
+def test_a_villain_uses_the_book_for_the_table_size(hands):
     """Heads-up and six-handed are two strategies, not one with a label."""
     from villain.sim import MIN_REGIME_HANDS, Villain
 
@@ -395,7 +391,7 @@ def test_a_villain_uses_the_book_for_the_table_size():
     assert v.at(6) is six
 
 
-def test_a_thin_regime_book_falls_back_to_the_pooled_one():
+def test_a_thin_regime_book_falls_back_to_the_pooled_one(hands):
     """A book on forty hands describes the right game and nothing else."""
     from villain.sim import MIN_REGIME_HANDS, Villain
 
@@ -437,8 +433,7 @@ def test_small_pairs_defend_the_bb_against_a_button_open():
     """33 from the BB 3-handed vs a BTN open is a call even for a tight player.
 
     Chen ranking put 22-55 below KTo, so a monotonic top-X% defend folded them.
-    Even a 35% defender still set-mines small pairs. 72o still folds.
-    """
+    Even a 35% defender still set-mines small pairs. 72o still folds."""
     tight = _Prof(bb_defend=0.35, three_bet=0.05, three_bet_vs_steal=0.05)
     pair_calls = junk_calls = 0
     n = 40
@@ -699,8 +694,7 @@ def test_a_third_pot_cbet_at_spr_two_is_not_a_shove():
     """SPR ≤ 2 used to jam every flop bet in a 3-bet pot.
 
     A third-pot stab at SPR 2 leaves 1.7 pots behind. Overpair on a dry flop
-    is the hand that then shoved a texture they bet small.
-    """
+    is the hand that then shoved a texture they bet small."""
     from villain.cards import card_id
     profile = _Prof(**{"cbet:flop": 0.99, "cbet:flop:dry": 0.99, "cbet:flop:3bp": 0.99,
                        "donk:flop": 0.0, "probe:flop": 0.0})
@@ -748,8 +742,7 @@ def test_a_flush_draw_calls_a_small_bet_and_folds_a_jam():
     """Same continue rate, different ordering: polar sizes rank made hands.
 
     A merged third-pot stab is a drawing hand's call. A jam is value-or-air,
-    and looking it up with playability is how a flush draw called off.
-    """
+    and looking it up with playability is how a flush draw called off."""
     from villain.cards import card_id
     profile = _Prof(**{
         "fold_vs_bet:flop": 0.45, "fold_vs_bet:flop:small": 0.45,
@@ -858,8 +851,7 @@ def test_a_ten_does_not_fold_the_boat_on_a_double_paired_board():
 
     After a line that leaves mostly broadway tens, a within-range
     percentile parks that pile at its midpoint, and a 21% continue cut
-    folded it. Top of the board does not fold.
-    """
+    folded it. Top of the board does not fold."""
     from villain.botplay import _ranges
     from villain.ranges import CLASS_NAMES
     h = _river_facing(("Qc", "Td"), ("9s", "3h", "Tc", "9d", "Th"))
@@ -1001,8 +993,7 @@ def test_a_preflop_shove_fold_cites_size_not_stack_depth():
     """A 200bb jam in a single-raised pot is a size, not a depth.
 
     fold_to_three_bet ~45% continue used to print 'outside the ~43% that
-    continue at this depth' against an all-in. Depth is 15bb push/fold.
-    """
+    continue at this depth' against an all-in. Depth is 15bb push/fold."""
     profile = _Prof(rfi=0.99, four_bet=0.02, fold_to_three_bet=0.55)
     folds = []
     for k in range(80):

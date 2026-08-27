@@ -83,8 +83,7 @@ def _within_pct(w: np.ndarray, order: np.ndarray) -> np.ndarray:
 
     Ties share their group's midpoint, which is what makes the measure usable
     as a frequency cut: all six combos of a pocket pair have to sit at the same
-    place, or "the top 4%" would slice a hand class in half.
-    """
+    place, or "the top 4%" would slice a hand class in half."""
     total = w.sum()
     if total <= 0:
         return np.full(N_COMBOS, 0.5)
@@ -100,8 +99,7 @@ def _above_frac(w: np.ndarray, order: np.ndarray) -> np.ndarray:
     This is the cut "top X%" actually means when a made hand is a pile:
     every ten on T-T-9-9-x is the same boat, and the midpoint of that pile
     is the middle of the range. Weight *above* the pile is ~0, so the whole
-    pile is in the top of the range.
-    """
+    pile is in the top of the range."""
     total = w.sum()
     if total <= 0:
         return np.zeros(N_COMBOS)
@@ -114,17 +112,13 @@ def _above_frac(w: np.ndarray, order: np.ndarray) -> np.ndarray:
 def _draw_bonus(rows: np.ndarray, board: np.ndarray) -> np.ndarray:
     """Playability bump so a flush draw is not ranked with 72o.
 
-    Made-hand evaluation cannot see four-to-a-flush or an open-ender, so
-    every polarised bluff that used that ranking was a naked ace-high --
-    never a draw. The bonuses are in the same 0-1 units as a percentile
-    so :class:`_BoardCache` can fold them into one.
+    Made-hand evaluation cannot see four-to-a-flush or an open-ender, so every
+    polarised bluff off that ranking is a naked ace-high. Bonuses are in
+    percentile units so :class:`_BoardCache` folds them into one.
 
-    A *draw* is something the hand does not have yet. Four to a flush already
-    stops counting at five suited, and the straight side has to do the same:
-    scoring a hand that already holds the straight as though it were drawing
-    to one is how a straight came out ahead of quads in the playability order
-    the postflop cuts are taken on.
-    """
+    A draw is something the hand does not have yet: both sides stop counting
+    once the hand is made, or a straight outranks quads in the playability
+    order the postflop cuts use."""
     n = len(rows)
     if n == 0 or len(board) >= 5:
         return np.zeros(n)
@@ -186,8 +180,7 @@ class _BoardCache:
     """Made-hand strength and playability of every live combo on one board.
 
     The seven-card evaluation is the expensive step and it is the same for
-    every seat, so it is done once per board and shared.
-    """
+    every seat, so it is done once per board and shared."""
 
     def __init__(self, board: list[int]):
         self.board = tuple(board)
@@ -229,8 +222,7 @@ class Ranges:
 
     The weights are per-combo and start uniform. A seat's range is narrowed
     only by that seat's own actions -- this is what *they* could hold, which is
-    the denominator their own measured frequencies were counted over.
-    """
+    the denominator their own measured frequencies were counted over."""
 
     def __init__(self, n_seats: int):
         self.n = n_seats
@@ -250,8 +242,7 @@ class Ranges:
         Card removal applies here and nowhere else in this module: an opponent
         cannot hold the cards in your hand, so they come out of the universe.
         A range percentile is the opposite case -- your own hand is a member of
-        your own range -- which is why the two measures are separate calls.
-        """
+        your own range -- which is why the two measures are separate calls."""
         c = self.board_cache(board)
         others = c.live & ~_USES[list(hole)].any(axis=0)
         mine = c.score[index_of(hole)]
@@ -271,8 +262,7 @@ class Ranges:
         """Where ``hole`` ranks inside this seat's current range.
 
         ``order`` is a per-combo sort key -- the preflop class table, or the
-        board strength. This is the number a measured frequency is a cut on.
-        """
+        board strength. This is the number a measured frequency is a cut on."""
         w = self.live_weights(seat, board)
         return float(_within_pct(w, order)[index_of(hole)])
 
@@ -285,8 +275,7 @@ class Ranges:
         that half the range shares. Every ten on a double-paired ten board
         is the same boat; the midpoint of that pile is ~0.6, and a 21%
         continue cut folds it. The weight *above* the hand does not: if
-        nothing in the range beats it, the whole pile continues.
-        """
+        nothing in the range beats it, the whole pile continues."""
         w = self.live_weights(seat, board)
         total = float(w.sum())
         if total <= 0:
@@ -302,15 +291,10 @@ class Ranges:
         the value slice and the bluff slice together, and a call keeps the
         band between folding and raising.
 
-        High bands (``hi >= 1``) use weight-above, not the midpoint
-        percentile: a made-hand tie that is the top of the range stays in
-        the top of the range. Low bands still use the midpoint, so a 70%
-        air pile is not all spent as a bluff.
-
-        ``keep_hole`` is the holding that just acted. Narrowing cannot
-        delete it -- they have it, regardless of which slice a frequency
-        said they would hold.
-        """
+        High bands (``hi >= 1``) use weight-above rather than the midpoint, so
+        a made-hand tie at the top of the range stays there; low bands keep the
+        midpoint, so a 70% air pile is not all spent as a bluff. ``keep_hole``
+        is the holding that just acted and narrowing cannot delete it."""
         w = self.live_weights(seat, board)
         if w.sum() <= 0:
             return
@@ -349,8 +333,7 @@ class Ranges:
         """The heaviest *made* hands still in this seat's range.
 
         Preflop class names on a paired board are how QTo showed up as the
-        thing they folded -- it was tens full. The review has to say that.
-        """
+        thing they folded -- it was tens full. The review has to say that."""
         from .cards import describe
         w = self.live_weights(seat, board)
         total = float(w.sum())

@@ -56,8 +56,7 @@ def test_regular_opponents_can_never_be_merged(store, hands):
     The fixture is twenty hands and its busiest pair shares ten of them --
     exactly ``SPURIOUS_OVERLAP``, and so still mergeable by design. Copying the
     batch under fresh hand ids puts them clearly past it, which is the state
-    this is about: not a reconnect, two people at one table.
-    """
+    this is about: not a reconnect, two people at one table."""
     import copy
     from collections import Counter
 
@@ -106,20 +105,19 @@ def test_a_brief_double_seating_stays_mergeable(store, hands):
     store.link(a, b)          # allowed, and undoable from the player page
 
 
-def test_a_one_hand_overlap_does_not_block_a_merge(tmp_path, hands):
+def test_a_one_hand_overlap_does_not_block_a_merge(hands, store):
     """A reconnect can leave a stale seat for a hand. Treating that as proof
     makes a legitimate merge permanently impossible, which is worse than
     asking."""
     from villain.db import SPURIOUS_OVERLAP
-    with Store(tmp_path / "v.db") as store:
-        a = store.player_for("test", "acct-a", "Dave")
-        b = store.player_for("test", "acct-b", "Dvae")
+    a = store.player_for("test", "acct-a", "Dave")
+    b = store.player_for("test", "acct-b", "Dvae")
+    store.mark_distinct([a, b])
+    assert store.shared_hands(a, b) == 1
+    assert not store.are_distinct(a, b)
+    for _ in range(SPURIOUS_OVERLAP):
         store.mark_distinct([a, b])
-        assert store.shared_hands(a, b) == 1
-        assert not store.are_distinct(a, b)
-        for _ in range(SPURIOUS_OVERLAP):
-            store.mark_distinct([a, b])
-        assert store.are_distinct(a, b), "a real overlap still blocks"
+    assert store.are_distinct(a, b), "a real overlap still blocks"
 
 
 def test_linking_pools_two_accounts(tmp_path, hands):
@@ -159,8 +157,7 @@ def test_delete_player_forgets_the_person_and_keeps_the_hands(tmp_path, hands):
     """The one thing delete must never do is take a hand with it.
 
     A hand seats several people; deleting one player's hands would silently
-    shrink everybody else's sample. So the identity goes and the log stays.
-    """
+    shrink everybody else's sample. So the identity goes and the log stays."""
     with Store(tmp_path / "v.db") as s:
         s.add_hands(hands)
         before_hands = s.conn.execute("SELECT COUNT(*) c FROM hands").fetchone()["c"]
@@ -242,28 +239,24 @@ def test_trailing_digits_and_punctuation_are_noise(a, b, expected):
     assert name_similarity(a, b) == expected
 
 
-def test_suggestion_reason_cites_the_matching_alias(tmp_path, hands):
+def test_suggestion_reason_cites_the_matching_alias(seeded):
     """Display names can drift; the reason must cite the aliases that scored."""
-    from villain.db import Store
-    db = tmp_path / "v.db"
-    with Store(db) as store:
-        store.add_hands(hands)
         # Plant a second player whose only alias collides with player1's name,
         # but whose display name is unrelated — the bug that made PlayerJHusband
         # look like a 100% match for PlayerE.
-        store.conn.execute(
-            "INSERT INTO players (display_name, created_at) VALUES ('OtherFace', 0)")
-        pid = store.conn.execute("SELECT id FROM players WHERE display_name='OtherFace'"
-                                 ).fetchone()["id"]
-        store.conn.execute(
-            "INSERT INTO aliases (site, account, name, player_id, hands) "
-            "VALUES ('pokernow', 'ghost-acct', 'player1', ?, 10)", (pid,))
-        store.conn.commit()
-        hits = [s for s in suggest_links(store)
-                if {s.keep_name, s.absorb_name} == {"player1", "OtherFace"}]
-        assert hits, "same screen name on two accounts should surface"
-        assert "player1" in hits[0].reason
-        assert "100%" not in hits[0].reason or "appeared as" in hits[0].reason
+    seeded.conn.execute(
+        "INSERT INTO players (display_name, created_at) VALUES ('OtherFace', 0)")
+    pid = seeded.conn.execute("SELECT id FROM players WHERE display_name='OtherFace'"
+                             ).fetchone()["id"]
+    seeded.conn.execute(
+        "INSERT INTO aliases (site, account, name, player_id, hands) "
+        "VALUES ('pokernow', 'ghost-acct', 'player1', ?, 10)", (pid,))
+    seeded.conn.commit()
+    hits = [s for s in suggest_links(seeded)
+            if {s.keep_name, s.absorb_name} == {"player1", "OtherFace"}]
+    assert hits, "same screen name on two accounts should surface"
+    assert "player1" in hits[0].reason
+    assert "100%" not in hits[0].reason or "appeared as" in hits[0].reason
 
 
 def test_unrelated_names_stay_apart():
