@@ -315,19 +315,27 @@ class Ranges:
             return
         self.w[seat] = narrowed
 
-    def top_classes(self, seat: int, n: int = 10,
-                    board: list[int] | None = None) -> list[tuple[str, float]]:
-        """The heaviest hand classes still in this seat's range, for the review."""
+    def _top_shares(self, seat: int, board: list[int] | None, n: int,
+                    label) -> list[tuple[str, float]]:
+        """The heaviest ``n`` groups of this seat's live range, as shares of it.
+
+        The two views differ only in what they call a combo -- its preflop
+        class, or the hand it actually makes on this board -- so that is the
+        argument, and the weighing and ranking below happen once."""
         w = self.live_weights(seat, board)
         total = float(w.sum())
         if total <= 0:
             return []
         shares: dict[str, float] = defaultdict(float)
-        for i, name in enumerate(CLASS_NAMES):
-            if w[i] > 0:
-                shares[name] += float(w[i])
+        for i in np.nonzero(w > 0)[0]:
+            shares[label(int(i))] += float(w[i])
         ranked = sorted(shares.items(), key=lambda kv: -kv[1])[:n]
         return [(name, wt / total) for name, wt in ranked]
+
+    def top_classes(self, seat: int, n: int = 10,
+                    board: list[int] | None = None) -> list[tuple[str, float]]:
+        """The heaviest hand classes still in this seat's range, for the review."""
+        return self._top_shares(seat, board, n, CLASS_NAMES.__getitem__)
 
     def top_made(self, seat: int, board: list[int], n: int = 8) -> list[tuple[str, float]]:
         """The heaviest *made* hands still in this seat's range.
@@ -335,16 +343,9 @@ class Ranges:
         Preflop class names on a paired board are how QTo showed up as the
         thing they folded -- it was tens full. The review has to say that."""
         from .cards import describe
-        w = self.live_weights(seat, board)
-        total = float(w.sum())
-        if total <= 0:
-            return []
         scores = self.board_cache(board).score
-        shares: dict[str, float] = defaultdict(float)
-        for i in np.nonzero(w > 0)[0]:
-            shares[describe(int(scores[i]))] += float(w[i])
-        ranked = sorted(shares.items(), key=lambda kv: -kv[1])[:n]
-        return [(name, wt / total) for name, wt in ranked]
+        return self._top_shares(seat, board, n,
+                                lambda i: describe(int(scores[i])))
 
     def reset(self, seat: int) -> None:
         self.w[seat] = 1.0

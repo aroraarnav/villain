@@ -18,7 +18,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .dynamics import adjustments, versus_read
+from .dynamics import adjustments, unified_read, versus_read
 from .features import record_hands
 from .model import Hand, hand_from_dict, hand_to_dict
 from .stats import VS_HERO, Meter, Ratio, StatBook
@@ -659,67 +659,27 @@ class Store:
         When ``only`` is set, hands that never seat those players are skipped so
         a single-player rebuild (e.g. after a merge) does not rescan the whole
         database through the feature pipeline."""
-        alias_rows = list(self.conn.execute(
-            "SELECT site, account, player_id FROM aliases"))
-        alias_map = {(r["site"], r["account"]): int(r["player_id"]) for r in alias_rows}
-
-        def resolve(site: str, account: str, name: str) -> int | None:
-            """Split key first, then the bare account.
-
-            Order matters: ``"<account>#<name>"`` is the more specific claim.
-            Checking the bare account first would hand every split hand back to
-            whoever owned the account originally, which is exactly the merge
-            the user declined."""
-            hit = alias_map.get((site, split_key(account, name)))
-            if hit is not None:
-                return hit
-            return alias_map.get((site, account))
+        alias_map, resolve = self.alias_resolver()
 
         wanted = {int(p) for p in only} if only else None
-        wanted_keys = None
-        if wanted is not None:
-            wanted_keys = {(r["site"], r["account"]) for r in alias_rows
-                           if int(r["player_id"]) in wanted}
-
         names: dict[str, str] = {}
         hands: list[Hand] = []
         query = "SELECT site, payload FROM hands ORDER BY started_at"
-        params: tuple = ()
-        if wanted_keys is not None:
-            # Pick the hands out of the index first. The seat table is small and
-            # uncompressed, so this replaces a full-database decompression with
-            # one cheap scan plus a lookup of just the hands that matter.
-            wanted_ids = {
-                row["hand_id"]
-                for row in self.conn.execute(
-                    "SELECT hand_id, site, account, name FROM hand_seats")
-                if (row["site"], row["account"]) in wanted_keys
-                or (row["site"], split_key(row["account"], row["name"])) in wanted_keys
-            }
-            if not wanted_ids:
+        n_total = self.conn.execute(
+            "SELECT COUNT(*) AS c FROM hands").fetchone()["c"]
+        if wanted is not None:
+            narrowed = self._narrow_to_hands(
+                {key for key, pid in alias_map.items() if pid in wanted},
+                "rebuild_ids")
+            if narrowed is None:
                 return 0
-            # Via a temp table, not an IN clause: a bulk import touches every
-            # player, and SQLite caps bound variables per statement, so IN
-            # fails with "too many SQL variables" on exactly the large imports
-            # that most need the narrowing.
-            self.conn.execute("DROP TABLE IF EXISTS temp.rebuild_ids")
-            self.conn.execute(
-                "CREATE TEMP TABLE rebuild_ids (hand_id TEXT PRIMARY KEY)")
-            self.conn.executemany(
-                "INSERT OR IGNORE INTO temp.rebuild_ids (hand_id) VALUES (?)",
-                [(h,) for h in wanted_ids])
-            query = ("SELECT h.site, h.payload FROM hands h"
-                     " JOIN temp.rebuild_ids r ON r.hand_id = h.hand_id"
-                     " ORDER BY h.started_at")
+            query, n_total = narrowed
         # The two phases that take the time: decoding every stored hand, then
         # walking them for features. Counted in hands rather than percent so
         # the bar cannot claim a fraction the work does not have, and against
         # the narrowed set when ``only`` is given.
-        n_total = (len(wanted_ids) if wanted_keys is not None
-                   else self.conn.execute(
-                       "SELECT COUNT(*) AS c FROM hands").fetchone()["c"])
         _report(0, n_total, "reading hands")
-        for seen, row in enumerate(self.conn.execute(query, params), 1):
+        for seen, row in enumerate(self.conn.execute(query), 1):
             if seen % 500 == 0:
                 _report(seen, n_total, "reading hands")
             data = json.loads(gzip.decompress(row["payload"]))
@@ -1159,6 +1119,61 @@ class Store:
         from .priors import REGIMES
         return {r: blob for r in REGIMES if (blob := self.fitted_priors(r))}
 
+    def alias_resolver(self):
+        """``resolve(site, account, name) -> player_id | None``, split key first.
+
+        Order matters: ``"<account>#<name>"`` is the more specific claim.
+        Checking the bare account first would hand every split hand back to
+        whoever owned the account originally, which is exactly the merge the
+        user declined.
+
+        One implementation because it is one rule. It was written out at every
+        place that re-keys a seat -- the rebuild, ``player_hands``, the replay
+        route, the session preview -- so the precedence had four chances to be
+        got wrong, and a fifth caller would have made its own fifth copy."""
+        accounts = {
+            (r["site"], r["account"]): int(r["player_id"])
+            for r in self.conn.execute(
+                "SELECT site, account, player_id FROM aliases")
+        }
+
+        def resolve(site: str, account: str, name: str) -> int | None:
+            hit = accounts.get((site, split_key(account, name)))
+            return hit if hit is not None else accounts.get((site, account))
+
+        return accounts, resolve
+
+    def _narrow_to_hands(self, keys: set[tuple[str, str]],
+                         temp: str) -> tuple[str, int] | None:
+        """``(query, hand_count)`` restricted to the hands those aliases sat in.
+
+        Picks the ids out of the seat index first: the seat table is small and
+        uncompressed, so this replaces a full-database decompression with one
+        cheap scan plus a lookup of just the hands that matter. Returns None
+        when no hand qualifies, so the caller can answer without a query.
+
+        Via a temp table, not an IN clause: a bulk import touches every player,
+        and SQLite caps bound variables per statement, so IN fails with "too
+        many SQL variables" on exactly the large imports that most need the
+        narrowing."""
+        wanted = {
+            row["hand_id"]
+            for row in self.conn.execute(
+                "SELECT hand_id, site, account, name FROM hand_seats")
+            if (row["site"], row["account"]) in keys
+            or (row["site"], split_key(row["account"], row["name"])) in keys
+        }
+        if not wanted:
+            return None
+        self.conn.execute(f"DROP TABLE IF EXISTS temp.{temp}")
+        self.conn.execute(f"CREATE TEMP TABLE {temp} (hand_id TEXT PRIMARY KEY)")
+        self.conn.executemany(
+            f"INSERT OR IGNORE INTO temp.{temp} (hand_id) VALUES (?)",
+            [(h,) for h in wanted])
+        return ("SELECT h.site, h.payload FROM hands h"
+                f" JOIN temp.{temp} w ON w.hand_id = h.hand_id"
+                " ORDER BY h.started_at"), len(wanted)
+
     def profiles(self, player_id: int, min_hands: int = 1) -> list:
         """One profile per table size. The detailed view, not the default."""
         from .profile import build_profiles
@@ -1182,17 +1197,10 @@ class Store:
 
         This is the default everywhere. Splitting by table size is how the
         statistics stay meaningful, not how anybody wants to read them."""
-        from .profile import build_unified, primary_regime
         books = self.books(player_id)
         if not books:
             return None
-        populations = self.fitted_by_regime()
-        priors = populations.get(primary_regime(books)) or None
-        profile = build_unified(books, priors=priors, populations=populations)
-        if profile is not None:
-            profile.adjustments = adjustments(books, priors=priors)
-            profile.versus = versus_read(books, priors=priors)
-        return profile
+        return unified_read(books, self.fitted_by_regime())
 
     def player_hands(self, player_id: int | None = None, progress=None) -> list[Hand]:
         """Stored hands, keyed to internal ids.
@@ -1204,48 +1212,25 @@ class Store:
         need every seat resolved to the id used elsewhere, not just one
         player's. Prefer this over :meth:`stored_hands`, whose ids are the raw
         site accounts on purpose."""
-        accounts = {
-            (r["site"], r["account"]): int(r["player_id"])
-            for r in self.conn.execute("SELECT site, account, player_id FROM aliases")
-        }
-
-        def resolve(site, account, name):
-            return (accounts.get((site, split_key(account, name)))
-                    or accounts.get((site, account)))
+        accounts, resolve = self.alias_resolver()
 
         query = "SELECT site, payload FROM hands ORDER BY started_at"
-        if player_id is not None:
-            # Pick the hand ids out of the seat index first. Asking for one
-            # player otherwise decompresses every hand in the database and
-            # throws almost all away -- once per player under `villain
-            # validate`, which was 8M parses and eleven minutes. The seat
-            # table is small and uncompressed; `rebuild` narrows this way.
-            mine = {key for key, pid in accounts.items() if pid == player_id}
-            wanted = {
-                row["hand_id"]
-                for row in self.conn.execute(
-                    "SELECT hand_id, site, account, name FROM hand_seats")
-                if (row["site"], row["account"]) in mine
-                or (row["site"], split_key(row["account"], row["name"])) in mine
-            }
-            if not wanted:
-                return []
-            self.conn.execute("DROP TABLE IF EXISTS temp.player_hand_ids")
-            self.conn.execute(
-                "CREATE TEMP TABLE player_hand_ids (hand_id TEXT PRIMARY KEY)")
-            self.conn.executemany(
-                "INSERT OR IGNORE INTO temp.player_hand_ids (hand_id) VALUES (?)",
-                [(h,) for h in wanted])
-            query = ("SELECT h.site, h.payload FROM hands h"
-                     " JOIN temp.player_hand_ids w ON w.hand_id = h.hand_id"
-                     " ORDER BY h.started_at")
-
         # Counted, because this is not a quick read: every hand is decompressed
         # and parsed, and on a large database that is a minute of silence before
         # the caller's own work even starts. A caller with a progress bar was
         # left with nothing to put in it for the longest part of the wait.
-        total = (len(wanted) if player_id is not None else
-                 self.conn.execute("SELECT COUNT(*) c FROM hands").fetchone()["c"])
+        total = self.conn.execute("SELECT COUNT(*) c FROM hands").fetchone()["c"]
+        if player_id is not None:
+            # Asking for one player otherwise decompresses every hand in the
+            # database and throws almost all away -- once per player under
+            # `villain validate`, which was 8M parses and eleven minutes.
+            narrowed = self._narrow_to_hands(
+                {key for key, pid in accounts.items() if pid == player_id},
+                "player_hand_ids")
+            if narrowed is None:
+                return []
+            query, total = narrowed
+
         out = []
         # Report after the work, not before it: reporting at 0 and again at
         # total jumps the bar to full while the last batch's gzip+parse still

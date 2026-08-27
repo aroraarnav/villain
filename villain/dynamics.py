@@ -327,3 +327,27 @@ def versus_read(by_regime: dict[str, StatBook],
     archetype, confidence, mix = match(profile)
     return VersusRead(archetype=archetype, confidence=confidence, mix=mix,
                       regime=regime, decisions=decisions, hands=sliced.hands)
+
+
+def unified_read(by_regime: dict[str, StatBook],
+                 populations: dict[str, dict] | None = None,
+                 versus: bool = True):
+    """A player's pooled profile with the against-you reads attached.
+
+    Pooling, picking the prior to shrink against, and hanging the adjustments
+    off the result are one sequence, and getting any step of it wrong produces
+    a profile that still looks fine. It was written out twice -- once for a
+    stored player, once for the preview of an uploaded session -- and the two
+    had already drifted: the preview never attached ``versus``, so a section
+    the same hands produce once saved was silently missing beforehand. That
+    difference is now the ``versus`` argument rather than a second copy, and
+    it is the only difference there is."""
+    from .profile import build_unified, primary_regime
+    populations = populations or None
+    priors = (populations or {}).get(primary_regime(by_regime)) or None
+    profile = build_unified(by_regime, priors=priors, populations=populations)
+    if profile is not None:
+        profile.adjustments = adjustments(by_regime, priors=priors)
+        if versus:
+            profile.versus = versus_read(by_regime, priors=priors)
+    return profile

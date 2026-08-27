@@ -39,6 +39,16 @@ NEIGHBORS = {HEADS_UP: (THREE, SHORT, FULL), THREE: (HEADS_UP, SHORT, FULL),
               SHORT: (THREE, FULL, HEADS_UP), FULL: (SHORT, THREE, HEADS_UP)}
 
 
+#: Pace priors: a bare stem plus the same mean on every street. How fast
+#: somebody acts does not vary with the table size or the street the way a
+#: frequency does, so all four regimes take these unchanged. Spelled as a
+#: product rather than as twenty-eight lines of table, twice, because that is
+#: what it is -- and the two hand-written copies had to be edited together.
+PACE = {"tank_fold": 0.12, "snap_call": 0.15, "snap_aggro": 0.10}
+PACE_PRIORS = PACE | {f"{stem}:{street}": mean
+                      for stem, mean in PACE.items()
+                      for street in ("pf", "flop", "turn", "river")}
+
 # mean frequency by regime. Missing entries fall back to the 6max value, then
 # to 0.5 with a weak prior.
 POPULATION: dict[str, dict[str, float]] = {
@@ -57,13 +67,7 @@ POPULATION: dict[str, dict[str, float]] = {
         "wwsf": 0.47, "wtsd": 0.32, "wsd": 0.52,
         # With checks in the aggression denominator (see profile.DERIVED).
         "aggression:flop": 0.32, "aggression:turn": 0.30, "aggression:river": 0.27,
-        "tank_fold": 0.12, "snap_call": 0.15, "snap_aggro": 0.10,
-        "tank_fold:pf": 0.12, "tank_fold:flop": 0.12,
-        "tank_fold:turn": 0.12, "tank_fold:river": 0.12,
-        "snap_call:pf": 0.15, "snap_call:flop": 0.15,
-        "snap_call:turn": 0.15, "snap_call:river": 0.15,
-        "snap_aggro:pf": 0.10, "snap_aggro:flop": 0.10,
-        "snap_aggro:turn": 0.10, "snap_aggro:river": 0.10,
+        **PACE_PRIORS,
         "river_bet_bluff": 0.30, "sd_light_call": 0.35,
     },
     SHORT: {
@@ -80,13 +84,7 @@ POPULATION: dict[str, dict[str, float]] = {
         "probe:turn": 0.28, "probe:river": 0.28,
         "wwsf": 0.45, "wtsd": 0.27, "wsd": 0.53,
         "aggression:flop": 0.28, "aggression:turn": 0.27, "aggression:river": 0.25,
-        "tank_fold": 0.12, "snap_call": 0.15, "snap_aggro": 0.10,
-        "tank_fold:pf": 0.12, "tank_fold:flop": 0.12,
-        "tank_fold:turn": 0.12, "tank_fold:river": 0.12,
-        "snap_call:pf": 0.15, "snap_call:flop": 0.15,
-        "snap_call:turn": 0.15, "snap_call:river": 0.15,
-        "snap_aggro:pf": 0.10, "snap_aggro:flop": 0.10,
-        "snap_aggro:turn": 0.10, "snap_aggro:river": 0.10,
+        **PACE_PRIORS,
         "river_bet_bluff": 0.28, "sd_light_call": 0.33,
     },
 }
@@ -101,12 +99,10 @@ POPULATION[THREE] = dict(
     bb_defend=0.52, bb_fold_to_open=0.48,
     steal=0.55, fold_to_steal=0.48, three_bet_vs_steal=0.14,
     cold_call=0.26, wwsf=0.46, wtsd=0.29, wsd=0.53,
-    aggression__flop=0.40,
 )
 POPULATION[THREE]["aggression:flop"] = 0.30
 POPULATION[THREE]["aggression:turn"] = 0.28
 POPULATION[THREE]["aggression:river"] = 0.26
-POPULATION[THREE].pop("aggression__flop", None)
 POPULATION[FULL] = dict(POPULATION[SHORT], vpip=0.20, pfr=0.15, rfi=0.20,
                         three_bet=0.06, steal=0.30, wtsd=0.25)
 

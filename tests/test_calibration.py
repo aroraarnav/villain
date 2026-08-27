@@ -6,27 +6,13 @@ diverge, the sim is not playing the profile — the 4-bet/5-bet ranking bug
 sat here for years with nothing to catch it. This file is that guard.
 """
 
-from dataclasses import dataclass
 
 import numpy as np
+from helpers import Prof as _Prof
+from helpers import seats as _seats
 
 from villain.botplay import decide
-from villain.holdem import Hand, Seat
-
-
-@dataclass
-class _Est:
-    value: float
-    opps: float = 500.0
-
-
-class _Prof:
-    def __init__(self, **freqs):
-        self.stats = {k: _Est(v) for k, v in freqs.items()}
-
-
-def _seats(*stacks):
-    return [Seat(chr(65 + i), s) for i, s in enumerate(stacks)]
+from villain.holdem import Hand
 
 
 def _play_preflop(opener, defender, n, seed=0):

@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from ..db import DEFAULT_PATH, Store, split_key
+from ..db import DEFAULT_PATH, Store
 from ..evidence import find as find_evidence
 from ..glossary import payload as glossary_payload
 from ..glossary import stat_help
@@ -43,6 +43,16 @@ class Route:
     #: "", "session" or "game" -- what to resolve and 404 on before dispatch.
     needs: str = ""
 
+
+#: The answer while the hero model is being fitted. One object because the
+#: two paths that return it -- a build this request started, and one already
+#: running -- are the same answer to the caller, and the page matches on the
+#: message.
+BUILDING = {
+    "status": "building",
+    "message": "Reading your hands -- fitting the strength model over every "
+               "one of them. This runs once per import.",
+}
 
 #: Cap on a request body. The upload route holds what it reads in memory.
 #: The UI uploads multiple hand-history JSON files in a single JSON payload,
@@ -245,20 +255,11 @@ class Handler(BaseHTTPRequestHandler):
             # Never block on the build: a cold hero is ~90s of model
             # fitting, so the page polls rather than holding a socket.
             status = hero_status(store)
-            if status != "ready" and hero_begin(store):
-                return self._send(202, {
-                    "status": "building",
-                    "message": "Reading your hands -- fitting the "
-                               "strength model over every one of them. "
-                               "This runs once per import.",
-                })
-            if status == "building":
-                return self._send(202, {
-                    "status": "building",
-                    "message": "Reading your hands -- fitting the "
-                               "strength model over every one of them. "
-                               "This runs once per import.",
-                })
+            # Order is the original one: a cold hero still tries to start a
+            # build before the already-building case answers, so the side
+            # effect of hero_begin is not skipped.
+            if (status != "ready" and hero_begin(store)) or status == "building":
+                return self._send(202, BUILDING)
             # Cold with no thread to build on: the browser, where the
             # tool is single-threaded and this is the only path that
             # finishes at all.
@@ -337,13 +338,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, {"error": "no such hand"})
             data = json.loads(gzip.decompress(row["payload"]))
             hand = hand_from_dict(data)
-            accounts = {
-                (r["site"], r["account"]): int(r["player_id"])
-                for r in store.conn.execute(
-                    "SELECT site, account, player_id FROM aliases")}
+            _, resolve = store.alias_resolver()
         for seat in hand.seats:
-            pid = (accounts.get((hand.site, split_key(seat.player_id, seat.name)))
-                   or accounts.get((hand.site, seat.player_id)))
+            pid = resolve(hand.site, seat.player_id, seat.name)
             if pid is not None:
                 seat.player_id = str(pid)
         return self._send(200, replay(hand, focus=focus))

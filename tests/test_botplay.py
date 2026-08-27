@@ -1,27 +1,14 @@
 """The villain policy: measured frequencies actually shape how a bot plays."""
 
-from dataclasses import dataclass
 
 import numpy as np
 import pytest
+from helpers import Est as _Est
+from helpers import Prof as _Prof
+from helpers import seats as _seats
 
 from villain.botplay import decide, preflop_strength
 from villain.holdem import Hand, Seat
-
-
-@dataclass
-class _Est:
-    value: float
-    opps: float = 500.0
-
-
-class _Prof:
-    def __init__(self, **freqs):
-        self.stats = {k: _Est(v) for k, v in freqs.items()}
-
-
-def _seats(*stacks):
-    return [Seat(chr(65 + i), s) for i, s in enumerate(stacks)]
 
 
 def _preflop_play_rate(profile, n=400, seed=0):

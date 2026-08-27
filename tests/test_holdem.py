@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+from helpers import seats as _seats
 
 from villain.cards import card_id
 from villain.holdem import Hand, Seat
@@ -9,10 +10,6 @@ from villain.holdem import Hand, Seat
 
 def _ids(text):
     return tuple(int(card_id(c)) for c in text.split())
-
-
-def _seats(*stacks):
-    return [Seat(chr(65 + i), s) for i, s in enumerate(stacks)]
 
 
 def test_heads_up_blinds_and_first_to_act():
