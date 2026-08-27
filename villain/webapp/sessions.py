@@ -14,12 +14,11 @@ from pathlib import Path
 
 from ..analyze import enrich
 from ..db import Store, split_key
-from ..dynamics import adjustments
+from ..dynamics import unified_read
 from ..features import record_hands
 from ..identity import askable_questions, auto_answers
 from ..model import hand_from_dict, hand_to_dict
 from ..parsers import parse_file
-from ..profile import build_unified, primary_regime
 from .heroview import _to_you
 from .payloads import profile_payload, roster_row
 
@@ -211,24 +210,13 @@ def session_payload(token: str, store: Store | None = None) -> dict:
     # The exporter is hero, the same person the Hero tab is about.
     hero_key = hero_of(mhands)
 
-    def _unified(by_regime):
-        # Same shrink as database profiles when this pool has fitted priors.
-        priors = None
-        populations = None
-        if store is not None and by_regime:
-            populations = store.fitted_by_regime()
-            fitted = populations.get(primary_regime(by_regime))
-            priors = fitted or None
-        profile = build_unified(by_regime, priors=priors, populations=populations)
-        if profile is not None:
-            # Store.profile attaches these for saved players; an uploaded
-            # session has no store to do it, and a preview that silently drops
-            # a section the same hands produce once saved is a preview of
-            # something else.
-            profile.adjustments = adjustments(by_regime, priors=priors)
-        return profile
-
-    keyed = [(k, _unified(by_regime)) for k, by_regime in books.items()]
+    # Same shrink as database profiles when this pool has fitted priors. No
+    # ``versus``: an uploaded session is previewed before it is saved, and
+    # attaching one here would be a behavior change, not a refactor.
+    populations = store.fitted_by_regime() if store is not None else None
+    keyed = [(k, unified_read(by_regime, populations if by_regime else None,
+                              versus=False))
+             for k, by_regime in books.items()]
     keyed = [(k, p) for k, p in keyed if p is not None]
     keyed.sort(key=lambda kp: -kp[1].hands)
 
