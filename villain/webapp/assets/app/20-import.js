@@ -213,7 +213,12 @@ async function viewSessions() {
       <p class="muted">Add hand histories on the Database tab.</p></div>`;
     return;
   }
-  if (state.sessionId == null) state.sessionId = sessions[0].id;
+  // No sitting named, or one named by a link that no longer exists: open the
+  // latest, and say so in the address bar without adding a step to go back to.
+  if (!sessions.some(x => x.id === state.sessionId)) {
+    state.sessionId = sessions[0].id;
+    if (onScreen("sessions")) syncUrl(true);
+  }
   // The list lives beside the detail, not above it: twenty sittings pushed the
   // thing you came to read off the bottom of the screen, and switching meant
   // scrolling back up every time.
@@ -238,7 +243,7 @@ async function viewSessions() {
     item.innerHTML = `<span class="sess-when">${esc(whenLabel(sess.started_at, true))}</span>
       <span class="small muted">${hrs ? hrs + "h " : ""}${mins}m \u00b7 ${
         sess.hands} hands \u00b7 ${sess.players}p</span>`;
-    item.onclick = () => { state.sessionId = sess.id; viewSessions(); };
+    item.onclick = () => { state.sessionId = sess.id; syncUrl(); viewSessions(); };
     rows.appendChild(item);
   }
   const layout = $("#sess-layout"), toggle = $("#sess-toggle");

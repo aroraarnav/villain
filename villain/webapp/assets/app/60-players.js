@@ -58,7 +58,7 @@ async function viewPlayers() {
   $("#db-roster").appendChild(rosterTable(data.players, {
     onClick: p => {
       if (p.player_id === data.hero_id) { switchTab("hero"); return; }
-      state.player = p.player_id; viewPlayer(p.player_id);
+      state.player = p.player_id; syncUrl(); viewPlayer(p.player_id);
     },
     heroId: data.hero_id,
   }));
@@ -90,6 +90,7 @@ async function viewPlayer(id) {
   view.appendChild(back);
   $("#back").onclick = () => {
     state.player = null;
+    syncUrl();
     if (state.roster) { viewPlayers(); return; }
     renderWithSpinner();
   };
@@ -210,6 +211,7 @@ function splitDialog(data) {
         // look at them on their own.
         state.roster = null;
         state.player = r.player_id;
+        syncUrl();
         await viewPlayer(r.player_id);
       } catch (err) {
         button.disabled = false;
@@ -247,6 +249,7 @@ function deleteDialog(data) {
         setBusy("Opening the roster\u2026", undefined);
         state.player = null;
         state.roster = null;
+        syncUrl(true);       // back should not return to a player who is gone
         await viewPlayers();
         $("#modal").innerHTML = "";
       } catch (e) {
@@ -282,6 +285,7 @@ function confirmReset(data) {
       const result = await post("/api/reset", {confirm: "delete everything"});
       $("#modal").innerHTML = "";
       state.player = null; state.session = null; state.roster = null;
+      syncUrl(true);
       viewPlayers();
       paintTabs();               // an emptied database closes tabs again
       showResult({reset: result});

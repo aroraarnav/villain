@@ -1,10 +1,51 @@
+/* ---- where you are, in the address bar ----
+   The whole tool is one page, so the browser's back button used to leave it
+   entirely. Every screen worth returning to gets a hash route, each move to a
+   new one is a history entry, and back/forward replay them. Hash rather than
+   path because the hosted app is a static file that cannot answer /player/12. */
+const ROUTE_TABS = {players: "", sessions: "sessions", hero: "hero", play: "simulate"};
+
+function routeOf() {
+  if (state.tab === "players" && state.player != null) return `#/player/${state.player}`;
+  if (state.tab === "sessions" && state.sessionId != null) return `#/sessions/${state.sessionId}`;
+  return "#/" + (ROUTE_TABS[state.tab] || "");
+}
+
+/* {tab, id} for a hash this app wrote, null for anything else -- the sign-in
+   redirect parks its token in the hash too, and that is not a screen. */
+function parseRoute(hash) {
+  const m = /^#\/([a-z]*)(?:\/(\d+))?$/.exec(hash || "#/");
+  if (!m) return null;
+  const id = m[2] != null ? Number(m[2]) : null;
+  if (m[1] === "player") return id != null ? {tab: "players", id} : null;
+  const tab = Object.keys(ROUTE_TABS).find(t => ROUTE_TABS[t] === m[1]);
+  return tab ? {tab, id} : null;
+}
+
+/* Record the screen now showing. A push when it is a new place; a replace when
+   the old entry should not be returned to -- a player that was just deleted,
+   or a route the app corrected on arrival. */
+function syncUrl(replace) {
+  const route = routeOf();
+  if (location.hash === route) return;
+  if (replace) history.replaceState(null, "", route);
+  else history.pushState(null, "", route);
+}
+
+const isBusy = () => !!document.querySelector(".veil.busy");
+
 /* ---- tabs ---- */
 function switchTab(tab, playerId) {
   // A blocking operation owns the window until it finishes. Leaving mid-import
   // replaces the view it is still writing into, and the veil it put up is
   // cleared by whatever it was doing rather than by the tab that replaced it --
   // which left a full-screen dim with nothing on it.
-  if (document.querySelector(".veil.busy")) return;
+  if (isBusy()) return;
+  showTab(tab, playerId);
+  syncUrl();
+}
+
+function showTab(tab, playerId) {
   if (state.tab === "play" && tab !== "play") holdSimClock();
   state.tab = tab;
   // Bare "go to the database tab" clears which player was open; a link that
@@ -95,7 +136,7 @@ async function render() {
 document.querySelectorAll("nav button").forEach(b =>
   b.onclick = () => {
     if (b.disabled) return;
-    if (document.querySelector(".veil.busy")) {
+    if (isBusy()) {
       // Nudge the thing that is holding the window, so the click reads as
       // "not now" rather than as nothing happening at all.
       const sheet = document.querySelector(".busy-sheet");
@@ -134,7 +175,10 @@ async function paintTabs() {
   // Landing on a tab that has since become unavailable -- a reset, say --
   // would otherwise leave the view stranded on a dead screen.
   const here = document.querySelector(`nav button[data-tab="${state.tab}"]`);
-  if (here && here.disabled) switchTab("players");
+  if (here && here.disabled && !isBusy()) {
+    showTab("players");
+    syncUrl(true);
+  }
 }
 paintTabs();
 
@@ -181,5 +225,34 @@ document.addEventListener("visibilitychange", () => {
     paintDealCount();
   }
 });
+
+/* Back and forward. The screen follows the address bar rather than the other
+   way round, so nothing is pushed here. */
+window.addEventListener("popstate", () => {
+  const route = parseRoute(location.hash);
+  if (!route) return;
+  // Mid-import the window is not ours to change. Put the address back to the
+  // screen that is actually showing so the two do not disagree.
+  if (isBusy()) { syncUrl(); return; }
+  // A dialog belongs to the screen it was opened on.
+  $("#modal").innerHTML = "";
+  $("#modal2").innerHTML = "";
+  if (route.tab === "sessions" && route.id != null) state.sessionId = route.id;
+  showTab(route.tab, route.tab === "players" ? route.id : undefined);
+});
+
+/* A shared or reloaded link opens where it points. A hash that is not a route
+   -- the sign-in redirect's, say -- is left for its owner. */
+{
+  const route = parseRoute(location.hash);
+  if (route) {
+    state.tab = route.tab;
+    if (route.tab === "players") state.player = route.id;
+    if (route.tab === "sessions") state.sessionId = route.id;
+    document.querySelectorAll("nav button").forEach(b =>
+      b.classList.toggle("on", b.dataset.tab === state.tab));
+    syncUrl(true);
+  }
+}
 
 renderWithSpinner();
