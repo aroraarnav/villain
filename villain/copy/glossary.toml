@@ -300,6 +300,11 @@ estimate = """The frequency after accounting for sample size. A player who folde
 available = """A ranking of which leaks to attack first, in big blinds per 100 hands, scaled by a capture fraction (you cannot bluff every river you reach with the nuts). Ordering is the signal; do not bank the number as a live winrate."""
 confidence = """How much of this read comes from their actual hands rather than from assumptions about players in general. Archetype confidence is a 10-way posterior; skill confidence is coverage plus volume — same word, two formulas."""
 unknown = """Not enough hands for a skill comparison. The number would mostly measure sample size, so it is withheld."""
+"graded decision" = """A postflop fold, call, no-pair bet or river check from a practice session, judged against the cards the villains actually held -- which the simulator dealt, so they are known even when nobody showed. Folds and calls are graded heads-up only: against two players, beating the one who bet says nothing about the other."""
+"folded with the price" = """You folded, but against the hand they really had your chance to win the pot was at least the share of it you were asked to pay. Calling would have made money in the long run, even if this particular runout would have lost."""
+"paid off" = """You called, and against the hand they really had your chance to win was below the share of the pot the call cost. Right or wrong at the time, their hand was too strong for the price."""
+"no-pair bet" = """A bet or raise after the flop while holding no pair or better on that board -- a bluff, or a draw betting as one. It worked if everyone folded on that street."""
+"checked the winner" = """You checked the river holding the best hand, and nobody bet after you. A bet there only loses to a hand you were already beating."""
 percentile = """The share of every possible hole-card combination on that board your hand beats -- not your chance to win the pot, which depends on what the other hand actually is. \"Usually X%\" is what a model fit on this database's own revealed hands says a line like that typically represents."""
 
 # What each rating component measures, and what a good or bad score means.

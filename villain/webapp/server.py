@@ -546,6 +546,16 @@ class Handler(BaseHTTPRequestHandler):
     def _sim_analysis(self, body: dict, game):
         return self._send(200, {"analysis": game.analysis()})
 
+    @post("/api/sim/hand", writes=False, needs="game")
+    def _sim_hand(self, body: dict, game):
+        """One finished hand with every card face up, for the review. Every
+        tip there cites hand numbers; this is what they open."""
+        from ..simreview import hand_detail
+        detail = hand_detail(game, int(body.get("hand_no", 0)))
+        if detail is None:
+            return self._send(404, {"error": "no such hand in this session"})
+        return self._send(200, detail)
+
     @post("/api/upload", writes=False)
     def _upload(self, body: dict):
         """Parse uploaded files into a session held in memory."""

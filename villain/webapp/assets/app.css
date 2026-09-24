@@ -654,12 +654,9 @@
   .think-bubble::after { content: ""; position: absolute; top: 100%; left: 50%;
     transform: translateX(-50%); border: 6px solid transparent; border-top-color: var(--panel); }
   .think-bubble.below::after { top: auto; bottom: 100%; border-top-color: transparent; border-bottom-color: var(--panel); }
-  .a-headline { border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
   .astats { display: flex; gap: 26px; flex-wrap: wrap; }
   .astat-v { font-family: var(--mono); letter-spacing: -0.03em; font-size: 21px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .astat-l { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
-  .a-vs-row { display: flex; justify-content: space-between; padding: 8px 0; border-top: 1px solid var(--line); }
-  .a-vs-row:first-child { border-top: 0; }
   /* Realized money only. A frequency that moved is not money and does not get
      this color -- see .sess-delta below. */
   .up { color: var(--up); } .down { color: var(--danger); }
@@ -710,15 +707,17 @@
     letter-spacing: -0.04em; color: #fff; line-height: 1;
     font-variant-numeric: tabular-nums;
   }
-  .lessons { margin: 16px 0 4px; display: flex; flex-direction: column; gap: 8px; }
-  .lesson { padding: 8px 12px; border-left: 3px solid var(--accent);
-            background: var(--accent-soft); border-radius: 0 8px 8px 0; }
   .pick-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
                gap: var(--sp-2); margin-bottom: var(--sp-4); }
   .pick-list > .loading { grid-column: 1 / -1; }
+  /* A button, so it does not inherit the page face on its own -- without
+     font: inherit the names here rendered in the platform UI font while the
+     same names on the Database roster were Space Grotesk. */
   .pick { text-align: left; border: 1px solid var(--line); border-radius: 10px;
           padding: 10px 12px; background: var(--panel); cursor: pointer;
-          display: flex; flex-direction: column; gap: 2px; }
+          display: flex; flex-direction: column; gap: 2px;
+          font: inherit; color: var(--ink); }
+  .pick .name { font-size: 14px; }
   .pick.on { border-color: var(--red); background: var(--accent-soft); }
   .sit-controls { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
   .sit-controls input { background: transparent; border: 1px solid var(--line);
@@ -1350,4 +1349,57 @@
   .choice.disabled label { cursor: not-allowed; }
   .choice.disabled label:has(input:checked) {
     border-color: var(--line); color: var(--muted); font-weight: 400;
+  }
+
+  /* ---- simulate: the session review ---- */
+  .review-top { display: flex; align-items: center; gap: var(--sp-5); flex-wrap: wrap;
+                margin-top: var(--sp-3); }
+  .review-pnl .pnl-big { font-family: var(--mono); font-size: 30px; letter-spacing: -0.04em; }
+  .review-top .graded-head { flex: 1 1 360px; margin: 0; }
+  .review-verdict { margin: var(--sp-3) 0 0; max-width: 72ch; }
+  /* Keep and stop ride the same rail a priced leak does, colored by which way
+     the advice points -- the money colors, because both are about chips. */
+  .review-tip { border-left: 2px solid var(--edge); border-radius: 0 8px 8px 0;
+                padding: var(--sp-2) var(--sp-3); margin: var(--sp-2) 0;
+                background: var(--inset); }
+  .review-tip.keep { border-left-color: var(--up); }
+  .review-tip.stop { border-left-color: var(--danger); }
+  .review-tip .leak-advice { margin: 0; }
+  .hand-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: var(--sp-1); }
+  .hand-chip { font: inherit; font-family: var(--mono); font-size: 11.5px;
+               letter-spacing: -0.02em; color: var(--muted); background: none;
+               border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px;
+               cursor: pointer; }
+  .hand-chip:hover, .hand-chip:focus-visible { color: var(--ink); border-color: var(--edge); }
+  .dec-row { display: grid; grid-template-columns: 210px 150px 110px minmax(0, 1fr);
+             gap: var(--sp-3); align-items: center; padding: var(--sp-2) 0;
+             border-top: 1px solid var(--line); }
+  .dec-row .hand-chips { margin: 0; }
+  .dec-label { display: flex; align-items: center; font-size: 14px; }
+  .villain-review { margin-top: var(--sp-3); }
+  .villain-review .name { font-size: 16px; }
+  .villain-review .dash-cols { margin-top: var(--sp-3); }
+  .villain-review .range-grid { max-width: 360px; margin-top: 0; }
+  .villain-review .howblock:first-child { margin-top: 0; }
+  .vfacts { display: flex; gap: var(--sp-5); flex-wrap: wrap; margin-top: var(--sp-3); }
+  .vfacts .stat-pair { align-items: flex-start; text-align: left; }
+  .vfacts .stat-pair .v { font-size: 19px; }
+  .sd-row { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto;
+            gap: var(--sp-2); align-items: center; padding: 4px 0; }
+  .key-row { display: grid;
+             grid-template-columns: 44px 38px auto auto minmax(0, 1fr) auto;
+             gap: var(--sp-3); align-items: center; padding: 7px var(--sp-1);
+             border-top: 1px solid var(--line); cursor: pointer; font-size: 14px; }
+  .key-row:hover, .key-row:focus-visible { background: var(--accent-soft); }
+  .key-flags { display: flex; flex-wrap: wrap; gap: 4px; }
+  .flag-tag { font-size: 11px; }
+  .hand-board { margin: var(--sp-3) 0; }
+  .hand-seats .seat-cards { justify-self: end; }
+  .hand-log { max-height: 260px; overflow: auto; font-size: 13px; }
+  @media (max-width: 700px) {
+    .dec-row { grid-template-columns: 1fr auto; }
+    .dec-row .dec-bar { display: none; }
+    .dec-row .dec-wrong { grid-column: 1 / -1; }
+    .key-row { grid-template-columns: 40px auto minmax(0, 1fr) auto; }
+    .key-row .key-board, .key-row > :nth-child(2) { display: none; }
   }

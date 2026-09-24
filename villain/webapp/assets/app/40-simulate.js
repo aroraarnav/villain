@@ -44,18 +44,25 @@ async function viewPlay() {
   }
   $("#sit-go").onclick = async () => {
     $("#sit-go").disabled = true;
-    ensureAudio();
     try {
-      const data = await post("/api/sim/new", {villains: [...picked],
+      await sitDown({villains: [...picked],
         stack: +$("#sit-stack").value, sb: +$("#sit-sb").value, bb: +$("#sit-bb").value});
-      resetSimClock();
-      state.simGen++;
-      state.game = data;
-      state.paused = false;          // a hold belongs to the table you left
-      state.analysis = null;
-      if (onScreen("play")) renderTable($("#view"), data);
     } catch (err) { $("#sit-go").disabled = false; alert(err.message); }
   };
+}
+
+/* The table you just left is kept so the review can offer it again: the point
+   of reading what went wrong against a player is to go and play them again. */
+async function sitDown(setup) {
+  ensureAudio();
+  const data = await post("/api/sim/new", setup);
+  state.simSetup = setup;
+  resetSimClock();
+  state.simGen++;
+  state.game = data;
+  state.paused = false;          // a hold belongs to the table you left
+  state.analysis = null;
+  if (onScreen("play")) renderTable($("#view"), data);
 }
 
 const SIM_DELAY = 3000;                 // one beat before every auto-action
@@ -608,6 +615,7 @@ async function endSession() {
     const r = await post("/api/sim/analysis", {token});
     if (gen !== state.simGen) return;
     state.analysis = r.analysis;
+    state.analysisToken = token;     // the review opens its hands through it
     state.game = null;
     state.lastEvent = null;
     resetSimClock();
@@ -618,43 +626,3 @@ async function endSession() {
   }
 }
 
-function renderAnalysis(view, a) {
-  const money = (c, bb) => `${c >= 0 ? "+" : ""}${c} <span class="muted">(${
-    c >= 0 ? "+" : ""}${bb} bb)</span>`;
-  const stat = (label, v) => `<div class="astat"><div class="astat-v">${
-    v == null ? "—" : v + "%"}</div><div class="astat-l">${label}</div></div>`;
-  view.innerHTML = `<div class="panel"><div class="spread"><h2 style="margin:0">session analysis</h2>
-      <button class="linkbtn" id="a-back">back to setup</button></div>
-    <div class="small muted" style="margin:-4px 0 16px">${a.hands} hands played.</div>
-    <div class="a-headline">
-      <div class="pnl-big ${a.pnl >= 0 ? "up" : "down"}">${a.pnl >= 0 ? "+" : ""}${a.pnl}</div>
-      <div class="small muted">${a.pnl_bb >= 0 ? "+" : ""}${a.pnl_bb} bb · ${
-        a.bb100 >= 0 ? "+" : ""}${a.bb100} bb/100 over ${a.hands} hands</div>
-    </div>
-    ${(a.lessons && a.lessons.length) ? `<div class="lessons">${
-      a.lessons.map(l => `<div class="lesson">${esc(l)}</div>`).join("")
-    }</div>` : ""}
-    <h3 style="margin:20px 0 8px">your line this session</h3>
-    <div class="astats">${stat("VPIP", a.vpip)}${stat("PFR", a.pfr)}${
-      stat("aggression", a.aggression)}${stat("to showdown", a.went_to_showdown)}${
-      stat("won at SD", a.won_at_showdown)}</div>
-    <h3 style="margin:22px 0 8px">against each villain</h3>
-    <div class="a-vs"></div>
-    <h3 style="margin:22px 0 8px">swings</h3>
-    <div class="small">Biggest pot won: ${a.best ? `hand ${a.best.hand_no}, ${money(a.best.net, (a.best.net/1).toFixed(0))}`.replace(/\(.*\)/, "") : "—"}</div>
-    <div class="small">Worst hand: ${a.worst ? `hand ${a.worst.hand_no}, ${a.worst.net}` : "—"}</div>
-  </div>`;
-  const vs = $(".a-vs", view);
-  for (const v of a.vs) {
-    const row = h("div", "a-vs-row");
-    row.innerHTML = `<span>${esc(v.name)}</span>
-      <span class="${v.net >= 0 ? "up" : "down"}" style="font-variant-numeric:tabular-nums">${
-        v.net >= 0 ? "+" : ""}${v.net} <span class="muted">(${
-        v.net_bb >= 0 ? "+" : ""}${v.net_bb} bb)</span></span>`;
-    vs.appendChild(row);
-  }
-  $("#a-back").onclick = () => {
-    state.analysis = null; state.game = null; state.lastEvent = null;
-    viewPlay();
-  };
-}
