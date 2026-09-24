@@ -14,6 +14,7 @@ import numpy as np
 from .botplay import decide, think_ms, think_pace
 from .cards import card_text, describe, evaluate
 from .holdem import STREETS, Hand, Seat
+from .model import positions_for
 from .priors import regime as regime_of
 
 #: Hands a villain needs *in a table size* before that book is preferred to
@@ -65,9 +66,10 @@ class Game:
         self.pnl = 0                          # your cumulative session profit/loss
         self._hero_start = start_stack
         self.vs = {n: 0 for i, n in enumerate(names) if i != hero_seat}
-        self.results: list[dict] = []
-        self.stats = {"hands": 0, "vpip": 0, "pfr": 0,
-                      "post_aggr": 0, "post_acts": 0, "sd_seen": 0, "sd_won": 0}
+        #: Every finished hand, whole: cards, actions, board. The review grades
+        #: decisions against what the villains actually held, which only the
+        #: sim can do -- a real hand history never shows a folded hand.
+        self.hands: list[dict] = []
         self.new_hand()
 
     # -- hand lifecycle ------------------------------------------------------
@@ -82,8 +84,7 @@ class Game:
         self.hand.hero_seat = self.hero_seat
         self.hand_no += 1
         self._starts = list(self.stacks)
-        self._hero_vol = self._hero_pfr = False
-        self._hero_post_aggr = self._hero_post_acts = 0
+        self._trace: list[dict] = []
 
     def step(self) -> dict | None:
         """Advance exactly one villain's action, or ``None`` if it is your turn
@@ -105,6 +106,7 @@ class Game:
         st_label = "pf" if h.street == 0 else STREETS[h.street]
         h.last_think[seat] = (think_pace(book, ms), st_label, act_tag)
         opening = h.street > 0 and h.bet == 0 and kind == "raise"
+        self._note(seat, kind)
         h.act(kind, amount)
         if h.over:
             self._bank()
@@ -115,19 +117,24 @@ class Game:
     def act(self, kind: str, amount: int = 0) -> None:
         if self.hand is None or self.hand.over or self.hand.to_act != self.hero_seat:
             raise RuntimeError("not your turn")
-        street = self.hand.street
+        self._note(self.hero_seat, kind)
         self.hand.act(kind, amount)
-        if street == 0:
-            if kind in ("call", "raise"):
-                self._hero_vol = True
-            if kind == "raise":
-                self._hero_pfr = True
-        else:
-            self._hero_post_acts += 1
-            if kind == "raise":
-                self._hero_post_aggr += 1
         if self.hand.over:
             self._bank()
+
+    def _note(self, seat: int, kind: str) -> None:
+        """Record a decision with the spot it was made in, before it is applied.
+
+        After the fact the engine only knows where the hand ended; the review
+        needs what each player faced -- the bet, the pot, who made it -- at
+        the moment they chose."""
+        h = self.hand
+        s = h.seats[seat]
+        self._trace.append({
+            "seat": seat, "street": h.street, "kind": kind,
+            "owed": max(0, h.bet - s.street_put), "pot": h.pot,
+            "raises": h.raises, "aggressor": h.last_raiser,
+        })
 
     def _bank(self) -> None:
         seats = self.hand.seats
@@ -138,89 +145,30 @@ class Game:
         hero_net = ends[self.hero_seat] - self._starts[self.hero_seat]
         self.pnl += hero_net
         showdown = len(self.hand._in_hand()) > 1
-        hero_folded = seats[self.hero_seat].folded
-        hero_won = (self.hand.winners or {}).get(self.hero_seat, 0) > 0
-        st = self.stats
-        st["hands"] += 1
-        st["vpip"] += int(self._hero_vol)
-        st["pfr"] += int(self._hero_pfr)
-        st["post_aggr"] += self._hero_post_aggr
-        st["post_acts"] += self._hero_post_acts
-        if showdown and not hero_folded:
-            st["sd_seen"] += 1
-            st["sd_won"] += int(hero_won)
-        self.results.append({"hand_no": self.hand_no, "net": hero_net,
-                             "pot": sum(s.hand_put for s in seats)})
+        pos = positions_for(list(range(len(seats))), self.button)
+        self.hands.append({
+            "hand_no": self.hand_no, "net": hero_net,
+            "pot": sum(s.hand_put for s in seats),
+            "board": [card_text(c) for c in self.hand.board],
+            "street": self.hand.street, "showdown": showdown,
+            "seats": [{"name": s.name, "position": pos.get(i, ""),
+                       "hole": [card_text(c) for c in s.hole],
+                       "folded": s.folded,
+                       "won": (self.hand.winners or {}).get(i, 0) > 0,
+                       "net": ends[i] - self._starts[i]}
+                      for i, s in enumerate(seats)],
+            "actions": self._trace,
+            "log": list(self.hand.log),
+        })
         self.stacks = ends
         for line in self.hand.log:
             self.history.append(line)
 
     def analysis(self) -> dict:
-        """A read on the session so far: your line, your P/L, and how you did
-        against each villain."""
-        st = self.stats
-        n = max(st["hands"], 1)
-        bb = self.bb
-        def pct(a, b):
-            return round(100 * a / b, 1) if b else None
-        results = sorted(self.results, key=lambda r: r["net"])
-        return {
-            "hands": st["hands"],
-            "pnl": self.pnl,
-            "pnl_bb": round(self.pnl / bb, 1) if bb else 0,
-            "bb100": round((self.pnl / bb) / n * 100, 1) if bb else 0,
-            "vpip": pct(st["vpip"], st["hands"]),
-            "pfr": pct(st["pfr"], st["hands"]),
-            "aggression": pct(st["post_aggr"], st["post_acts"]),
-            "went_to_showdown": pct(st["sd_seen"], st["hands"]),
-            "won_at_showdown": pct(st["sd_won"], st["sd_seen"]),
-            "vs": sorted(
-                [{"name": k, "net": v, "net_bb": round(v / bb, 1) if bb else 0}
-                 for k, v in self.vs.items()], key=lambda d: d["net"]),
-            "worst": results[0] if results else None,
-            "best": results[-1] if results else None,
-            "lessons": self._lessons(),
-        }
-
-    def _lessons(self) -> list[str]:
-        """Name the reads this session was supposed to teach.
-
-        The analysis used to be P/L and VPIP -- numbers that do not say
-        *what to do next*. These sentences are the profile talking: they
-        fold this many flops, they fold this many 3-bets, so this is the
-        work."""
-        n = max(self.stats["hands"], 1)
-        aggr = (self.stats["post_aggr"] / self.stats["post_acts"]
-                if self.stats["post_acts"] else None)
-        out = []
-        for i, who in enumerate(self.profiles):
-            if i == self.hero_seat or who is None:
-                continue
-            book = who.at(len(self.names)) if isinstance(who, Villain) else who
-            name = self.names[i]
-            fold_f = _stat(book, "fold_vs_bet:flop")
-            if fold_f is not None and fold_f >= 0.55:
-                if aggr is not None and aggr < 0.40:
-                    out.append(f"{name} folds {fold_f:.0%} of flops — you bet "
-                               f"{aggr:.0%} of postflop streets. Bet them.")
-                else:
-                    out.append(f"{name} folds {fold_f:.0%} of flops — keep betting.")
-            elif fold_f is not None and fold_f <= 0.30:
-                out.append(f"{name} continues {1 - fold_f:.0%} of flops — "
-                           "value thinner, stop bluffing.")
-            fold_t = _stat(book, "fold_vs_bet:turn")
-            if fold_t is not None and fold_t >= 0.55:
-                out.append(f"{name} folds {fold_t:.0%} of turns — the second barrel prints.")
-            f3 = _stat(book, "fold_to_three_bet")
-            if f3 is not None and f3 >= 0.65:
-                out.append(f"{name} folds {f3:.0%} to 3-bets — 3-bet them light.")
-            cbet = _stat(book, "cbet:flop")
-            if cbet is not None and cbet >= 0.72:
-                out.append(f"{name} c-bets {cbet:.0%} of flops — most of it is air. Raise and float.")
-        # Session-level, once, so a 2-hand session is not a lecture.
-        if n >= 8 and self.stats["vpip"] / n < 0.15:
-            out.append("You played fewer than 15% of hands. The reps are in the pots you take.")
-        return out[:5]
+        """The post-session review. Lives in :mod:`villain.simreview` because
+        it reads the finished hands, not the table."""
+        from .simreview import review
+        return review(self)
 
     # -- view ----------------------------------------------------------------
 
@@ -318,7 +266,3 @@ def _made_name(hole, board) -> str | None:
     ])
     return describe(int(evaluate(seven[None, :])[0]))
 
-
-def _stat(profile, key: str, min_opps: float = 20.0) -> float | None:
-    value = None if profile is None else profile.rate(key, None, min_opps)
-    return None if value is None else float(value)
