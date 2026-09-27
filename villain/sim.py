@@ -9,6 +9,9 @@ hidden until a showdown actually turns them over.
 
 from __future__ import annotations
 
+import re
+import threading
+
 import numpy as np
 
 from .botplay import decide, think_ms, think_pace
@@ -70,11 +73,25 @@ class Game:
         #: decisions against what the villains actually held, which only the
         #: sim can do -- a real hand history never shows a folded hand.
         self.hands: list[dict] = []
+        #: Held by the server around every request on this game. The HTTP
+        #: server is threaded, and ``step`` reads whose turn it is and then
+        #: acts -- two requests interleaved there played one seat's decision
+        #: for another.
+        self.lock = threading.Lock()
+        #: Bumped on every change to the table. The page sends the one it drew
+        #: from, so a double click or a countdown racing a click is refused
+        #: instead of being played on a table nobody has seen yet.
+        self.version = 0
         self.new_hand()
 
     # -- hand lifecycle ------------------------------------------------------
 
     def new_hand(self) -> None:
+        if self.hand is not None and not self.hand.over:
+            # Dealing over a live hand threw it away unbanked: the chips you
+            # had put in vanished from the P/L and the review never saw it.
+            raise RuntimeError("the hand is still being played")
+        self.version += 1
         # Keep the game going: anyone too short to post is topped back up.
         self.stacks = [s if s >= self.bb else self.start_stack for s in self.stacks]
         self._hero_start = self.stacks[self.hero_seat]
@@ -106,17 +123,19 @@ class Game:
         st_label = "pf" if h.street == 0 else STREETS[h.street]
         h.last_think[seat] = (think_pace(book, ms), st_label, act_tag)
         opening = h.street > 0 and h.bet == 0 and kind == "raise"
+        self.version += 1
         self._note(seat, kind)
         h.act(kind, amount)
         if h.over:
             self._bank()
         return {"seat": seat, "name": self.names[seat], "action": kind,
-                "amount": amount, "reason": reason, "opening": opening,
+                "amount": amount, "reason": _public(reason), "opening": opening,
                 "think_ms": ms}
 
     def act(self, kind: str, amount: int = 0) -> None:
         if self.hand is None or self.hand.over or self.hand.to_act != self.hero_seat:
             raise RuntimeError("not your turn")
+        self.version += 1
         self._note(self.hero_seat, kind)
         self.hand.act(kind, amount)
         if self.hand.over:
@@ -130,9 +149,15 @@ class Game:
         the moment they chose."""
         h = self.hand
         s = h.seats[seat]
+        # Priced on what this seat can actually put in: chips a covering stack
+        # bet beyond that can never be called, so they are neither owed nor
+        # in the pot being played for. Counting them graded a short stack's
+        # fold to a shove against a price it was never offered.
+        reach = s.street_put + s.stack
+        excess = sum(max(0, o.street_put - reach) for o in h.seats)
         self._trace.append({
             "seat": seat, "street": h.street, "kind": kind,
-            "owed": max(0, h.bet - s.street_put), "pot": h.pot,
+            "owed": max(0, min(h.bet, reach) - s.street_put), "pot": h.pot - excess,
             "raises": h.raises, "aggressor": h.last_raiser,
         })
 
@@ -211,6 +236,7 @@ class Game:
             }
         return {
             "hand_no": self.hand_no,
+            "version": self.version,
             "pnl": self.pnl,
             "sb": self.sb, "bb": self.bb,
             "street": STREETS[h.street],
@@ -251,6 +277,17 @@ class Game:
             if rows:
                 out[s.name] = [{"cls": n, "share": round(p, 3)} for n, p in rows]
         return out
+
+
+_HALF_OF_RANGE = re.compile(r" \((?:value|a bluff)\)| (?:for value|as a bluff)(?= —)")
+
+
+def _public(reason: str) -> str:
+    """The reason as the table may see it while the hand is live.
+
+    The policy tags a bet as value or bluff, and that tag rode along in the
+    step event -- one look at the network tab and a face-down hand was face up."""
+    return _HALF_OF_RANGE.sub("", reason)
 
 
 def _made_name(hole, board) -> str | None:

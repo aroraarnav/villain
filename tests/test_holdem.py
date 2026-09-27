@@ -31,7 +31,9 @@ def test_fold_hands_pot_to_the_other_player():
     h = Hand(_seats(100, 100), button=0, sb=1, bb=2, rng=np.random.default_rng(2))
     h.act("fold")                              # button/SB folds preflop
     assert h.over
-    assert h.winners == {1: 3}
+    # The big blind's unmatched chip comes back; only the called part is won.
+    assert h.winners == {1: 2}
+    assert "Uncalled 1 returned to" in " ".join(h.log)
     assert h.seats[1].stack == 101 and h.seats[0].stack == 99
 
 
@@ -212,3 +214,88 @@ def test_the_hero_log_is_first_person():
     assert "You win " in h.log[-1]
 
 
+
+
+def test_a_covering_stack_that_loses_is_not_a_winner():
+    """The uncalled excess was paid out as a win: a 400 stack that shoved into
+    a 60 stack and lost was logged "wins 340" and marked a winner."""
+    for seed in range(200):
+        h = Hand(_seats(400, 60), button=0, sb=1, bb=2, rng=np.random.default_rng(seed))
+        h.act("raise", 400)
+        h.act("call")
+        if h.seats[0].stack < 400:                 # the big stack lost
+            break
+    assert h.over
+    assert 0 not in h.winners
+    assert h.seats[0].stack == 340
+    assert "Uncalled 340 returned to" in " ".join(h.log)
+
+
+def test_nothing_can_be_played_after_the_hand_is_over():
+    """_settle left to_act set, so a late act paid the pot out a second time."""
+    h = Hand(_seats(100, 100), button=0, sb=1, bb=2, rng=np.random.default_rng(398))
+    h.act("fold")
+    with pytest.raises(RuntimeError):
+        h.act("call")
+    assert sum(s.stack for s in h.seats) == 200
+
+
+def test_call_with_nothing_owed_and_a_free_fold_are_refused():
+    h = Hand(_seats(100, 100), button=0, sb=1, bb=2, rng=np.random.default_rng(1))
+    h.act("call")                                  # SB completes
+    with pytest.raises(ValueError):
+        h.act("call")                              # BB owes nothing
+    with pytest.raises(ValueError):
+        h.act("fold")
+    assert not h.limped - {0}
+
+
+def test_blinds_that_put_everyone_all_in_run_the_board_out():
+    """Nobody can act after the blinds; the hand used to sit there, neither
+    over nor anyone's turn, and the sim step crashed on it."""
+    h = Hand(_seats(2, 2), button=0, sb=2, bb=2, rng=np.random.default_rng(4))
+    assert h.over and len(h.board) == 5
+    assert sum(s.stack for s in h.seats) == 4
+
+
+def test_short_all_ins_that_add_up_to_a_raise_reopen_the_action():
+    """A opens 100, B shoves 148, C shoves 208: neither is a full raise on its
+    own, but A now faces 108 more -- a full raise over what A last matched."""
+    h = Hand(_seats(148, 208, 1000, 1000), button=0, sb=1, bb=2,
+             rng=np.random.default_rng(5))
+    assert h.to_act == 3
+    h.act("raise", 100)                            # A (UTG), a full raise of 98
+    h.act("raise", 148)                            # B, all in, +48: incomplete
+    h.act("raise", 208)                            # C, all in, +60: incomplete
+    h.act("call")                                  # BB calls 208
+    assert h.to_act == 3
+    assert h.legal().can_raise
+
+
+def test_one_short_all_in_does_not_reopen_the_action():
+    h = Hand(_seats(148, 1000, 1000, 1000), button=0, sb=1, bb=2,
+             rng=np.random.default_rng(5))
+    h.act("raise", 100)
+    h.act("raise", 148)                            # +48 only
+    h.act("call")
+    h.act("call")
+    assert h.to_act == 3
+    assert not h.legal().can_raise
+
+
+def test_odd_chip_goes_left_of_the_button():
+    """Split pots gave the odd chip to the lowest seat index."""
+    h = Hand(_seats(100, 100, 100), button=1, sb=1, bb=3, rng=np.random.default_rng(0))
+    for i, hole in ((0, ("2c", "3d")), (1, ("4h", "5h")), (2, ("2d", "3c"))):
+        h.seats[i].hole = tuple(card_id(c) for c in hole)
+    # Popped from the end: flop, turn, river -- a broadway straight for all.
+    h._deck = [card_id(c) for c in ("Th", "Jc", "Qd", "Ks", "As")]
+    h.act("call")                                  # seat 1 (UTG) calls 3
+    h.act("call")                                  # seat 2 (SB) completes
+    h.act("check")                                 # seat 0 (BB)
+    h.act("raise", 3)                              # seat 2 bets the flop
+    h.act("call")                                  # seat 0
+    h.act("fold")                                  # seat 1: 15 in the pot
+    while not h.over:
+        h.act("check")
+    assert h.winners == {2: 8, 0: 7}

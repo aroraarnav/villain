@@ -174,13 +174,19 @@ function actionText(ev) {
   return `Raises to ${ev.amount}`;
 }
 
+/* One request on the table at a time. A double-clicked Call, or the deal
+   countdown firing under a click on "Deal now", sent two -- the second was
+   played on a table nobody had seen yet. The version is the server's guard
+   for the same thing. */
 async function simPost(route, extra) {
-  if (!state.game) return;
+  if (!state.game || state.simInFlight) return;
   const token = state.game.token;
   const gen = state.simGen;
   clearSimTimer();
+  state.simInFlight = true;
   try {
-    const d = await post(route, Object.assign({token}, extra || {}));
+    const d = await post(route, Object.assign(
+      {token, version: state.game.state.version}, extra || {}));
     if (gen !== state.simGen || !state.game || state.game.token !== token) return;
     state.game = {token, state: d.state};
     state.stepUntil = null;
@@ -191,7 +197,30 @@ async function simPost(route, extra) {
     }
     if (state.tab === "play" && !state.analysis) renderTable($("#view"), state.game);
     else armSimClock();
-  } catch (err) { /* game gone or navigated away */ }
+  } catch (err) {
+    if (gen === state.simGen) simFailed(err, token);
+  } finally {
+    state.simInFlight = false;
+  }
+}
+
+/* A request the table could not survive used to be swallowed with the step
+   timer already cleared, so after a restart or an evicted game the table sat
+   on "villains acting…" for good. Recover when the server says how; say so
+   and offer the way out when it cannot. */
+function simFailed(err, token) {
+  if (!state.game || state.game.token !== token) return;
+  const table = err.data && err.data.state;
+  if (table) {
+    state.game = {token, state: table};
+    if (state.tab === "play" && !state.analysis) renderTable($("#view"), state.game);
+    return;
+  }
+  const el = $("#controls");
+  if (!el || state.tab !== "play") return;
+  el.innerHTML = `<p class="err" style="margin:0">${esc(err.message)}</p>`;
+  el.appendChild(actbtn("Try again", () => renderTable($("#view"), state.game)));
+  el.appendChild(actbtn("Leave table", () => { $("#leave") && $("#leave").click(); }));
 }
 
 function clearSimTimer() {
@@ -448,8 +477,10 @@ function tickDealCountdown() {
 
 async function stepBots(token) {
   const gen = state.simGen;
+  if (state.simInFlight) return;
+  state.simInFlight = true;
   try {
-    const r = await post("/api/sim/step", {token});
+    const r = await post("/api/sim/step", {token, version: state.game.state.version});
     if (gen !== state.simGen || !state.game || state.game.token !== token) return;
     if (r.event) actionSound(r.event.action);
     state.game = {token, state: r.state};
@@ -458,7 +489,11 @@ async function stepBots(token) {
     if (state.clockHold) state.clockHold.stepUntil = null;
     if (state.tab === "play" && !state.analysis) renderTable($("#view"), state.game);
     else armSimClock();
-  } catch (err) { /* game gone or navigated away */ }
+  } catch (err) {
+    if (gen === state.simGen) simFailed(err, token);
+  } finally {
+    state.simInFlight = false;
+  }
 }
 
 function cfArmed(st) {
@@ -552,8 +587,12 @@ function renderControls(el, data) {
     const facing = lg.can_call && !lg.can_check;
     const callTo = lg.committed + lg.call_amount;
     const potAfter = st.pot + lg.call_amount;
+    // Only a street nobody has put anything into is a bet. The big blind's
+    // option already has chips in, and sizing it off the pot alone clamped
+    // every preset to the minimum and called the raise a bet.
+    const unopened = lg.can_check && lg.committed === 0;
     const sizeTo = (frac) => {
-      const raw = lg.can_check ? Math.round(frac * st.pot)
+      const raw = unopened ? Math.round(frac * st.pot)
         : callTo + Math.round(frac * potAfter);
       return Math.min(lg.max_raise_to, Math.max(lg.min_raise_to, raw));
     };
@@ -568,7 +607,7 @@ function renderControls(el, data) {
     const labelFor = (v) => {
       v = snap(v);
       if (facing && v <= callTo) return `Call ${lg.call_amount}`;
-      return lg.can_check ? `Bet ${v}` : `Raise to ${v}`;
+      return unopened ? `Bet ${v}` : `Raise to ${v}`;
     };
     const wrap = h("div", "raise-wrap");
     const slider = document.createElement("input");

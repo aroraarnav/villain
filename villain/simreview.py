@@ -136,6 +136,9 @@ def _grade(hand, hero: int) -> list[dict]:
             out.append(base | {"kind": "bluff", "right": worked})
         elif (a["kind"] == "check" and street == 3 and a["owed"] == 0
               and hand["showdown"] and hand["seats"][hero]["won"]
+              # A chop was not a pot left on the table: betting it gets
+              # called only by the hand that ties it.
+              and sum(1 for x in hand["seats"] if x["won"]) == 1
               and not any(b["kind"] == "raise" and b["street"] == 3
                           for b in acts[k + 1:])):
             out.append(base | {"kind": "check", "right": False})

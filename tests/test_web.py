@@ -1437,3 +1437,40 @@ def test_forgetting_the_hero_drops_the_finished_page(tmp_path, hands):
         assert heroview.hero_status(store) == "ready"
         heroview.forget_hero(store)
         assert heroview.hero_status(store) == "cold"
+
+
+def _sim_game(store, hands, db):
+    from villain.webapp.sessions import SIM_GAMES
+
+    store.add_hands(hands)
+    pid = int(store.players()[0]["id"])
+    status, body, _ = _dispatch(db, "POST", "/api/sim/new", {"villains": [pid]})
+    assert status == 200, body
+    token = json.loads(body)["token"]
+    return token, SIM_GAMES[token]
+
+
+def test_the_sim_refuses_blinds_and_stacks_that_are_not_a_game(store, hands, db):
+    store.add_hands(hands)
+    pid = int(store.players()[0]["id"])
+    for setup in ({"sb": 5, "bb": 2}, {"sb": 2, "bb": 2}, {"stack": 20, "bb": 50}):
+        status, _, _ = _dispatch(db, "POST", "/api/sim/new", {"villains": [pid], **setup})
+        assert status == 400, setup
+
+
+def test_a_stale_sim_request_is_refused_with_the_live_table(store, hands, db):
+    """A double click sent the same action twice; the second landed on the
+    next street, before anyone had seen it."""
+    token, game = _sim_game(store, hands, db)
+    stale = game.version - 1
+    status, body, _ = _dispatch(db, "POST", "/api/sim/step", {"token": token, "version": stale})
+    assert status == 409
+    assert json.loads(body)["state"]["version"] == game.version
+
+
+def test_the_next_hand_waits_for_this_one(store, hands, db):
+    token, game = _sim_game(store, hands, db)
+    assert not game.hand.over
+    status, _, _ = _dispatch(db, "POST", "/api/sim/next", {"token": token})
+    assert status == 409
+    assert game.hand_no == 1

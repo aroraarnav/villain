@@ -192,11 +192,27 @@ def test_think_ms_uses_the_fold_meter():
 
 def test_step_returns_think_ms():
     from villain.sim import Game
-    g = Game(["You", "Arav", "nuj"],
+    g = Game(["You", "PlayerA", "PlayerB"],
              [None, _Prof(rfi=0.99), _Prof(rfi=0.99)],
              0, 200, 1, 2, seed=1)
-    g.new_hand()
+    g.act("fold")                    # hero opens the action on the first deal
     ev = g.step()
     assert ev is not None
     assert 400 <= ev["think_ms"] <= 8000
     assert ev["seat"] != 0
+
+
+def test_open_limps_come_from_just_under_the_raise_cut():
+    """The limp gate was measured from the top of the range, but the top had
+    already raised: a 10% limper who opens 30% limped 0.6% of the time."""
+    from villain.holdem import Seat
+
+    prof = _Prof(rfi=0.30, limp=0.10)
+    n = 2000
+    limps = 0
+    for s in range(n):
+        seats = [Seat(f"P{i}", 200) for i in range(6)]
+        h = Hand(seats, button=5, sb=1, bb=2, rng=np.random.default_rng(s))
+        kind, _, _ = decide(h, h.to_act, prof, np.random.default_rng(s + 99))
+        limps += kind == "call"
+    assert abs(limps / n - 0.10) < 0.02
