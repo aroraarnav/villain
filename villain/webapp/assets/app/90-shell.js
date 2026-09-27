@@ -209,6 +209,9 @@ document.addEventListener("keydown", e => {
   if (e.key !== "Escape") return;
   for (const id of ["#modal2", "#modal"]) {
     const layer = $(id);
+    // The busy veil is not a dialog: dismissing it mid-write unlocked the tabs
+    // and the import button while the write it guards was still running.
+    if (layer && layer.querySelector(".veil.busy")) return;
     if (layer && layer.innerHTML.trim()) { layer.innerHTML = ""; return; }
   }
 });
@@ -237,6 +240,10 @@ window.addEventListener("popstate", () => {
   // A dialog belongs to the screen it was opened on.
   $("#modal").innerHTML = "";
   $("#modal2").innerHTML = "";
+  // A tab that is locked now (the Hero tab after a reset, say) cannot be
+  // returned to; land on the database instead and correct the address.
+  const button = document.querySelector(`nav button[data-tab="${route.tab}"]`);
+  if (button && button.disabled) { showTab("players"); syncUrl(true); return; }
   if (route.tab === "sessions" && route.id != null) state.sessionId = route.id;
   showTab(route.tab, route.tab === "players" ? route.id : undefined);
 });

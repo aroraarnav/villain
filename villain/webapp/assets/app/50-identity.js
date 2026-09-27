@@ -576,21 +576,18 @@ async function askIdentity(token, questions, onDone, linked, conflicts) {
       // status line the reader may not have been looking at, so a failed apply
       // looked like an apply that silently did nothing -- with the hands still
       // unsaved and the database still empty.
-      const sheet = modal.querySelector(".sheet");
-      if (sheet) {
-        let note = sheet.querySelector(".apply-err");
-        if (!note) {
-          note = document.createElement("p");
-          note.className = "err apply-err";
-          sheet.appendChild(note);
-        }
-        note.textContent = /expired/i.test(err.message || "")
-          ? "This upload timed out while the dialog was open. Nothing was saved — add the files again."
-          : `Not applied — ${err.message}`;
-      } else {
-        $("#modal").innerHTML = "";
+      // The busy veil replaced this dialog in #modal, so put the dialog back
+      // before writing into it; rethrowing into a click handler reached no one.
+      $("#modal").replaceChildren(modal.closest(".veil") || modal);
+      let note = modal.querySelector(".apply-err");
+      if (!note) {
+        note = document.createElement("p");
+        note.className = "err apply-err";
+        modal.appendChild(note);
       }
-      throw err;
+      note.textContent = /expired/i.test(err.message || "")
+        ? "This upload timed out while the dialog was open. Nothing was saved — add the files again."
+        : `Not applied — ${err.message}`;
     }
   };
 

@@ -95,8 +95,12 @@ function fieldRead(row) {
 /* ---- tooltip ---- */
 const tip = $("#tip");
 function bindTip(el, html) {
+  const owner = {};
   const place = (x, y) => {
-    tip.innerHTML = html; tip.classList.add("on");
+    // Rewriting the content on every mousemove forced a fresh layout per
+    // event; only the position changes while the pointer stays inside.
+    if (tip._owner !== owner) { tip.innerHTML = html; tip._owner = owner; }
+    tip.classList.add("on");
     const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
     let left = x + pad, top = y + pad;
     if (left + w > innerWidth - 8) left = x - w - pad;
@@ -104,7 +108,7 @@ function bindTip(el, html) {
     tip.style.left = Math.max(8, left) + "px";
     tip.style.top = Math.max(8, top) + "px";
   };
-  const hide = () => tip.classList.remove("on");
+  const hide = () => { tip.classList.remove("on"); tip._owner = null; };
   const anchor = () => {
     const r = el.getBoundingClientRect();
     place(r.left + r.width / 2, r.bottom - 6);
@@ -141,6 +145,9 @@ function wireDrop(drop, input, take) {
   drop.ondragleave = () => drop.classList.remove("over");
   drop.ondrop = e => {
     e.preventDefault();
+    // The panel around the Database tab's zone takes drops too; letting this
+    // one bubble ran two imports of the same files at once.
+    e.stopPropagation();
     drop.classList.remove("over");
     take(e.dataTransfer.files);
   };

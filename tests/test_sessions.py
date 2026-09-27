@@ -80,3 +80,20 @@ def test_a_sitting_survives_a_deleted_player(store):
     # And every other sitting they sat in, not just the first.
     for session in store.sessions():
         store.session_detail(session)
+
+
+def test_a_sitting_keeps_its_id_when_an_older_one_arrives(tmp_path, hands):
+    """Links and back/forward carry the id. Numbered by position, importing an
+    earlier night shifted every id after it onto a different sitting."""
+    import dataclasses
+
+    older = [dataclasses.replace(h, hand_id=h.hand_id + "-old",
+                                 started_at=h.started_at - 30 * 24 * 3600 * 1000)
+             for h in hands]
+    with Store(tmp_path / "v.db") as s:
+        s.add_hands(hands)
+        before = {x["id"]: x["hand_ids"] for x in s.sessions()}
+        s.add_hands(older)
+        after = {x["id"]: x["hand_ids"] for x in s.sessions()}
+    for sid, ids in before.items():
+        assert after[sid] == ids

@@ -27,13 +27,26 @@ from ..parsers import UnknownFormat
 from ..replay import replay
 from ..stats import VS_HERO
 from .assets import page, static
-from .heroview import _cached_hero_id, forget_hero, hero_begin, hero_payload, hero_peek, hero_status
+from .heroview import _cached_hero_id, forget_hero, forget_hero_failure, hero_begin, hero_payload, hero_peek, hero_status
 from .jsonutil import encode as json_encode
 from .payloads import MIN_ROSTER_HANDS, profile_payload, roster_payload, tab_availability
 from .sessions import SESSIONS, SIM_GAMES, _reap_sessions, apply_answers, commit_session, parse_upload, question_payload, session_brief, session_payload
 
 #: Hostnames the UI may be reached on. Anything else is a rebinding attempt.
 LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", ""})
+
+class BadRequest(Exception):
+    """A malformed request, answered 400. Kept apart from ValueError, which the
+    store raises for a real conflict (409): a typo'd id is the caller's
+    mistake, not a state the database is in."""
+
+
+def _int(value, what: str) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise BadRequest(f"{what} must be a whole number") from None
+
 
 @dataclass(frozen=True)
 class Route:
@@ -148,6 +161,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(404, {"error": "not found"})
         try:
             return handler(self, route, arg) if arg else handler(self, route)
+        except BadRequest as exc:
+            return self._send(400, {"error": str(exc)})
         except Exception as exc:                      # keep the server alive
             return self._send(500, {"error": str(exc)})
 
@@ -173,7 +188,7 @@ class Handler(BaseHTTPRequestHandler):
 
     @get("/api/session-detail")
     def _session_detail(self, route):
-        sid = int(parse_qs(route.query).get("id", ["0"])[0])
+        sid = _int(parse_qs(route.query).get("id", ["0"])[0], "id")
         with Store(self.db_path) as store:
             match = next((x for x in store.sessions() if x["id"] == sid), None)
             if match is None:
@@ -211,7 +226,7 @@ class Handler(BaseHTTPRequestHandler):
 
     @get("/api/player/<arg>")
     def _player(self, _route, arg):
-        player_id = int(arg)
+        player_id = _int(arg, "player id")
         with Store(self.db_path) as store:
             row = store.conn.execute(
                 "SELECT display_name FROM players WHERE id = ?",
@@ -255,6 +270,11 @@ class Handler(BaseHTTPRequestHandler):
             # Never block on the build: a cold hero is ~90s of model
             # fitting, so the page polls rather than holding a socket.
             status = hero_status(store)
+            if status == "failed":
+                # Said once, then forgotten, so opening the tab again retries.
+                error = hero_peek(store).get("error")
+                forget_hero_failure(store)
+                return self._send(500, {"error": f"Could not build the Hero page: {error}"})
             # Order is the original one: a cold hero still tries to start a
             # build before the already-building case answers, so the side
             # effect of hero_begin is not skipped.
@@ -274,7 +294,7 @@ class Handler(BaseHTTPRequestHandler):
     @get("/api/evidence")
     def _evidence(self, route):
         query = parse_qs(route.query)
-        player_id = int(query.get("player", ["0"])[0])
+        player_id = _int(query.get("player", ["0"])[0], "player")
         stat = query.get("stat", [""])[0]
         if not stat:
             return self._send(400, {"error": "stat required"})
@@ -420,6 +440,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(404, {"error": "game not found -- start a new one"})
                 return route.handler(self, body, game)
             return route.handler(self, body)
+        except BadRequest as exc:
+            return self._send(400, {"error": str(exc)})
         except ValueError as exc:
             return self._send(409, {"error": str(exc)})
         except Exception as exc:
@@ -434,7 +456,7 @@ class Handler(BaseHTTPRequestHandler):
 
     @post("/api/player/delete", writes=True)
     def _delete_player(self, body: dict):
-        player_id = int(body.get("player_id", 0))
+        player_id = _int(body.get("player_id"), "player_id")
         with Store(self.db_path) as store:
             # Hero is not a villain you can forget: the whole Hero tab is built
             # from that identity, and deleting it would leave the tool reading a
@@ -458,7 +480,9 @@ class Handler(BaseHTTPRequestHandler):
     def _unlink(self, body: dict):
         with Store(self.db_path) as store:
             try:
-                new_id = store.unlink(int(body["player_id"]),
+                if "site" not in body or "account" not in body:
+                    raise BadRequest("site and account required")
+                new_id = store.unlink(_int(body.get("player_id"), "player_id"),
                                       str(body["site"]), str(body["account"]))
             except LookupError as exc:
                 # No such alias on that player -- the caller asked about
