@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 import numpy as np
+import pytest
 from helpers import Prof
 
 from villain.glossary import TERMS, stat_help
@@ -196,3 +197,48 @@ def test_the_review_routes_open_a_session_hand(seeded, db):
     gone = browser.dispatch_json("POST", "/api/sim/hand",
                                  json.dumps({"token": token, "hand_no": 99}))
     assert gone["status"] == 404
+
+
+def test_a_covered_call_is_priced_on_what_you_could_put_in():
+    """Hero has 100, the villain 400. Facing a 340 shove with 40 behind, the
+    price is 40 into 200 -- the review graded it against the whole 340."""
+    from helpers import Prof
+
+    from villain.sim import Game
+    from villain.simreview import _grade
+
+    g = Game(["You", "V1"], [None, Prof()], 0, 400, 1, 2, seed=0)
+    g.stacks = [100, 400]
+    g.button = 1
+    g.hand = None
+    g.new_hand()
+    h = g.hand
+    g.act("raise", 60)
+    g._note(1, "call")
+    h.act("call")
+    g._note(1, "raise")
+    h.act("raise", h.legal().max_raise_to)
+    g.act("fold")
+    graded = _grade(g.hands[-1], 0)[0]
+    assert graded["needed"] == pytest.approx(40 / 200, abs=0.001)
+
+
+def test_the_live_step_does_not_say_value_or_bluff():
+    from villain.sim import _public
+
+    assert _public("c-bets 60% pot (value) — fires ~50% here") == "c-bets 60% pot — fires ~50% here"
+    assert _public("raises as a bluff — polar vs a flop bet, ~12%") == "raises — polar vs a flop bet, ~12%"
+    assert _public("raises for value — polar vs a flop bet, ~12%") == "raises — polar vs a flop bet, ~12%"
+
+
+def test_a_hand_cannot_be_dealt_over_a_live_one():
+    """A second "next" threw the live hand away unbanked."""
+    from helpers import Prof
+
+    from villain.sim import Game
+
+    g = Game(["You", "V1"], [None, Prof()], 0, 200, 1, 2, seed=3)
+    assert not g.hand.over
+    with pytest.raises(RuntimeError):
+        g.new_hand()
+    assert g.hand_no == 1

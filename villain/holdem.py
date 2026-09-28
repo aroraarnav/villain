@@ -121,6 +121,11 @@ class Hand:
         self.last_think: dict = {}                # seat -> (pace, street, act) for fold_next
         self._staged: tuple[int, object] | None = None   # see :meth:`stage`
         self.to_act: int | None = self._first_to_act_preflop()
+        # Stacks at or under the blinds can leave nobody able to act at all.
+        # Waiting for a decision there left a hand that was neither over nor
+        # anyone's turn, and the table froze on it.
+        if self.to_act is None:
+            self._runout()
 
     # -- setup ---------------------------------------------------------------
 
@@ -223,8 +228,11 @@ class Hand:
         min_raise_to = self.bet + self.min_raise
         # Incomplete all-ins do not re-open: a player who has already acted
         # on the last *full* raise may call the extra or fold, not raise.
+        # Several short all-ins can add up to a full raise over what this seat
+        # last matched, and that re-opens it even though no single one did.
         can_raise = (max_raise_to > self.bet and s.stack > owed
-                     and (self.raise_open or i not in self.acted))
+                     and (self.raise_open or i not in self.acted
+                          or owed >= self.min_raise))
         return Legal(
             can_check=can_check, can_call=can_call, call_amount=call_amount,
             can_raise=can_raise, min_raise_to=min(min_raise_to, max_raise_to),
@@ -246,11 +254,18 @@ class Hand:
         """Apply the seat-to-act's decision. ``kind`` is ``fold``/``check``/
         ``call``/``raise``; ``amount`` for a raise is the total this-street
         commitment to reach (a raise *to*, not *by*)."""
-        if self.to_act is None:
+        if self.over or self.to_act is None:
             raise RuntimeError("no seat to act")
         i = self.to_act
         s = self.seats[i]
         legal = self.legal()
+        # Strict, because a repeated request is the usual way these arrive: a
+        # double-clicked Call landed on the next street as a check nobody saw,
+        # and a "call" with nothing owed counted the big blind as a limper.
+        if kind == "call" and not legal.can_call:
+            raise ValueError("nothing to call")
+        if kind == "fold" and not legal.can_fold:
+            raise ValueError("checking is free")
         staged = getattr(self, "_staged", None)
         self._staged = None
         if staged is not None and staged[0] == i:
@@ -387,6 +402,19 @@ class Hand:
         self.pot_settled += sum(s.street_put for s in self.seats)
         for s in self.seats:                             # sweep last street in
             s.street_put = 0
+        self.to_act = None
+        # Chips nobody matched go back before anything is awarded. Paid out as
+        # winnings, a covering stack that lost the showdown was logged as
+        # winning and marked a winner.
+        puts = sorted((s.hand_put for s in self.seats), reverse=True)
+        top = max(range(self.n), key=lambda i: self.seats[i].hand_put)
+        uncalled = puts[0] - (puts[1] if self.n > 1 else 0)
+        if uncalled > 0:
+            s = self.seats[top]
+            s.hand_put -= uncalled
+            s.stack += uncalled
+            self.pot_settled -= uncalled
+            self.log.append(f"Uncalled {uncalled} returned to {s.name}")
         contribs = {i: s.hand_put for i, s in enumerate(self.seats)}
         winners: dict[int, int] = dict.fromkeys(range(self.n), 0)
 
@@ -400,7 +428,10 @@ class Hand:
             contenders = [i for i in contributors if not self.seats[i].folded]
             if not contenders:                           # everyone folded in -- rare
                 contenders = contributors
-            best = self._best(contenders)
+            # Odd chips go to the first winner left of the button, not the
+            # lowest seat number.
+            best = sorted(self._best(contenders),
+                          key=lambda i: (i - self.button - 1) % self.n)
             share, extra = divmod(amount, len(best))
             for j, w in enumerate(best):
                 winners[w] += share + (1 if j < extra else 0)

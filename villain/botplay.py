@@ -603,10 +603,23 @@ def _raise_or_jam(hand, seat, legal, target: int) -> tuple[str, int]:
     return ("raise", to)
 
 
+def _callable_pot(hand, seat) -> int:
+    """The pot as this seat can play for it.
+
+    A covering stack's chips beyond what this seat can match are never won or
+    lost by it. Left in, a shove from a big stack read as a small bet into a
+    big pot -- the same 150 to call into 120 was a 0.4-pot "small" bet with a
+    400 stack behind it and a 1.25-pot bet with 210, so bots called off far
+    wider whenever they were covered."""
+    s = hand.seats[seat]
+    reach = s.street_put + s.stack
+    return hand.pot - sum(max(0, o.street_put - reach) for o in hand.seats)
+
+
 def _price(hand, legal) -> tuple[int, float, float, float]:
     """Chips to call, bet/pot, MDF, required equity to break even."""
     B = max(legal.call_amount, 1)
-    pot_before = max(hand.pot - B, 1)
+    pot_before = max(_callable_pot(hand, hand.to_act) - B, 1)
     frac = B / pot_before
     mdf = 1.0 / (1.0 + frac)
     req_eq = B / (2.0 * B + pot_before)
@@ -755,9 +768,13 @@ def _decide_preflop(hand, seat: int, profile, rng, lg, bb: int) -> tuple[str, in
                     f"isolates the {hand.limpers} limper{'s' if hand.limpers > 1 else ''}"
                     f" to {to / bb:.1f}bb — attacks limps ~{iso_f:.0%} from {pos or 'here'}")
         over = _freq_n(profile, "over_limp", 0.05, 12)
-        over_gate = 1 - _clamp(over * 2, 0.08, 0.45)
+        # The band just under the iso cut: everything above it isolated a
+        # branch ago, so a gate measured from the top of the range limped
+        # clamp(2*over) - iso of hands -- 9.6% for a 20% over-limper who
+        # isolates 30%, 29.6% for one who isolates 10%.
+        over_gate = max(0.0, 1 - iso_f - over)
         if lg.can_call and over > 0.05 and _over(strength, over_gate, rng) and not short:
-            _keep(hand, seat, _ORDER_OPEN, [(over_gate, 1.0)])
+            _keep(hand, seat, _ORDER_OPEN, [(over_gate, 1 - iso_f)])
             return ("call", 0, f"over-limps behind — comes along ~{over:.0%} in limped pots")
         if lg.can_check:
             return ("check", 0, "checks the option behind the limpers")
@@ -777,7 +794,10 @@ def _decide_preflop(hand, seat: int, profile, rng, lg, bb: int) -> tuple[str, in
             return ("raise", to,
                     f"opens to {obb:.1f}bb from {pos or 'the button'} — opens ~{rfi:.0%} there, their own size")
         limp = _freq(profile, "limp", 0.03)
-        limp_gate = 1 - _clamp(limp * 3, 0.1, 0.5)
+        # Measured from the raise cut down, for the reason over-limps are: a
+        # gate from the top of the range realized clamp(3*limp) - rfi, so a
+        # 10% limper who opens 30% limped 0.6% of hands.
+        limp_gate = max(0.0, 1 - rfi - limp)
         if lg.can_call and limp > 0.06 and _over(strength, limp_gate, rng) and not short:
             # An open-limp is the slice below the opening range, not above
             # it: hands good enough to open were raised a branch ago.
@@ -922,17 +942,13 @@ def _decide_preflop(hand, seat: int, profile, rng, lg, bb: int) -> tuple[str, in
         if _over(strength, rr_gate, rng):
             _keep(hand, seat, _ORDER_OPEN, [(rr_gate, 1.0)])
             _, to = _raise_or_jam(hand, seat, lg, lg.max_raise_to)
-            return ("raise", to,
-                    f"shoves { _remain_bb(hand, seat):.0f}bb — {rr_label}, "
-                    f"no flatting { _remain_bb(hand, seat):.0f}bb")
+            return ("raise", to, _no_flat_shove(hand, seat, cont))
         if _over(call_s, 1 - cont, rng):
             order = _ORDER_DEFEND if level <= 1 else _ORDER_OPEN
             top = rr_gate if order is _ORDER_OPEN else 1.0
             _keep(hand, seat, order, [(1 - cont, max(top, 1 - cont))])
             _, to = _raise_or_jam(hand, seat, lg, lg.max_raise_to)
-            return ("raise", to,
-                    f"shoves { _remain_bb(hand, seat):.0f}bb — the {cont:.0%} that "
-                    f"would continue vs this size, getting it in")
+            return ("raise", to, _no_flat_shove(hand, seat, cont))
         if lg.can_check:
             return ("check", 0, "checks")
         return ("fold", 0, fold_why)
@@ -955,6 +971,17 @@ def _decide_preflop(hand, seat: int, profile, rng, lg, bb: int) -> tuple[str, in
     if lg.can_check:
         return ("check", 0, "checks")
     return ("fold", 0, fold_why)
+
+
+def _no_flat_shove(hand, seat, cont: float) -> str:
+    """One explanation for both shoving branches at a no-flat depth.
+
+    The top of the range and the rest of what continues used to be explained
+    differently, and the explanation is shown live -- so the wording said
+    which half of the range had just shoved."""
+    depth = _remain_bb(hand, seat)
+    return (f"shoves {depth:.0f}bb — no flatting at {depth:.0f}bb, so the "
+            f"{cont:.0%} that would continue vs this size gets it in")
 
 
 def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -> tuple[str, int, str]:
@@ -1005,7 +1032,7 @@ def decide(hand, seat: int, profile, rng: np.random.Generator, name: str = "") -
         # fraction on top of raw pot odds -- weak-live hands fold big bets.
         level = hand.raises                          # 1 = a bet, 2 = a raise, 3+ = a re-raise
         B = lg.call_amount
-        pot_before = max(hand.pot - B, 1)
+        pot_before = max(_callable_pot(hand, seat) - B, 1)
         f = B / pot_before                            # bet as a fraction of the pot
         mdf = 1.0 / (1.0 + f)                          # P / (P + B)
         req_eq = B / (2.0 * B + pot_before)            # pot odds

@@ -438,7 +438,14 @@ class Handler(BaseHTTPRequestHandler):
                 game = SIM_GAMES.get(body.get("token"))
                 if game is None:
                     return self._send(404, {"error": "game not found -- start a new one"})
-                return route.handler(self, body, game)
+                with game.lock:
+                    if "version" in body and _int(body["version"], "version") != game.version:
+                        # Drawn from a table that has since moved on: a double
+                        # click, or the countdown racing a click. Hand back the
+                        # table as it is instead of playing the stale request.
+                        return self._send(409, {"error": "the table has moved on",
+                                                "state": game.state()})
+                    return route.handler(self, body, game)
             return route.handler(self, body)
         except BadRequest as exc:
             return self._send(400, {"error": str(exc)})
@@ -526,12 +533,19 @@ class Handler(BaseHTTPRequestHandler):
     def _sim_new(self, body: dict):
         from ..sim import Game, Villain
 
-        vids = [int(x) for x in (body.get("villains") or [])][:5]
+        vids = [_int(x, "villain") for x in (body.get("villains") or [])][:5]
         if not vids:
             return self._send(400, {"error": "pick at least one villain"})
-        stack = max(20, int(body.get("stack", 200)))
-        bb = max(2, int(body.get("bb", 2)))
-        sb = max(1, int(body.get("sb", bb // 2)))
+        stack = max(20, _int(body.get("stack", 200), "stack"))
+        bb = max(2, _int(body.get("bb", 2), "big blind"))
+        sb = max(1, _int(body.get("sb", bb // 2), "small blind"))
+        # A small blind at or over the big one handed the small blind a
+        # negative call, and a stack that cannot cover the big blind is not a
+        # game -- both are typos, and saying so beats dealing them.
+        if sb >= bb:
+            return self._send(400, {"error": "the small blind has to be smaller than the big blind"})
+        if stack <= bb:
+            return self._send(400, {"error": "stacks have to be bigger than the big blind"})
         names, profiles = ["You"], [None]
         with Store(self.db_path) as store:
             known = {int(r["id"]): r["display_name"] for r in store.players()}
@@ -551,7 +565,7 @@ class Handler(BaseHTTPRequestHandler):
     @post("/api/sim/act", writes=False, needs="game")
     def _sim_act(self, body: dict, game):
         try:
-            game.act(str(body.get("kind")), int(body.get("amount", 0)))
+            game.act(str(body.get("kind")), _int(body.get("amount", 0), "amount"))
         except (RuntimeError, ValueError) as exc:
             return self._send(400, {"error": str(exc)})
         return self._send(200, {"state": game.state()})
@@ -563,6 +577,9 @@ class Handler(BaseHTTPRequestHandler):
 
     @post("/api/sim/next", writes=False, needs="game")
     def _sim_next(self, body: dict, game):
+        if not game.hand.over:
+            return self._send(409, {"error": "the hand is still being played",
+                                    "state": game.state()})
         game.new_hand()
         return self._send(200, {"state": game.state()})
 
@@ -575,7 +592,7 @@ class Handler(BaseHTTPRequestHandler):
         """One finished hand with every card face up, for the review. Every
         tip there cites hand numbers; this is what they open."""
         from ..simreview import hand_detail
-        detail = hand_detail(game, int(body.get("hand_no", 0)))
+        detail = hand_detail(game, _int(body.get("hand_no", 0), "hand_no"))
         if detail is None:
             return self._send(404, {"error": "no such hand in this session"})
         return self._send(200, detail)
