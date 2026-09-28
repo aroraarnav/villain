@@ -30,7 +30,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .model import STREET_LABELS, Act, Street
-from .reads import StrengthModel, build_dataset, strength_by_street, texture
+from .reads import StrengthModel, build_dataset, stored_strengths, texture
 from .reads import fit as fit_strength
 from .stats import Decision, HandView
 
@@ -302,7 +302,7 @@ def _hero_spots(hands: list, hero_id: int, progress=None):
                 # dataset pass already scored this hand under, so asking with
                 # hero alone missed the cache on every hand (19s of a build).
                 known = {s.seat: s for s in hand.seats if len(s.hole_cards) == 2}
-                yield hand, seat, strength_by_street(hand, known)
+                yield hand, seat, stored_strengths(hand, known)
         if progress is not None and (at + 1) % every == 0:
             progress(at + 1, total)
     if progress is not None:

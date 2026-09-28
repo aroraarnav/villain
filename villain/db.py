@@ -126,6 +126,17 @@ CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+-- What each hand's cards say -- all-in equity, showdown and per-street
+-- strength percentiles -- which depends on nothing but the hand. Scoring it
+-- was about 70% of a rebuild and all of a Hero build's reading phase, redone
+-- after every import and merge for answers that could not have changed.
+-- Disposable: rows from another DERIVED_VERSION are recomputed.
+CREATE TABLE IF NOT EXISTS hand_derived (
+    hand_id TEXT PRIMARY KEY,
+    version TEXT NOT NULL,
+    payload TEXT NOT NULL
+) WITHOUT ROWID;
 """
 
 DEFAULT_PATH = Path.home() / ".villain" / "villain.db"
@@ -184,6 +195,15 @@ def _report(done: int, total: int, phase: str) -> None:
 #: account is any string, so the marker must be one no integer id can start
 #: with.
 UNATTRIBUTED = "?"
+
+
+def _derived_version() -> str:
+    """Stamp on stored card-scored facts. The definitions stamp is part of it:
+    stored hands are decoded fresh on every read, so a parser fix -- which
+    bumps the definitions -- can change the cards and pots they were scored
+    from."""
+    from .features import DERIVED_VERSION
+    return f"{DERIVED_VERSION}/{DEFINITIONS_VERSION}"
 
 
 def key_seats(hand: Hand, resolve, names: dict[str, str] | None = None,
@@ -599,6 +619,8 @@ class Store:
                     self.conn.execute(
                         "UPDATE hands SET payload = ?, source = 1 WHERE hand_id = ?",
                         (payload, hand.hand_id))
+                    self.conn.execute(
+                        "DELETE FROM hand_derived WHERE hand_id = ?", (hand.hand_id,))
                     reread.append(hand)
                     report.reread += 1
                 continue
@@ -775,6 +797,7 @@ class Store:
                 hero = None
             if hero is None:
                 hero = hero_of(hands)
+        self._derive(hands)
         # Two-pass timing: freeze each player's snap/tank cutoffs from the
         # full sample, then tag every hand with those same thresholds.
         books = record_hands(hands, progress=_report, hero=hero)
@@ -985,6 +1008,7 @@ class Store:
             # whole sitting down.
             key_seats(hand, resolve)
             hands.append(hand)
+        self._attach_derived(hands)
         return record_hands(hands)
 
     #: Only statistics with a per-*hand* denominator are compared session to
@@ -1203,6 +1227,35 @@ class Store:
         from .priors import REGIMES
         return {r: blob for r in REGIMES if (blob := self.fitted_priors(r))}
 
+    def _attach_derived(self, hands: list[Hand]) -> list[Hand]:
+        """Hang each hand's stored card-scored facts on it, where current."""
+        from .features import load_derived
+        by_id = {hand.hand_id: hand for hand in hands}
+        ids = list(by_id)
+        for at in range(0, len(ids), 900):         # under SQLite's variable cap
+            chunk = ids[at:at + 900]
+            for row in self.conn.execute(
+                    "SELECT hand_id, payload FROM hand_derived WHERE version = ?"
+                    f" AND hand_id IN ({','.join('?' * len(chunk))})",
+                    (_derived_version(), *chunk)):
+                by_id[row["hand_id"]].derived = load_derived(row["payload"])
+        return hands
+
+    def _derive(self, hands: list[Hand]) -> None:
+        """Attach every hand's card-scored facts, scoring and storing only the
+        hands the store has no current record for."""
+        from .features import derive_many, load_derived
+        self._attach_derived(hands)
+        missing = [hand for hand in hands if hand.derived is None]
+        if not missing:
+            return
+        payloads = derive_many(missing, progress=_report)
+        self.conn.executemany(
+            "INSERT OR REPLACE INTO hand_derived (hand_id, version, payload) VALUES (?, ?, ?)",
+            [(hand.hand_id, _derived_version(), text) for hand, text in zip(missing, payloads)])
+        for hand, text in zip(missing, payloads):
+            hand.derived = load_derived(text)
+
     def seat_visibility(self) -> dict[int, tuple[int, int]]:
         """``player_id -> (hands seated, hands with their cards known)``.
 
@@ -1374,7 +1427,7 @@ class Store:
                 progress(at + 1, total)
         if progress is not None:
             progress(total, total)
-        return out
+        return self._attach_derived(out)
 
     def delete_player(self, player_id: int) -> dict:
         """Forget one person. Their hands stay exactly where they are.
@@ -1419,7 +1472,7 @@ class Store:
             "players": self.conn.execute("SELECT COUNT(*) c FROM players").fetchone()["c"],
         }
         for table in ("ratios", "meters", "books", "notes", "distinct_pairs", "hand_seats",
-                      "aliases", "fitted_priors", "hands", "players"):
+                      "aliases", "fitted_priors", "hands", "players", "hand_derived"):
             self.conn.execute(f"DELETE FROM {table}")
         self.conn.execute("DELETE FROM sqlite_sequence WHERE name = 'players'")
         self.conn.commit()

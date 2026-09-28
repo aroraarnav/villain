@@ -129,7 +129,7 @@ def build_dataset(hands: list[Hand], progress=None) -> list[Row]:
         known = {s.seat: s for s in hand.seats if len(s.hole_cards) == 2}
         if not known:
             continue
-        strengths = strength_by_street(hand, known)
+        strengths = stored_strengths(hand, known)
         for decision in view.decisions():
             seat = known.get(decision.seat)
             if seat is None or decision.street is Street.PREFLOP:
@@ -299,6 +299,15 @@ def _board_universe(board: tuple[str, ...]):
             del _BOARD_CACHE[old_key]
     _BOARD_CACHE[board] = result
     return result
+
+
+def stored_strengths(hand: Hand, known: dict) -> dict[tuple[int, Street], float]:
+    """:func:`strength_by_street` for every known holding, from the store's
+    per-hand record when it has one -- the reading phase of a Hero build was
+    this, recomputed for every hand on every build."""
+    if hand.derived is not None and "strength" in hand.derived:
+        return hand.derived["strength"]
+    return strength_by_street(hand, known)
 
 
 def strength_by_street(hand: Hand, known: dict) -> dict[tuple[int, Street], float]:
