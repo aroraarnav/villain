@@ -82,7 +82,7 @@ def _hero_model(store: Store, progress=None, hands=None):
 #: Bump whenever _build_hero_payload's returned shape changes, so an old
 #: cache file from a previous version of this module is a miss rather than a
 #: served-stale response with fields the current frontend does not expect.
-_HERO_CACHE_VERSION = 9
+_HERO_CACHE_VERSION = 10
 
 
 def forget_hero(store: Store) -> None:

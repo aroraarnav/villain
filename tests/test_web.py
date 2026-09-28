@@ -682,7 +682,9 @@ def test_a_cold_hero_build_is_reported_as_a_write(tmp_path, hands):
     browser.set_db(str(db))
 
     first = browser.build_hero()
-    assert first["wrote"] is True
+    # The sidecar, not the database: the page uploads only what changed.
+    assert first["hero_wrote"] is True
+    assert first["wrote"] is False
     assert (db.with_name(db.name + ".hero-cache.json")).exists()
 
     # Worker restart: in-memory caches are gone. The sidecar is what boot
@@ -694,7 +696,7 @@ def test_a_cold_hero_build_is_reported_as_a_write(tmp_path, hands):
         assert heroview.hero_status(store) == "ready"
 
     second = browser.build_hero()
-    assert second["wrote"] is False, "a cache hit is a read"
+    assert second["wrote"] is False and second["hero_wrote"] is False, "a cache hit is a read"
     assert second["body"] == first["body"]
 
 

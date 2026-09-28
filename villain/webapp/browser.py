@@ -97,10 +97,14 @@ def dispatch_json(method: str, path: str, body: str = "") -> dict:
     # definitions rebuild entirely -- a write no route asked for.
     from .. import db
     from .heroview import consume_hero_dirty
+    # Separate from the database's own flag: a Hero build rewrites only its
+    # sidecar, and the page uploads only what changed -- lumped together, a
+    # 64KB cache write sent the whole 106MB database up again.
     return {"status": code, "body": out.decode("utf-8"), "content_type": content_type,
-            "wrote": db.consume_cache_dirty() or consume_hero_dirty() or (
+            "wrote": db.consume_cache_dirty() or (
                 method == "POST" and code < 400 and writes_to_disk(
-                    path.split("?")[0]))}
+                    path.split("?")[0])),
+            "hero_wrote": consume_hero_dirty()}
 
 
 def set_progress(hook=None) -> None:
@@ -157,4 +161,4 @@ def build_hero(progress=None) -> dict:
                                     "no player has cards known on enough of their "
                                     "own hands."}),
             "content_type": "application/json",
-            "wrote": consume_cache_dirty() or consume_hero_dirty()}
+            "wrote": consume_cache_dirty(), "hero_wrote": consume_hero_dirty()}

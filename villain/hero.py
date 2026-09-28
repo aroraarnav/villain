@@ -434,7 +434,7 @@ class GradeReport:
 def fold_grades(hands: list, hero_id: int, model: StrengthModel,
                 progress=None) -> GradeReport:
     """Grade every postflop fold hero made against the hand hero actually held."""
-    grades: list[Grade] = []
+    pending: list[tuple[dict, list[float]]] = []
     for hand, seat, strengths in _hero_spots(hands, hero_id, progress):
         view = HandView(hand)
         current_street = Street.PREFLOP
@@ -449,22 +449,30 @@ def fold_grades(hands: list, hero_id: int, model: StrengthModel,
                 to_call = decision.action.to_call
                 pot_before = decision.action.pot_before
                 if strength is not None and to_call > 0 and hand.big_blind:
-                    grades.append(Grade(
-                        FOLD, hand_id=hand.hand_id, street=int(decision.street),
-                        hole_cards=seat.hole_cards, board=hand.board_at(decision.street),
-                        strength=strength,
-                        faced_strength=_predict_strength(model, hand, last_aggro),
-                        required_equity=to_call / (pot_before + to_call),
-                        pot_before_bb=pot_before / hand.big_blind,
-                        to_call_bb=to_call / hand.big_blind,
-                    ))
+                    pending.append(({
+                        "hand_id": hand.hand_id, "street": int(decision.street),
+                        "hole_cards": seat.hole_cards,
+                        "board": hand.board_at(decision.street),
+                        "strength": strength,
+                        "required_equity": to_call / (pot_before + to_call),
+                        "pot_before_bb": pot_before / hand.big_blind,
+                        "to_call_bb": to_call / hand.big_blind,
+                    }, _strength_features(hand, last_aggro)))
             if act.is_aggressive:
                 last_aggro = decision
-    return GradeReport(grades=grades)
+    return _graded(FOLD, pending, model)
 
 
-def _predict_strength(model: StrengthModel, hand, decision: Decision) -> float:
-    """What the population model expects a line like this one to represent.
+def _graded(kind, pending: list[tuple[dict, list[float]]], model: StrengthModel) -> GradeReport:
+    """Grades for collected spots, with the population's read of each line
+    predicted in one call rather than one call per spot."""
+    faced = model.predict_many([features for _, features in pending])
+    return GradeReport(grades=[Grade(kind, faced_strength=f, **fields)
+                               for (fields, _), f in zip(pending, faced)])
+
+
+def _strength_features(hand, decision: Decision) -> list[float]:
+    """The model's input for what a line like this one represents.
 
     Used for both a bet hero folded to and a check hero made -- the feature
     vector states its own action type, so one call answers both.
@@ -486,13 +494,13 @@ def _predict_strength(model: StrengthModel, hand, decision: Decision) -> float:
         float(decision.players_in),
         *texture(hand.board_at(decision.street)),
     ]
-    return model.predict(features)
+    return features
 
 
 def missed_value(hands: list, hero_id: int, model: StrengthModel,
                  progress=None) -> GradeReport:
     """Grade every postflop check hero made against the hand hero actually held."""
-    grades: list[Grade] = []
+    pending: list[tuple[dict, list[float]]] = []
     for hand, seat, strengths in _hero_spots(hands, hero_id, progress):
         for decision in HandView(hand).decisions():
             if (decision.seat != seat.seat or decision.street is Street.PREFLOP
@@ -501,14 +509,13 @@ def missed_value(hands: list, hero_id: int, model: StrengthModel,
             strength = strengths.get((seat.seat, decision.street))
             if strength is None or not hand.big_blind:
                 continue
-            grades.append(Grade(
-                CHECK, hand_id=hand.hand_id, street=int(decision.street),
-                hole_cards=seat.hole_cards, board=hand.board_at(decision.street),
-                strength=strength,
-                faced_strength=_predict_strength(model, hand, decision),
-                pot_before_bb=decision.action.pot_before / hand.big_blind,
-            ))
-    return GradeReport(grades=grades)
+            pending.append(({
+                "hand_id": hand.hand_id, "street": int(decision.street),
+                "hole_cards": seat.hole_cards, "board": hand.board_at(decision.street),
+                "strength": strength,
+                "pot_before_bb": decision.action.pot_before / hand.big_blind,
+            }, _strength_features(hand, decision)))
+    return _graded(CHECK, pending, model)
 
 
 # -- tells: does something visible about hero's bet change with the hand behind it ---

@@ -107,6 +107,9 @@ class _StubModel:
     def predict(self, features):
         return 0.5
 
+    def predict_many(self, rows):
+        return [0.5] * len(rows)
+
 
 def test_fold_grades_produces_well_formed_grades(stored):
     hero_id = find_hero(stored, min_hands=10)

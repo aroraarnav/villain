@@ -166,8 +166,17 @@ def test_a_guest_flush_keeps_a_definitions_rebuild():
     """Guests have no account, but IndexedDB still has to receive a stamped
     database or the next visit rebuilds the sample from scratch."""
     shell = SHELL.read_text()
-    assert "if (r.wrote)" in shell
+    assert "if (r.wrote || r.hero_wrote)" in shell
     assert "persistWrite = async () => { await toDisk(false); }" in shell
+
+
+def test_a_hero_cache_write_does_not_upload_the_database():
+    """A cold Hero build rewrites a 64KB sidecar. Reported as one "wrote"
+    flag, the page uploaded the whole database with it."""
+    shell = SHELL.read_text()
+    assert "persistWrite({ db: !!r.wrote, hero: !!r.hero_wrote })" in shell
+    assert 'if (sendDb) await sync.put(user.sub, "db"' in shell
+    assert "if (hash !== heroSent)" in shell
 
 
 def test_the_third_party_script_is_pinned_and_checked():

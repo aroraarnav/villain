@@ -242,6 +242,12 @@
     const RESET = "villain.reset-local";
 
     let persistWrite = async () => {};
+    // SHA-256 of the hero sidecar as last uploaded (or downloaded), so an
+    // unchanged one is not sent again. Null: not known, so send it.
+    let heroSent = null;
+    const digest = async (bytes) => Array.from(
+      new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)),
+      (b) => b.toString(16).padStart(2, "0")).join("");
     let cancelSave = () => {};                 // drop a save that is only queued
     let saveNote = () => {};                   // replaced once the header exists
     let brokenRemote = false;                  // the stored copy could not be read back
@@ -288,6 +294,7 @@
           const hero = await sync.get(user.sub, "hero").catch(() => ({ bytes: null }));
           if (hero.bytes) await writeFile(HERO, hero.bytes);
           else await call("remove", { path: HERO });
+          heroSent = hero.bytes ? await digest(hero.bytes) : "";
           await toDisk(false);
         } catch (err) {
           // An unreadable copy on the server must not cost you the working one
@@ -301,25 +308,41 @@
 
       let timer = 0;
       let pending = false;
+      // What changed since the last save. A cold Hero build rewrites only the
+      // 64KB sidecar, and saving used to mean the whole database too -- 60MB
+      // gzipped, for a file that had not changed.
+      let dbDirty = false, heroDirty = false;
       const upload = async (report) => {
         pending = false;
+        const sendDb = dbDirty, sendHero = heroDirty;
+        dbDirty = heroDirty = false;
         // `report` is passed when a caller is already showing progress of its
         // own -- the import, under its veil. Otherwise it goes to the header.
         const onProgress = report || showProgress;
         try {
           if (!report) saveNote("Saving…");
           await toDisk(false);
-          await sync.put(user.sub, "db", await readFile(DB), onProgress);
+          if (sendDb) await sync.put(user.sub, "db", await readFile(DB), onProgress);
           if (!report) showProgress(null);
           // A hero cache that no longer exists here has to be removed there
           // too. Sweeping only runs while writing, so a file that is never
-          // written again would keep every version it ever had.
-          const heroBytes = await readFile(HERO);
-          if (heroBytes) await sync.put(user.sub, "hero", heroBytes);
-          else await sync.drop(user.sub, "hero");
+          // written again would keep every version it ever had. Unchanged
+          // since the last upload, it is not sent again.
+          if (sendDb || sendHero) {
+            const heroBytes = await readFile(HERO);
+            const hash = heroBytes ? await digest(heroBytes) : "";
+            if (hash !== heroSent) {
+              if (heroBytes) await sync.put(user.sub, "hero", heroBytes);
+              else await sync.drop(user.sub, "hero");
+              heroSent = hash;
+            }
+          }
           const took = sync.tookOver();
           if (!report) saveNote(took ? "Saved — replaced a newer copy from another tab." : "");
         } catch (err) {
+          // Still owed: a later save must not believe these went up.
+          dbDirty = dbDirty || sendDb;
+          heroDirty = heroDirty || sendHero;
           // Loudly. A failed save that only reaches the console is how somebody
           // imports a session, closes the tab and loses it.
           if (!report) showProgress(null);
@@ -327,7 +350,9 @@
           saveNote(`Not saved — ${err.message}`);
         }
       };
-      persistWrite = async () => {
+      persistWrite = async ({ db = true, hero = false } = {}) => {
+        dbDirty = dbDirty || db;
+        heroDirty = heroDirty || hero;
         pending = true;
         clearTimeout(timer);
         timer = setTimeout(upload, 800);
@@ -337,11 +362,13 @@
       // import is not "finished" while its hands are still going up.
       window.villainSaveNow = async (report) => {
         clearTimeout(timer);
+        dbDirty = true;                  // called after an import committed
         await upload(report);
       };
-      cancelSave = () => { clearTimeout(timer); pending = false; };
+      cancelSave = () => { clearTimeout(timer); pending = false; dbDirty = heroDirty = false; };
       if (brokenRemote) {
         // Write the good local copy over the unreadable stored one at once.
+        dbDirty = heroDirty = true;
         upload();
       }
 
@@ -439,7 +466,7 @@
       // database". This page used to decide it with a regex of its own, which
       // meant a route added to the handler and not to the regex worked
       // perfectly on a laptop and silently never reached the account.
-      if (r.wrote) {
+      if (r.wrote || r.hero_wrote) {
         if (url.pathname === "/api/reset" && user) {
           // "Delete everything" has to mean everything. Uploading the emptied
           // database instead would leave the account holding a file, a version
@@ -448,7 +475,7 @@
           await sync.drop(user.sub, "db").catch(() => {});
           await sync.drop(user.sub, "hero").catch(() => {});
         } else {
-          await persistWrite();
+          await persistWrite({ db: !!r.wrote, hero: !!r.hero_wrote });
         }
       }
       return new Response(r.body, { status: r.status, headers: { "Content-Type": r.content_type } });
