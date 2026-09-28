@@ -156,12 +156,12 @@ high = "They want to see cards. Value bet thin; bluffing is throwing money away.
 low = "They are looking for a reason to fold. Barrel relentlessly."
 
 [stats.wsd]
-what = "Of the showdowns they reach, how often they win."
+what = "Of the showdowns they reach, how often they win the pot or a share of it."
 high = "They get there with real hands. Their calls mean something."
 low = "They arrive with weak holdings — paying off too often."
 
 [stats.wwsf]
-what = "Having seen a flop, how often they end up winning the pot."
+what = "Having seen a flop, how often they end up winning the pot or a share of it."
 high = "They take their share of pots after the flop."
 low = "They see flops and give up. Bet at them."
 

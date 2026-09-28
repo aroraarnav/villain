@@ -320,7 +320,7 @@ async function showEvidence(playerId, stat, headline) {
     <p class="small muted">${data.hits
       ? `Showing the most recent \u2014 click one to replay it.`
       : `Never, in ${data.count} chance${data.count === 1 ? "" : "s"}.`}
-      ${data.count > data.hits
+      ${data.misses
       ? `<label class="onlyhits"><input type="checkbox" id="show-all">
            show the ones where it did not</label>` : ""}</p>
     <div id="evlist"></div>`);

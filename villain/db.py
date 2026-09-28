@@ -20,7 +20,7 @@ from pathlib import Path
 
 from .dynamics import adjustments, unified_read, versus_read
 from .features import record_hands
-from .model import Hand, hand_from_dict, hand_to_dict
+from .model import Hand, hand_from_dict, stored_form
 from .stats import VS_HERO, Meter, Ratio, StatBook
 
 SCHEMA = """
@@ -141,7 +141,7 @@ SPURIOUS_OVERLAP = 10
 #: request, so a 71k-hand database makes the next page wait about a minute --
 #: acceptable once, so the stamp must survive the request that wrote it. See
 #: :data:`PROGRESS_HOOK` and :func:`consume_cache_dirty`.
-DEFINITIONS_VERSION = "2026-08-24.sim-plays-the-rest-of-the-book"
+DEFINITIONS_VERSION = "2026-09-27.four-way-review-math"
 
 #: Set by a host that can show a progress bar: ``hook(done, total, phase)``,
 #: where ``total`` of zero means the phase cannot be counted. Module-level
@@ -183,6 +183,35 @@ def _report(done: int, total: int, phase: str) -> None:
 UNATTRIBUTED = "?"
 
 
+def key_seats(hand: Hand, resolve, names: dict[str, str] | None = None,
+              keep_unresolved: bool = False) -> None:
+    """Re-key a hand's seats from site accounts onto player ids, in place.
+
+    One player gets one seat. Accounts that shared a few hands can still be
+    merged (see :data:`SPURIOUS_OVERLAP`), and in those hands both seats
+    resolved to the same player: two hands dealt, a VPIP of 2 out of 2, and a
+    player folding to their own bet. The seat that did more keeps the id; the
+    other stays in the hand for everyone else's read and is booked to nobody.
+    A seat whose player was deleted is booked to nobody the same way, unless
+    ``keep_unresolved`` leaves it on its site account."""
+    busy = {}
+    for a in hand.actions:
+        if a.act.is_voluntary:
+            busy[a.seat] = busy.get(a.seat, 0) + 1
+    owner: dict[str, int] = {}
+    for seat in sorted(hand.seats, key=lambda s: -busy.get(s.seat, 0)):
+        pid = resolve(hand.site, seat.player_id, seat.name)
+        if pid is None and keep_unresolved:
+            continue
+        if pid is None or str(pid) in owner:
+            seat.player_id = UNATTRIBUTED + str(seat.player_id)
+            continue
+        owner[str(pid)] = seat.seat
+        if names is not None:
+            names[str(pid)] = seat.name or names.get(str(pid), "")
+        seat.player_id = str(pid)
+
+
 def split_key(account: str, name: str) -> str:
     """Alias key for an account id the user has split between two people."""
     return f"{account}#{name.strip().lower()}"
@@ -204,12 +233,17 @@ class ImportReport:
     #: Accounts folded into another player as reconnects of one person.
     merged_accounts: int = 0
     players: dict[str, int] = field(default_factory=dict)   # display name -> hands added
+    #: Already stored, but only as an older parser decoded them; replaced by
+    #: what the site wrote so the current parser reads them from now on.
+    reread: int = 0
 
     def __str__(self) -> str:
         text = (f"{self.hands_new} new hands from {self.files} file(s) "
                 f"({self.duplicates} already known), {self.players_new} new player(s)")
         if self.merged_accounts:
             text += f", {self.merged_accounts} account(s) merged as reconnects"
+        if self.reread:
+            text += f", {self.reread} stored hand(s) re-read with the current parser"
         if self.unusable:
             # An import that yields no statistics must not look like a success.
             text += (f"\n  {self.unusable} hand(s) could not be read and "
@@ -254,6 +288,12 @@ class Store:
         for col in ("spread", "floor", "ceiling"):
             if col not in cols:
                 self.conn.execute(f"ALTER TABLE fitted_priors ADD COLUMN {col} REAL")
+        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(hands)")}
+        if "source" not in cols:
+            # Whether the payload is what the site wrote (1) or an older
+            # parser's decoding of it (0). Every hand before this was the latter.
+            self.conn.execute(
+                "ALTER TABLE hands ADD COLUMN source INTEGER NOT NULL DEFAULT 0")
         self._repair_distinct_pairs()
         self._backfill_hand_seats()
 
@@ -264,10 +304,10 @@ class Store:
             return
         rows = []
         for row in self.conn.execute("SELECT hand_id, site, payload FROM hands"):
-            data = json.loads(gzip.decompress(row["payload"]))
-            for seat in data.get("seats") or []:
+            hand = hand_from_dict(json.loads(gzip.decompress(row["payload"])))
+            for seat in hand.seats:
                 rows.append((row["hand_id"], row["site"],
-                             seat.get("player_id") or "", seat.get("name") or ""))
+                             seat.player_id or "", seat.name or ""))
         if rows:
             self.conn.executemany(
                 "INSERT OR IGNORE INTO hand_seats (hand_id, site, account, name)"
@@ -534,19 +574,29 @@ class Store:
         import N full rebuilds, and a directory is the normal case."""
         report = report or ImportReport()
         fresh: list[Hand] = []
+        reread: list[Hand] = []
         for hand in hands:
             report.hands_seen += 1
             known = self.conn.execute(
-                "SELECT 1 FROM hands WHERE hand_id = ?", (hand.hand_id,)).fetchone()
+                "SELECT source FROM hands WHERE hand_id = ?", (hand.hand_id,)).fetchone()
+            payload = gzip.compress(json.dumps(stored_form(hand)).encode())
             if known:
                 report.duplicates += 1
+                # Skipping a hand already seen kept whatever the parser of the
+                # day made of it, forever. Seeing the export again is the one
+                # chance to keep what the site wrote instead.
+                if not known["source"] and hand.source is not None:
+                    self.conn.execute(
+                        "UPDATE hands SET payload = ?, source = 1 WHERE hand_id = ?",
+                        (payload, hand.hand_id))
+                    reread.append(hand)
+                    report.reread += 1
                 continue
-            payload = gzip.compress(json.dumps(hand_to_dict(hand)).encode())
             self.conn.execute(
-                "INSERT INTO hands (hand_id, site, table_id, started_at, players, payload)"
-                " VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO hands (hand_id, site, table_id, started_at, players,"
+                " payload, source) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (hand.hand_id, hand.site, hand.table_id, hand.started_at,
-                 len(hand.seats), payload),
+                 len(hand.seats), payload, int(hand.source is not None)),
             )
             self.conn.executemany(
                 "INSERT OR IGNORE INTO hand_seats (hand_id, site, account, name)"
@@ -559,6 +609,10 @@ class Store:
                 report.unusable += 1
 
         touched = self._ingest(fresh, report, name_splits or set())
+        if reread:
+            _, resolve = self.alias_resolver()
+            touched |= {pid for hand in reread for seat in hand.seats
+                        if (pid := resolve(hand.site, seat.player_id, seat.name)) is not None}
         self.conn.commit()
         self._pending.update(touched)
         if not defer_rebuild:
@@ -642,13 +696,13 @@ class Store:
                 "SELECT site, account FROM aliases WHERE player_id = ?", (player_id,)
             ).fetchall()
             keys = {(r["site"], r["account"]) for r in accounts}
-            rows = [
-                r for r in self.conn.execute(
-                    "SELECT site, payload FROM hands ORDER BY started_at").fetchall()
-                if any((r["site"], seat["player_id"]) in keys
-                       or (r["site"], split_key(seat["player_id"], seat["name"])) in keys
-                       for seat in json.loads(gzip.decompress(r["payload"]))["seats"])
-            ]
+            decoded = (hand_from_dict(json.loads(gzip.decompress(r["payload"])))
+                       for r in self.conn.execute(
+                           "SELECT payload FROM hands ORDER BY started_at"))
+            return [h for h in decoded
+                    if any((h.site, seat.player_id) in keys
+                           or (h.site, split_key(seat.player_id, seat.name)) in keys
+                           for seat in h.seats)]
         return [hand_from_dict(json.loads(gzip.decompress(r["payload"]))) for r in rows]
 
     # -- books -----------------------------------------------------------
@@ -685,23 +739,34 @@ class Store:
             data = json.loads(gzip.decompress(row["payload"]))
             hand = hand_from_dict(data)
             # Re-key seats onto internal player ids so merged aliases pool.
-            for seat in hand.seats:
-                pid = resolve(hand.site, seat.player_id, seat.name)
-                if pid is None:
-                    # A seat whose account maps to nobody: its player was
-                    # deleted. It stays in the hand -- everybody else's read
-                    # depends on how many were dealt in and what it did -- but
-                    # is booked to nobody, under a prefix no player id can
-                    # collide with, and dropped below. The raw account instead
-                    # books stats under a site string and fails int() on write.
-                    seat.player_id = UNATTRIBUTED + str(seat.player_id)
-                    continue
-                names[str(pid)] = seat.name or names.get(str(pid), "")
-                seat.player_id = str(pid)
+            # Unresolved seats are booked under a prefix no player id can
+            # collide with, and dropped below: a raw account would book stats
+            # under a site string and fail int() on write.
+            key_seats(hand, resolve, names)
             hands.append(hand)
+        # Who "you" are is a fact about the whole database. A narrowed
+        # rebuild resolved it over its own few hands, and could key every vs:
+        # counter to somebody else; so a full rebuild records the answer and a
+        # narrowed one reuses it while that player still exists.
+        from .hero import hero_of
+        every = self.conn.execute("SELECT COUNT(*) AS c FROM hands").fetchone()["c"]
+        if wanted is None or len(hands) == every:
+            hero = hero_of(hands)
+            self.conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES ('hero_player', ?)",
+                (hero or "",))
+        else:
+            row = self.conn.execute(
+                "SELECT value FROM meta WHERE key = 'hero_player'").fetchone()
+            hero = row["value"] if row and row["value"] else None
+            if hero is not None and not self.conn.execute(
+                    "SELECT 1 FROM players WHERE id = ?", (hero,)).fetchone():
+                hero = None
+            if hero is None:
+                hero = hero_of(hands)
         # Two-pass timing: freeze each player's snap/tank cutoffs from the
         # full sample, then tag every hand with those same thresholds.
-        books = record_hands(hands, progress=_report)
+        books = record_hands(hands, progress=_report, hero=hero)
 
         wanted_str = {str(p) for p in wanted} if wanted is not None else None
         written = 0
@@ -884,25 +949,18 @@ class Store:
         from .model import hand_from_dict
         if not hand_ids:
             return {}
-        alias_map = {(r["site"], r["account"]): int(r["player_id"])
-                     for r in self.conn.execute(
-                         "SELECT site, account, player_id FROM aliases")}
+        _, resolve = self.alias_resolver()
         hands = []
         marks = ",".join("?" * len(hand_ids))
         for row in self.conn.execute(
                 f"SELECT site, payload FROM hands WHERE hand_id IN ({marks})"
                 " ORDER BY started_at", tuple(hand_ids)):
             hand = hand_from_dict(json.loads(gzip.decompress(row["payload"])))
-            for seat in hand.seats:
-                pid = alias_map.get((hand.site, split_key(seat.player_id, seat.name))) \
-                    or alias_map.get((hand.site, seat.player_id))
-                # Marked, not left as the raw account -- :meth:`rebuild`'s
-                # convention, for its reason. Deleting a player leaves their
-                # seats resolving to nobody, and a site account string is
-                # indistinguishable from a player id downstream, where an
-                # int() on one takes the whole sitting down.
-                seat.player_id = (str(pid) if pid is not None
-                                  else UNATTRIBUTED + str(seat.player_id))
+            # Marked, not left as the raw account -- :meth:`rebuild`'s
+            # convention, for its reason: a site account string downstream is
+            # indistinguishable from a player id, and int() on one takes the
+            # whole sitting down.
+            key_seats(hand, resolve)
             hands.append(hand)
         return record_hands(hands)
 
@@ -1243,9 +1301,7 @@ class Store:
         for at, row in enumerate(self.conn.execute(query)):
             data = json.loads(gzip.decompress(row["payload"]))
             hand = hand_from_dict(data)
-            for seat in hand.seats:
-                pid = resolve(hand.site, seat.player_id, seat.name)
-                seat.player_id = str(pid) if pid is not None else seat.player_id
+            key_seats(hand, resolve, keep_unresolved=True)
             out.append(hand)
             if progress is not None and (at + 1) % 200 == 0:
                 progress(at + 1, total)

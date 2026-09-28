@@ -14,7 +14,11 @@ Code   Meaning
 0      check
 2      post big blind (``value``)
 3      post small blind (``value``)
-7      call (``value`` = street-cumulative wager)
+4      post a missed big blind (``value``) -- live, counts as a wager
+5      post a missed small blind (``value``) -- dead, straight to the pot
+6      straddle (``value``)
+7      call (``value`` = street-cumulative wager) -- *or* a bet of exactly
+       one big blind, which the site logs as a call; see ``_replay``
 8      bet or raise (``value`` = street-cumulative, ``allIn`` flag)
 9      board cards (``turn`` 1/2/3 = flop/turn/river, ``run`` for run-it-twice)
 10     pot award (``value``, plus showdown ``cards``/``combination``)
@@ -44,6 +48,12 @@ from ..model import Act, Action, Hand, Seat, Street, positions_for
 from .base import register
 
 CHECK, POST_BB, POST_SB = 0, 2, 3
+#: A returning player's make-up posts. Seen as ``5`` then ``4`` from the same
+#: seat before any action, and that seat then *checks* its option: the big
+#: blind (4) is live, the small blind (5) is dead money. Unrecognised, both
+#: left the pot short of the awards and the hand was dropped as untrustworthy
+#: for everyone at the table -- about 1.5% of a real database.
+POST_MISSED_BB, POST_DEAD_SB = 4, 5
 #: A straddle: a voluntary blind from the seat after the big blind, posted
 #: before any cards are seen. Always twice the big blind, and always the seat
 #: after the one that posted it -- which is how it was identified, the site
@@ -138,12 +148,26 @@ def _parse_hand(raw: dict[str, Any], table_id: str,
         hand.hero_seat = next(
             (s.seat for s in seats if s.player_id == str(exporter)), None)
 
-    pos = positions_for([s.seat for s in seats], int(raw["dealerSeat"]))
+    # The blinds say where the button really is. Anchored on ``dealerSeat``
+    # alone, a dead button or a dead small blind shifted every label by one:
+    # the big blind was called SB, and steals and defends went to the wrong
+    # seats.
+    events = raw.get("events") or []
+    posted = {e["payload"]["type"]: e["payload"].get("seat") for e in reversed(events)
+              if e["payload"]["type"] in (POST_SB, POST_BB)}
+    pos = positions_for([s.seat for s in seats], int(raw["dealerSeat"]),
+                        sb_seat=posted.get(POST_SB), bb_seat=posted.get(POST_BB))
     for s in seats:
         s.position = pos.get(s.seat, "?")
 
-    _replay(hand, raw.get("events") or [], by_seat)
+    _replay(hand, events, by_seat)
+    hand.source = {"site": "pokernow", "table_id": table_id,
+                   "exporter": exporter, "raw": raw}
     return hand
+
+
+def from_source(source: dict) -> Hand:
+    return _parse_hand(source["raw"], source["table_id"], source.get("exporter"))
 
 
 def _replay(hand: Hand, events: list[dict[str, Any]], by_seat: dict[int, Seat]) -> None:
@@ -219,6 +243,13 @@ def _replay(hand: Hand, events: list[dict[str, Any]], by_seat: dict[int, Seat]) 
         if code in IGNORED:
             continue
 
+        if code == POST_DEAD_SB:
+            # Dead money, kept the way antes are: in the pot and in what the
+            # seat invested, but no wager to call and no action to count.
+            if seat is not None:
+                committed[seat] = committed.get(seat, 0) + int(p.get("value") or 0)
+            continue
+
         act = _ACTS.get(code)
         if act is None:
             hand.flags.add(f"unknown_event:{code}")
@@ -234,6 +265,12 @@ def _replay(hand: Hand, events: list[dict[str, Any]], by_seat: dict[int, Seat]) 
             to_amount = int(p.get("value") or 0)
             amount = to_amount - prior
             if code == AGGRESS:
+                act = Act.RAISE if street_max > 0 else Act.BET
+            elif code == CALL and to_amount > street_max:
+                # A lead of exactly one big blind is logged as a call. Stored
+                # as one, the bet went uncounted: donk and c-bet numbers missed
+                # it, nobody was recorded as facing it, and a min-bet c-bet
+                # read as a missed c-bet -- 2.7% of a real database.
                 act = Act.RAISE if street_max > 0 else Act.BET
 
         action = Action(
@@ -285,6 +322,7 @@ _ACTS = {
     AGGRESS: Act.BET,      # refined to RAISE during replay
     POST_SB: Act.POST_SB,
     POST_BB: Act.POST_BB,
+    POST_MISSED_BB: Act.POST_BB,
     # Chips, not just a flag. The hand already knew a straddle had happened --
     # `straddleSeat` in the metadata sets a flag -- but the event carrying the
     # money was unrecognised and skipped, so the pot came up short by the
@@ -297,4 +335,4 @@ _ACTS = {
     STRADDLE: Act.POST_STRADDLE,
 }
 
-register("pokernow", sniff, parse)
+register("pokernow", sniff, parse, from_source)

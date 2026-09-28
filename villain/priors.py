@@ -130,10 +130,29 @@ STRENGTH: dict[str, float] = {
 }
 
 
+def general_keys(stat: str):
+    """``stat``, then each more general key it is a slice of.
+
+    ``three_bet:BB:vs:BTN`` -> ``three_bet:BB`` -> ``three_bet``. A qualifier
+    pair (``vs:BTN``, ``stk:deep``) goes as one. Stripping a single segment
+    turned that key into ``three_bet:BB:vs``, which no table has, so every
+    slice two deep fell to a coin-flip prior: a 1-in-20 3-bet read as 30%,
+    and the simulator 3-bet at that rate."""
+    parts = stat.split(":")
+    yield stat
+    while len(parts) > 1:
+        parts = parts[:-2] if len(parts) >= 3 and parts[-2] in ("vs", "stk") else parts[:-1]
+        yield ":".join(parts)
+
+
 def strength_for(stat: str) -> float:
     """Prior weight in pseudo-opportunities, from the between-player spread."""
-    if stat in STRENGTH:
-        return STRENGTH[stat]
+    for key in general_keys(stat):
+        if key in STRENGTH:
+            return STRENGTH[key]
+        if key in SPREAD:
+            spread = SPREAD[key]
+            return min(MAX_STRENGTH, max(MIN_STRENGTH, STRENGTH_SCALE / (spread * spread)))
     spread = spread_of(stat)
     return min(MAX_STRENGTH, max(MIN_STRENGTH, STRENGTH_SCALE / (spread * spread)))
 
@@ -306,11 +325,9 @@ def population_mean(stat: str, table_regime: str) -> float:
 
 def prior_for(stat: str, table_regime: str) -> tuple[float, float]:
     table = POPULATION.get(table_regime, POPULATION[SHORT])
-    mean = table.get(stat)
-    if mean is None:
-        # Size-split fold stats inherit the street's overall fold frequency.
-        base = stat.rsplit(":", 1)[0]
-        mean = table.get(base, 0.5)
+    # A slice inherits the frequency of what it is a slice of: a size-split
+    # fold stat the street's fold rate, a 3-bet vs one opener the 3-bet rate.
+    mean = next((table[key] for key in general_keys(stat) if key in table), 0.5)
     return mean, strength_for(stat)
 
 
@@ -330,9 +347,12 @@ def fit_empirical(samples: dict[str, list[tuple[float, float]]],
         n = len(rates)
         mean = sum(rates) / n
         var = sum((r - mean) ** 2 for r in rates) / (n - 1)
-        mean_opps = sum(o for _, o in usable) / n
         # Subtract the binomial sampling noise to recover the true spread.
-        within = mean * (1 - mean) / mean_opps
+        # Averaged per player: noise is p(1-p)/n for each sample size, and
+        # dividing by the *mean* sample size instead understates it whenever
+        # sizes differ (1/n is convex), which overstated the spread and fitted
+        # a prior too weak to hold a thin sample.
+        within = sum(mean * (1 - mean) / o for _, o in usable) / n
         between = var - within
         if between <= 1e-6 or not 0 < mean < 1:
             strength = 200.0                      # players are indistinguishable

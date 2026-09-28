@@ -209,3 +209,80 @@ def test_a_straddle_is_a_post_not_a_voluntary_raise():
     assert posts[0].amount == 40
     assert posts[0].act.is_post
     assert not posts[0].is_voluntary
+
+
+def _six_handed(events, dealer=6, seats=(1, 2, 3, 4, 5, 6)):
+    raw = _minimal_hand(dealerSeat=dealer)
+    raw["players"] = [{"seat": s, "id": f"p{s}", "name": f"P{s}", "stack": 1000}
+                      for s in seats]
+    raw["events"] = [{"at": i, "payload": p} for i, p in enumerate(events)]
+    return raw
+
+
+def test_missed_blind_posts_are_money_not_unknown_events():
+    """A returning player posts a dead small blind (5) and a live big blind
+    (4), then checks their option. Undecoded, the pot came up short of the
+    award and the hand was dropped for everyone at the table."""
+    from villain.parsers.pokernow import _parse_hand
+    raw = _six_handed([
+        {"type": 3, "seat": 1, "value": 10},
+        {"type": 2, "seat": 2, "value": 20},
+        {"type": 5, "seat": 3, "value": 10},
+        {"type": 4, "seat": 3, "value": 20},
+        {"type": 0, "seat": 3},
+        {"type": 11, "seat": 4}, {"type": 11, "seat": 5}, {"type": 11, "seat": 6},
+        {"type": 11, "seat": 1},
+        {"type": 0, "seat": 2},
+        {"type": 9, "turn": 1, "cards": ["2c", "7d", "Kh"]},
+        {"type": 0, "seat": 2},
+        {"type": 8, "seat": 3, "value": 40},
+        {"type": 11, "seat": 2},
+        {"type": 16, "seat": 3, "value": 40},
+        {"type": 10, "seat": 3, "value": 60},
+    ])
+    hand = _parse_hand(raw, "table")
+    assert not [f for f in hand.flags if f.startswith("unknown_event")]
+    assert "pot_mismatch" not in hand.flags
+    assert hand.pot == 60
+    assert hand.seat(3).invested == 30
+    # The live post is what let seat 3 check: nothing was owed.
+    check = next(a for a in hand.actions if a.seat == 3 and a.act is Act.CHECK)
+    assert check.to_call == 0
+
+
+def test_a_one_big_blind_lead_is_a_bet():
+    """PokerNow logs a lead of exactly the big blind as a call (opcode 7)."""
+    from villain.parsers.pokernow import _parse_hand
+    raw = _six_handed([
+        {"type": 3, "seat": 1, "value": 10},
+        {"type": 2, "seat": 2, "value": 20},
+        {"type": 11, "seat": 3}, {"type": 11, "seat": 4}, {"type": 11, "seat": 5},
+        {"type": 7, "seat": 6, "value": 20},
+        {"type": 11, "seat": 1},
+        {"type": 0, "seat": 2},
+        {"type": 9, "turn": 1, "cards": ["2c", "7d", "Kh"]},
+        {"type": 7, "seat": 2, "value": 20},
+        {"type": 7, "seat": 6, "value": 20},
+        {"type": 9, "turn": 2, "cards": ["3s"]},
+        {"type": 0, "seat": 2}, {"type": 0, "seat": 6},
+        {"type": 9, "turn": 3, "cards": ["9s"]},
+        {"type": 0, "seat": 2}, {"type": 0, "seat": 6},
+        {"type": 10, "seat": 6, "value": 90},
+    ])
+    hand = _parse_hand(raw, "table")
+    flop = [a for a in hand.actions if a.street is Street.FLOP]
+    assert [a.act for a in flop] == [Act.BET, Act.CALL]
+    assert flop[1].to_call == 20
+    # Preflop the same opcode is still a call: it matches the big blind.
+    assert next(a for a in hand.actions if a.seat == 6).act is Act.CALL
+
+
+@pytest.mark.parametrize("dealer,seats,sb,bb,expected", [
+    # Dead button: seat 1 dealt and left; seat 2 posts SB, seat 3 BB.
+    (1, [2, 3, 4, 5], 2, 3, {2: "SB", 3: "BB", 4: "UTG", 5: "BTN"}),
+    # Dead small blind: the SB seat is empty, seat 3 still posts the BB.
+    (1, [1, 3, 4, 5], None, 3, {3: "BB", 4: "UTG", 5: "CO", 1: "BTN"}),
+])
+def test_positions_follow_the_blinds(dealer, seats, sb, bb, expected):
+    """Anchored on the dealer seat alone, both cases shifted every label."""
+    assert positions_for(seats, dealer, sb_seat=sb, bb_seat=bb) == expected

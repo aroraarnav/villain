@@ -344,6 +344,10 @@ def texture(board: list[str]) -> tuple[float, float, float, float]:
     paired = float(len(set(ranks)) < len(ranks))
     suited = float(max(suits.count(s) for s in set(suits)) >= 3)
     spread = max(ranks) - min(ranks)
+    # The ace plays low too: A-2-3 is as connected as 2-3-4, not a dry board.
+    if 12 in ranks:
+        low = [-1 if r == 12 else r for r in ranks]
+        spread = min(spread, max(low) - min(low))
     connected = float(spread <= 4)
     high = float(max(ranks) >= 10)      # queen or better
     return (paired, suited, connected, high)
