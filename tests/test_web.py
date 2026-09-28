@@ -1474,3 +1474,30 @@ def test_the_next_hand_waits_for_this_one(store, hands, db):
     status, _, _ = _dispatch(db, "POST", "/api/sim/next", {"token": token})
     assert status == 409
     assert game.hand_no == 1
+
+
+def test_the_hero_page_is_rebuilt_when_what_it_reads_changes(tmp_path, hands):
+    """Keyed on hand count alone, the page survived every change that keeps
+    the count: a rename, a refit, a definitions bump -- from disk, too."""
+    from villain.webapp import heroview
+
+    with Store(tmp_path / "v.db") as store:
+        store.add_hands(hands)
+        store.rebuild()
+        heroview.hero_payload(store)
+        assert heroview.hero_status(store) == "ready"
+        store.conn.execute("UPDATE players SET display_name = 'Ghost' WHERE id = "
+                           "(SELECT MIN(id) FROM players)")
+        store.conn.commit()
+        assert heroview.hero_status(store) == "cold"
+
+
+def test_a_rename_refreshes_the_roster(seeded):
+    from villain.webapp.payloads import roster_payload
+
+    before = {r["name"] for r in roster_payload(seeded)}
+    seeded.conn.execute("UPDATE players SET display_name = 'Ghost' WHERE id = "
+                        "(SELECT MIN(id) FROM players)")
+    seeded.conn.commit()
+    after = {r["name"] for r in roster_payload(seeded)}
+    assert "Ghost" in after and after != before

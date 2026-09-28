@@ -185,7 +185,12 @@ def _roster_fingerprint(store: Store) -> tuple:
         "SELECT COUNT(*), SUM(hits), SUM(opps) FROM ratios").fetchone())
     priors = tuple(store.conn.execute(
         "SELECT COUNT(*), SUM(strength) FROM fitted_priors").fetchone())
-    return (hands, players, ratios, priors)
+    # Names too: a rename-only commit changes no count and no counter, and
+    # the roster kept showing the old name.
+    names = store.conn.execute(
+        "SELECT group_concat(id || '=' || display_name, '|')"
+        " FROM (SELECT id, display_name FROM players ORDER BY id)").fetchone()[0]
+    return (hands, players, ratios, priors, names)
 
 
 def roster_payload(store: Store) -> list[dict]:

@@ -62,19 +62,19 @@ def find_hero(store, min_hands: int = MIN_HERO_HANDS, progress=None,
 
     ``min_hands`` is overridable for testing against small fixtures; it exists so
     a villain who showed a few hands in a short sample cannot look like hero."""
+    if hands is None:
+        # A count per player of seats and seats with cards known, which the
+        # seat index answers without decoding a single hand.
+        tallies = store.seat_visibility()
+        return _most_visible({p: n for p, (n, _) in tallies.items()},
+                             {p: k for p, (_, k) in tallies.items()}, min_hands)
     seen: dict[int, int] = {}
     total: dict[int, int] = {}
     # `hands` lets a caller that has already loaded them hand them over. A cold
     # Hero build needs the same list twice -- once to work out whose seat is
     # whose, once to fit the model -- and loading it twice meant decompressing
     # and parsing the whole database twice for one page.
-    #
-    # Counted when it does load: on a cold build this is the first thing that
-    # happens, so it is the first thing anybody waiting is waiting for.
     seq = hands
-    if seq is None:
-        seq = store.player_hands(progress=progress)
-        progress = None          # the load already counted itself
     n = len(seq)
     every = 200
     if progress is not None:
@@ -92,7 +92,10 @@ def find_hero(store, min_hands: int = MIN_HERO_HANDS, progress=None,
             progress(at + 1, n)
     if progress is not None:
         progress(n, n)
+    return _most_visible(total, seen, min_hands)
 
+
+def _most_visible(total: dict[int, int], seen: dict[int, int], min_hands: int) -> int | None:
     best, best_frac = None, 0.0
     for pid, count in total.items():
         if count < min_hands:
