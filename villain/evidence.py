@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .features import _pace_thresholds, _think_pass, record_hand
+from .features import EVALUATED_RATIOS, _pace_thresholds, _think_pass, record_hand
 from .hero import hero_of
 from .model import Act, Hand, Street
 
@@ -82,10 +82,13 @@ def find(hands: list[Hand], player_key: str, stat: str,
     # would open onto an empty panel rather than the hands behind it.
     hero = hero_of(hands)
 
+    # Scoring cards is most of the cost of a replay and almost no counter
+    # needs it: 32s for the hero's evidence, 4s without.
+    score_cards = stat.removeprefix("vs:") in EVALUATED_RATIOS
     out: list[Evidence] = []
     for hand in hands:
         books: dict = {}
-        record_hand(hand, books, pace_locks=locks, hero=hero)
+        record_hand(hand, books, pace_locks=locks, hero=hero, score_cards=score_cards)
         by_regime = books.get(player_key)
         if not by_regime:
             continue

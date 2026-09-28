@@ -295,7 +295,11 @@ def _hero_spots(hands: list, hero_id: int, progress=None):
         if hand.board:
             seat = next((s for s in hand.seats if s.player_id == str(hero_id)), None)
             if seat is not None and len(seat.hole_cards) == 2:
-                yield hand, seat, strength_by_street(hand, {seat.seat: seat})
+                # Every known holding, not just hero's: that is the key the
+                # dataset pass already scored this hand under, so asking with
+                # hero alone missed the cache on every hand (19s of a build).
+                known = {s.seat: s for s in hand.seats if len(s.hole_cards) == 2}
+                yield hand, seat, strength_by_street(hand, known)
         if progress is not None and (at + 1) % every == 0:
             progress(at + 1, total)
     if progress is not None:

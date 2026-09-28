@@ -18,12 +18,12 @@ try:
 except ImportError:              # no process model (e.g. Pyodide/WASM)
     ProcessPoolExecutor = None
 
-from .cards import card_ids, evaluate
+from .cards import card_ids
 from .equity import equities
 from .hero import hero_of
 from .model import Act, Hand, Street, postflop_rank
 from .priors import regime as regime_of
-from .reads import texture
+from .reads import _board_universe, texture
 from .stats import VS_HERO, HandView, StatBook, size_bucket, stack_bucket
 
 #: player id -> table-size regime -> book
@@ -138,9 +138,15 @@ def record_hands(hands: Iterable[Hand], books: Books | None = None,
     return books
 
 
+#: The only counters that need a hand's cards scored. Equity and showdown
+#: percentiles are nearly all of the cost of reading a hand, and everything
+#: else they feed is a meter, which evidence never asks about.
+EVALUATED_RATIOS = frozenset({"river_bet_bluff", "sd_light_call"})
+
+
 def record_hand(hand: Hand, books: Books,
                 pace_locks: PaceLocks | None = None,
-                hero: str | None = None) -> None:
+                hero: str | None = None, score_cards: bool = True) -> None:
     """Fold one hand into every participating player's book for this regime.
 
     ``pace_locks`` freezes snap/tank cutoffs (from :func:`record_hands`).
@@ -173,7 +179,7 @@ def record_hand(hand: Hand, books: Books,
         _preflop(hand, view, books, reg, pace_locks=pace_locks, hero_seat=hero_seat)
     pace_events = _postflop(hand, view, books, reg, pace_locks=pace_locks,
                             hero_seat=hero_seat)
-    _results(hand, view, books, reg, pace_events)
+    _results(hand, view, books, reg, pace_events, score_cards=score_cards)
 
 
 def _ip_against(hand: Hand, seat: int, other: int | None) -> str:
@@ -672,8 +678,8 @@ def _timing(book: StatBook, d, street_label: str,
 # -- results and showdown truth ------------------------------------------------
 
 def _results(hand: Hand, view: HandView, books: Books, reg: str,
-             pace_events: dict[tuple[int, str], tuple[str, str]] | None = None
-             ) -> None:
+             pace_events: dict[tuple[int, str], tuple[str, str]] | None = None,
+             score_cards: bool = True) -> None:
     bb = hand.big_blind
     showdown = view.showdown()
     complete_board = len(hand.board) >= 5
@@ -704,6 +710,8 @@ def _results(hand: Hand, view: HandView, books: Books, reg: str,
             book.count(f"after:{pace}:{street}:{action}:won", seat.net > 0)
             book.count(f"after:{pace}:{street}:{action}:wtsd", seat.seat in showdown)
 
+    if not score_cards:
+        return
     _all_in_ev(hand, view, books, reg, showdown)
 
     if not complete_board:
@@ -793,20 +801,13 @@ def _showdown_strengths(board: list[str], known: dict[int, tuple[str, ...]]) -> 
     """Percentile of each shown hand among every holding the board allows.
 
     "Two pair" says nothing without the board -- two pair on a paired
-    four-flush board is a bluff-catcher."""
-    board5 = board[:5]
-    board_ids = card_ids(board5).astype(np.int64)
-    dead = set(board_ids.tolist())
-    for cards in known.values():
-        dead |= set(card_ids(cards).astype(np.int64).tolist())
-
-    live = [c for c in range(52) if c not in set(board_ids.tolist())]
-    combos = np.array([(a, b) for i, a in enumerate(live) for b in live[i + 1:]], dtype=np.int64)
-    seven = np.concatenate([combos, np.repeat(board_ids[None, :], len(combos), axis=0)], axis=1)
-    universe = np.sort(evaluate(seven))
-
+    four-flush board is a bluff-catcher. The universe is the one the reads
+    already build and cache per board; this rebuilt it, slower, for every
+    showdown."""
+    universe, lookup = _board_universe(tuple(board[:5]))
     out: dict[int, float] = {}
     for seat, cards in known.items():
-        score = int(evaluate(np.concatenate([card_ids(cards).astype(np.int64), board_ids])[None, :])[0])
+        a, b = sorted(int(c) for c in card_ids(cards))
+        score = lookup[a * 52 + b]
         out[seat] = float(np.searchsorted(universe, score, side="left") / len(universe))
     return out
