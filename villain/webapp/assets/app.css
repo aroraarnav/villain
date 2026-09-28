@@ -898,8 +898,7 @@
      carrying direction. */
   .sess-delta .up { color: var(--ink); font-weight: 600; }
   .sess-delta .down { color: var(--muted); }
-  .linkish { cursor: pointer; text-decoration: underline;
-             text-underline-offset: 3px; text-decoration-color: var(--axis); }
+  button.sess-name { font-weight: 700; }
   select { font: inherit; font-size: 14px; padding: 5px 8px; border-radius: 8px;
            background: var(--panel); color: var(--ink); border: 1px solid var(--edge); }
   .q.group .members { margin: 8px 0; }

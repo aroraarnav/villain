@@ -864,8 +864,11 @@ class Store:
                 " LEFT JOIN hand_seats s ON s.hand_id = h.hand_id"):
             seats.setdefault(row["hand_id"], set()).add(row["account"])
             tables[row["hand_id"]] = row["table_id"]
-        for i, sess in enumerate(out):
-            sess["id"] = i + 1
+        for sess in out:
+            # Keyed on when the sitting began, not its place in the list: an
+            # ordinal renumbered every later sitting whenever an older export
+            # was imported, so a saved #/sessions/3 quietly opened another night.
+            sess["id"] = sess["started_at"]
             who: set = set()
             for hid in sess["hand_ids"]:
                 who |= seats.get(hid, set())

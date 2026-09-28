@@ -73,6 +73,10 @@
     worker.postMessage({ type: "visibility", hidden: document.visibilityState === "hidden" });
   tellVisibility();
   document.addEventListener("visibilitychange", tellVisibility);
+  // document.open() below erases every listener on the document (HTML spec,
+  // "document open steps"), so anything that must outlive boot is kept here
+  // and registered again once the interface has been written.
+  const keepOnVisibility = [tellVisibility];
   let nextCall = 0;
   const waiting = new Map();
   worker.onmessage = (event) => {
@@ -344,9 +348,11 @@
       // pagehide is too late to start a request; browsers routinely kill one
       // begun during teardown. visibilitychange fires while the page can still
       // finish it, and covers switching tabs as well as closing them.
-      document.addEventListener("visibilitychange", () => {
+      const flushOnHide = () => {
         if (document.visibilityState === "hidden" && pending) { clearTimeout(timer); upload(); }
-      });
+      };
+      document.addEventListener("visibilitychange", flushOnHide);
+      keepOnVisibility.push(flushOnHide);
     } else {
       // Guest: the preloaded sample, kept in this browser only.
       step("Loading the sample database…", 78);
@@ -459,6 +465,7 @@
     document.open();
     document.write(html);
     document.close();
+    for (const listener of keepOnVisibility) document.addEventListener("visibilitychange", listener);
 
     const style = document.createElement("style");
     style.textContent = css + (await shellCssReady);

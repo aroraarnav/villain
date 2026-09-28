@@ -19,11 +19,17 @@ const REBUILD_PHASES = {
   "reading hands": "Reading your stored hands",
   "reading players": "Rebuilding every player's numbers",
 };
-let rebuildBar = null, rebuildIdle = null;
+let rebuildBar = null, rebuildIdle = null, rebuildVeil = null;
 
 window.__villainRebuild = (msg) => {
   if (!rebuildBar) {
-    rebuildBar = showBusy("Updating your database…");
+    // Commits, links and splits rebuild too, under a veil of their own.
+    // Replacing it cut that operation's later steps (the account save) loose
+    // from any veil, and clearing it on idle unlocked the window mid-write --
+    // so report into the existing veil and leave clearing it to its owner.
+    const existing = document.querySelector(".veil.busy");
+    rebuildBar = existing ? busyUpdater() : showBusy("Updating your database…");
+    rebuildVeil = existing ? null : document.querySelector(".veil.busy");
   }
   const label = REBUILD_PHASES[msg.phase] || "Working";
   const done = Number(msg.done), total = Number(msg.total);
@@ -38,9 +44,8 @@ window.__villainRebuild = (msg) => {
   // longer than the gap between ticks (~100ms at the slowest phase).
   if (rebuildIdle) clearTimeout(rebuildIdle);
   rebuildIdle = setTimeout(() => {
-    rebuildBar = rebuildIdle = null;
-    const modal = $("#modal");
-    if (modal) modal.innerHTML = "";
+    if (rebuildVeil && rebuildVeil.isConnected) $("#modal").innerHTML = "";
+    rebuildBar = rebuildIdle = rebuildVeil = null;
   }, 1500);
 };
 
@@ -56,6 +61,10 @@ function showBusy(text) {
     </div>
   </div></div>`;
   $("#busy-text").textContent = text;
+  return busyUpdater();
+}
+
+function busyUpdater() {
   /* (message, fraction).
      A null message leaves the text alone, because progress updates arrive far
      more often than the step they belong to changes.
@@ -266,17 +275,21 @@ async function drawSession(id) {
   const body = $("#sess-body");
   body.innerHTML = "";
   body.appendChild(loadingBlock("Reading the sitting\u2026"));
-  const data = await get(`/api/session-detail?id=${id}`);
+  let data;
+  try { data = await get(`/api/session-detail?id=${id}`); }
+  catch (err) { body.innerHTML = `<p class="err">${esc(err.message)}</p>`; return; }
   body.innerHTML = "";
   for (const p of data.players) {
     const div = h("div", "sess-row" + (p.is_hero ? " hero-scope hero-sitting" : ""));
     const netTxt = p.net_bb > 0 ? `+${p.net_bb}` : `${p.net_bb}`;
+    // Too few hands tonight to rate: a 0 here would be a number nobody measured.
+    const unrated = p.skill == null;
     // Net bb and skill are the only measurements on this page, and they were
     // 12.5px muted text at the right margin. Same stat-pair the profile header
     // uses -- one figure treatment across the app, not a per-screen decision.
     div.innerHTML = `<div class="sess-head">
         <div class="sess-id">
-          <div class="sess-who"><b class="linkish">${esc(p.name)}</b>${
+          <div class="sess-who"><button class="linkbtn sess-name">${esc(p.name)}</button>${
             p.is_hero ? '<span class="tag hero-tag">you</span>' : ""}
             <span class="tag arch ${p.confidence >= 0.5 ? "on" : ""}">${esc(p.archetype)}</span>
             <span class="sitting-note">this sitting</span>
@@ -289,16 +302,20 @@ async function drawSession(id) {
             <span class="k">bb</span>
           </div>
           <div class="stat-pair sess-skill">
-            <span class="v">${Math.round(p.skill)}</span>
-            <span class="k">skill</span>
+            <span class="v ${unrated ? "muted" : ""}">${unrated ? "\u2014" : Math.round(p.skill)}</span>
+            <span class="k">${unrated ? "unknown" : "skill"}</span>
           </div>
         </div>
       </div>
       <div class="sess-deltas"></div>`;
-    $("b", div).onclick = () => switchTab("players", p.player_id);
-    const skillBar = bar(p.skill, 100, "var(--mark-2)", 999);
-    skillBar.setAttribute("preserveAspectRatio", "none");
-    $(".sess-skill", div).appendChild(skillBar);
+    $(".sess-name", div).onclick = () => switchTab("players", p.player_id);
+    if (unrated) {
+      bindTip($(".sess-skill", div), `<b>unknown</b><br>${termTip("unknown")}`);
+    } else {
+      const skillBar = bar(p.skill, 100, "var(--mark-2)", 999);
+      skillBar.setAttribute("preserveAspectRatio", "none");
+      $(".sess-skill", div).appendChild(skillBar);
+    }
     // A sitting-only read, not the pooled one on their Database page. The
     // two disagreeing is correct -- a sitting can look nothing like the
     // season -- but only if it says so.

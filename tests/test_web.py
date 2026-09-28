@@ -765,6 +765,27 @@ def _dispatch_from(db_path, method, path, origin=None, referer=None, host="127.0
     return browser.dispatch(method, path, headers, b"")
 
 
+def test_a_malformed_id_is_a_bad_request_not_a_crash(tmp_path, hands):
+    """A typo'd id is the caller's mistake. As a 500 it read as the tool
+    breaking, and as a 409 (ValueError) it read as a database conflict."""
+    from villain.webapp import browser
+
+    db = tmp_path / "v.db"
+    with Store(db) as store:
+        store.add_hands(hands)
+    for path in ("/api/player/abc", "/api/session-detail?id=abc",
+                 "/api/evidence?player=abc&stat=vpip"):
+        status, _, _ = _dispatch_from(db, "GET", path)
+        assert status == 400, path
+    for path, body in (("/api/player/delete", {"player_id": "abc"}),
+                       ("/api/unlink", {"site": "pokernow", "account": "x"}),
+                       ("/api/unlink", {"player_id": 1})):
+        raw = json.dumps(body).encode()
+        status, _, _ = browser.dispatch("POST", path, {
+            "Host": "127.0.0.1", "Content-Length": str(len(raw))}, raw)
+        assert status == 400, (path, body)
+
+
 def test_a_cross_origin_page_cannot_read_the_roster(tmp_path, hands):
     """The whole threat model is "these people's games never leave the laptop".
 
@@ -1382,3 +1403,37 @@ def test_a_sitting_still_renders_after_a_player_is_deleted(seeded, db):
         status, body, _ = _dispatch(db, "GET", f"/api/session-detail?id={sid}")
         assert status == 200, body
         assert victim not in {p["player_id"] for p in json.loads(body)["players"]}
+
+
+def test_a_failed_hero_build_is_reported_not_retried(store, db):
+    """The build thread swallowed its exception, so peek went back to "cold",
+    the page asked again, a second doomed build started, and its 202 body was
+    rendered as a profile."""
+    from villain.webapp import heroview
+
+    key = (str(store.path), None)
+    heroview._HERO_FAILED[key] = "model fit exploded"
+    try:
+        status, body, _ = _dispatch(db, "GET", "/api/hero?peek=1")
+        assert json.loads(body)["status"] == "failed"
+        status, body, _ = _dispatch(db, "GET", "/api/hero")
+        assert status == 500
+        assert "model fit exploded" in json.loads(body)["error"]
+        # Told once; the next visit tries again.
+        assert key not in heroview._HERO_FAILED
+    finally:
+        heroview._HERO_FAILED.pop(key, None)
+
+
+def test_forgetting_the_hero_drops_the_finished_page(tmp_path, hands):
+    """A split or delete leaves the hand count alone, so the payload cache --
+    keyed on it -- kept serving the old hero after forget_hero."""
+    from villain.webapp import heroview
+
+    with Store(tmp_path / "v.db") as store:
+        store.add_hands(hands)
+        store.rebuild()
+        heroview.hero_payload(store)
+        assert heroview.hero_status(store) == "ready"
+        heroview.forget_hero(store)
+        assert heroview.hero_status(store) == "cold"

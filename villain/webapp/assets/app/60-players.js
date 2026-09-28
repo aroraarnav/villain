@@ -12,9 +12,9 @@ async function viewPlayers() {
     state.roster = data;
   }
   state.heroId = data.hero_id;
+  if (!onScreen("players")) return;
   $("#meta").textContent = `${data.hands} hands \u00b7 ${data.players.length} players`;
   if (!data.players.length) {
-    if (!onScreen("players")) return;
     view.innerHTML = `<div class="panel"><h2>nothing stored yet</h2>
       <p class="muted">Drop your hand history exports here.</p>
       <div class="drop" id="db-drop">
@@ -81,7 +81,9 @@ async function viewPlayers() {
 async function viewPlayer(id) {
   const view = $("#view");
   const data = await get("/api/player/" + id);
-  if (!onScreen("players")) return;
+  // A later click or Back may have moved on while this was loading; painting
+  // it now would put one player's profile under another's address.
+  if (!onScreen("players") || state.player !== id) return;
   const names = [...new Set(data.aliases.map(a => a.name))];
   $("#meta").textContent = names.length > 1
     ? `also known as ${names.slice(1).join(", ")}` : "";
@@ -333,33 +335,33 @@ async function showEvidence(playerId, stat, headline) {
       el.hidden = !showAll.checked && !el.classList.contains("counted");
     });
   }
-  for (const h of data.hands) {
+  for (const hand of data.hands) {
     const row = h("div", "ev");
-    const when = h.started_at ? new Date(h.started_at).toLocaleString() : "";
+    const when = hand.started_at ? new Date(hand.started_at).toLocaleString() : "";
     row.innerHTML = `
       <span class="ev-board"></span>
-      <span class="ev-what"><span class="ev-summary">${esc(h.summary)}</span>
+      <span class="ev-what"><span class="ev-summary">${esc(hand.summary)}</span>
         <span class="small muted ev-when">${esc(when)}</span></span>
-      <span class="ev-net ${h.net_bb < 0 ? "lost" : ""}">${
-        h.net_bb > 0 ? "+" : ""}${h.net_bb} bb</span>`;
+      <span class="ev-net ${hand.net_bb < 0 ? "lost" : ""}">${
+        hand.net_bb > 0 ? "+" : ""}${hand.net_bb} bb</span>`;
     const boardCell = $(".ev-board", row);
-    if ((h.board || []).length) boardCell.appendChild(cardsEl(h.board, {small: true}));
+    if ((hand.board || []).length) boardCell.appendChild(cardsEl(hand.board, {small: true}));
     else boardCell.innerHTML = `<span class="small muted">no flop</span>`;
-    if ((h.hole_cards || []).length) {
-      const hole = cardsEl(h.hole_cards, {small: true});
+    if ((hand.hole_cards || []).length) {
+      const hole = cardsEl(hand.hole_cards, {small: true});
       hole.classList.add("hole");
       boardCell.appendChild(hole);
     }
-    row.classList.toggle("counted", !!h.hit);
-    if (!h.hit) row.hidden = true;
+    row.classList.toggle("counted", !!hand.hit);
+    if (!hand.hit) row.hidden = true;
     row.tabIndex = 0;
     row.setAttribute("role", "button");
     row.onkeydown = e => {
       if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault(); showReplay(h.hand_id, playerId, headline);
+        e.preventDefault(); showReplay(hand.hand_id, playerId, headline);
       }
     };
-    row.onclick = () => showReplay(h.hand_id, playerId, headline);
+    row.onclick = () => showReplay(hand.hand_id, playerId, headline);
     list.appendChild(row);
   }
 }
@@ -372,7 +374,9 @@ async function showReplay(handId, playerId, headline) {
     <div id="replay"></div>`});
   const box = $("#replay", layer);
   box.appendChild(loadingBlock("Loading the hand\u2026"));
-  const r = await get(`/api/hand/${handId}?focus=${playerId}`);
+  let r;
+  try { r = await get(`/api/hand/${handId}?focus=${playerId}`); }
+  catch (err) { box.innerHTML = `<p class="err">${esc(err.message)}</p>`; return; }
   box.innerHTML = "";
   const seatLine = h("div", "small muted seatline");
   for (const st of r.seats) {

@@ -80,7 +80,16 @@ def forget_hero(store: Store) -> None:
     key = str(store.path)
     _HERO_ID_CACHE.pop(key, None)
     _HERO_MODEL_CACHE.pop(key, None)
+    # The finished page too: keyed by (path, hero id) and hand count, it
+    # survived every split and delete and kept serving the old hero.
+    for cache in (_HERO_PAYLOAD_CACHE, _HERO_FAILED):
+        for stale in [k for k in cache if k[0] == key]:
+            cache.pop(stale, None)
     _hero_disk_cache_path(store).unlink(missing_ok=True)
+
+
+def forget_hero_failure(store: Store, hero_id: int | None = None) -> None:
+    _HERO_FAILED.pop((str(store.path), hero_id), None)
 
 
 def _hero_disk_cache_path(store: Store) -> Path:
@@ -151,6 +160,11 @@ _HERO_BUILDING: set = set()
 #: became a static "this page will appear" with no bar.
 _HERO_PROGRESS: dict = {}
 
+#: Why the last background build died, until somebody is told. Swallowing it
+#: sent peek back to "cold", so the page asked again, started a second doomed
+#: build, and rendered its 202 body as a profile.
+_HERO_FAILED: dict = {}
+
 #: Whether this interpreter can start a thread at all. Pyodide cannot, and the
 #: browser build runs the same server module, so "start it in the background
 #: and poll" has nowhere to run there. Probed once and remembered.
@@ -184,6 +198,8 @@ def hero_status(store: Store, hero_id: int | None = None) -> str:
         return "ready"
     if key in _HERO_BUILDING:
         return "building"
+    if key in _HERO_FAILED:
+        return "failed"
     hit, _payload = _hero_disk_cache_load(store, hero_id, hand_count)
     return "ready" if hit else "cold"
 
@@ -192,6 +208,8 @@ def hero_peek(store: Store, hero_id: int | None = None) -> dict:
     """What ``GET /api/hero?peek=1`` returns: status, plus progress if building."""
     status = hero_status(store, hero_id)
     out = {"status": status}
+    if status == "failed":
+        out["error"] = _HERO_FAILED[(str(store.path), hero_id)]
     progress = _HERO_PROGRESS.get((str(store.path), hero_id))
     if progress is not None:
         done, total, phase = progress
@@ -223,8 +241,8 @@ def hero_begin(store: Store, hero_id: int | None = None) -> bool:
         try:
             with Store(path) as own:
                 hero_payload(own, hero_id, progress=report)
-        except Exception:
-            pass                       # a failed build must not wedge the flag
+        except Exception as exc:       # a failed build must not wedge the flag
+            _HERO_FAILED[key] = str(exc) or type(exc).__name__
         finally:
             _HERO_BUILDING.discard(key)
             _HERO_PROGRESS.pop(key, None)
