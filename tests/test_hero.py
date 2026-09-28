@@ -247,6 +247,7 @@ def test_sizing_tell_describe_lead_false_drops_the_street_opener():
     (["7c", "8d", "9h"], "wet"),        # connected
     (["Ac", "8d", "2h"], "dry"),
     (["2c", "2d", "9h"], "dry"),        # paired but not suited/connected
+    (["Ac", "2d", "3h"], "wet"),        # a wheel board: the ace plays low
 ])
 def test_texture_label(board, expected):
     assert texture_label(board) == expected

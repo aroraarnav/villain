@@ -21,7 +21,7 @@ except ImportError:              # no process model (e.g. Pyodide/WASM)
 from .cards import card_ids, evaluate
 from .equity import equities
 from .hero import hero_of
-from .model import Act, Hand, Street
+from .model import Act, Hand, Street, postflop_rank
 from .priors import regime as regime_of
 from .reads import texture
 from .stats import VS_HERO, HandView, StatBook, size_bucket, stack_bucket
@@ -84,7 +84,8 @@ def _record_chunk(payload):
 
 
 def record_hands(hands: Iterable[Hand], books: Books | None = None,
-                 workers: int | None = None, progress=None) -> Books:
+                 workers: int | None = None, progress=None,
+                 hero: str | None = None) -> Books:
     """Extract stats for every hand.
 
     Two passes: accumulate think times, then freeze snap/tank cutoffs from
@@ -102,8 +103,10 @@ def record_hands(hands: Iterable[Hand], books: Books | None = None,
         for reg, book in by_regime.items():
             locks[(pid, reg)] = _pace_thresholds(book)
     # Resolved over the whole batch, because a single hand cannot say who
-    # exported it.
-    hero = hero_of(hands)
+    # exported it -- unless the caller knows better: a batch narrowed to a few
+    # players can name a different "you" than the whole database does.
+    if hero is None:
+        hero = hero_of(hands)
 
     n_workers = _default_workers() if workers is None else workers
     if ProcessPoolExecutor is not None and n_workers > 1 and len(hands) >= PARALLEL_MIN_HANDS and not books and _can_spawn():
@@ -173,6 +176,20 @@ def record_hand(hand: Hand, books: Books,
     _results(hand, view, books, reg, pace_events)
 
 
+def _ip_against(hand: Hand, seat: int, other: int | None) -> str:
+    """"ip" or "oop" for ``seat`` against one opponent, by postflop order.
+
+    Preflop "in position" meant the seat was labeled BTN or CO, so a UTG open
+    folding to the big blind's 3-bet was booked out of position -- and the
+    simulator reads these keys as position against the raiser."""
+    if other is None:
+        return "oop"
+    rank = postflop_rank(len(hand.seats))
+    mine = rank.get(hand.seat(seat).position, -1)
+    theirs = rank.get(hand.seat(other).position, -1)
+    return "ip" if mine > theirs else "oop"
+
+
 def book_for(books: Books, player_id: str, reg: str, name: str = "") -> StatBook:
     by_regime = books.setdefault(player_id, {})
     book = by_regime.get(reg)
@@ -213,6 +230,11 @@ def _preflop(hand: Hand, view: HandView, books: Books, reg: str,
     limpers: set[int] = set()
     cold_callers = 0
     bb = hand.big_blind
+    # Open sizes are read in blinds of the pot being opened. A straddle is the
+    # biggest blind in it, and dividing by the posted big blind made a
+    # standard open over a straddle read as a 5bb open -- 5% of real hands.
+    live_bb = max([bb] + [a.to_amount for a in hand.actions
+                          if a.act is Act.POST_STRADDLE and a.street is Street.PREFLOP])
     # VPIP and PFR are per *hand*, not per decision. A player who limps and
     # then calls a raise put money in once; counting both decisions inflates
     # the denominator and makes the sample look larger than it is.
@@ -243,8 +265,8 @@ def _preflop(hand: Hand, view: HandView, books: Books, reg: str,
             if pos in ("CO", "BTN", "SB"):
                 book.count("steal", raised)
             if raised:
-                book.measure("open_bb", a.to_amount / bb)
-                book.measure(f"open_bb:{pos}", a.to_amount / bb)
+                book.measure("open_bb", a.to_amount / live_bb)
+                book.measure(f"open_bb:{pos}", a.to_amount / live_bb)
 
         elif d.aggression_level == 0:
             # Limpers in, nobody raised: an isolation spot, and a wider one
@@ -254,8 +276,8 @@ def _preflop(hand: Hand, view: HandView, books: Books, reg: str,
             book.count(f"iso:{pos}:{depth}", raised)
             book.count("over_limp", called)
             if raised:
-                book.measure("iso_bb", a.to_amount / bb)
-                book.measure(f"iso_bb:{pos}", a.to_amount / bb)
+                book.measure("iso_bb", a.to_amount / live_bb)
+                book.measure(f"iso_bb:{pos}", a.to_amount / live_bb)
 
         elif d.aggression_level == 1 and d.seat != opener:
             # Facing a single raise.
@@ -286,7 +308,7 @@ def _preflop(hand: Hand, view: HandView, books: Books, reg: str,
                 book.count("limp_raise", raised)
             if raised and open_size:
                 book.measure("three_bet_ratio", a.to_amount / open_size)
-                book.measure(f"three_bet_ratio:{'ip' if d.in_position else 'oop'}",
+                book.measure(f"three_bet_ratio:{_ip_against(hand, d.seat, opener)}",
                              a.to_amount / open_size)
             # The same decisions, sliced to raises that were yours. Alongside
             # the pooled counter, never instead: that is its baseline.
@@ -301,7 +323,8 @@ def _preflop(hand: Hand, view: HandView, books: Books, reg: str,
         elif d.aggression_level == 2:
             if d.seat == opener:
                 book.count("fold_to_three_bet", folded)
-                book.count(f"fold_to_three_bet:{'ip' if d.in_position else 'oop'}", folded)
+                book.count(f"fold_to_three_bet:{_ip_against(hand, d.seat, three_bettor)}",
+                           folded)
                 book.count("four_bet", raised)
                 if three_bet_amt:
                     if raised:
@@ -493,6 +516,18 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
             frac = faced_bet_size.get(d.seat, d.bet_fraction)
             bucket = size_bucket(frac)
             first_face = d.seat not in faced_bet_already
+            # The c-bet itself, unraised, faced by somebody other than the
+            # c-bettor. "Any first bet faced once a c-bet exists" also counted
+            # the c-bettor folding to a check-raise as folding to a c-bet --
+            # their own.
+            facing_cbet = (first_bettor is not None and bettor_had_initiative
+                           and d.seat != first_bettor and d.aggression_level == 1
+                           and faced_bet_from.get(d.seat) == first_bettor)
+            if raised:
+                # Taking the lead back by raising is taking it back as much as
+                # betting is; left set, their next-street bet was booked as a
+                # delayed c-bet.
+                declined_initiative.discard(d.seat)
             faced_bet_already.add(d.seat)
             if first_face:
                 book.count(f"fold_vs_bet:{s}", folded)
@@ -526,7 +561,7 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
                     called_here.add(d.seat)
                     if d.in_position:
                         called_here_ip.add(d.seat)
-                if first_bettor is not None and bettor_had_initiative:
+                if facing_cbet:
                     book.count(f"fold_to_cbet:{s}", folded)
                 # The same decisions, sliced to bets that were yours. Under
                 # first_face for the reason the pooled counters are, and this
@@ -535,7 +570,7 @@ def _postflop(hand: Hand, view: HandView, books: Books, reg: str,
                     book.count(f"{VS_HERO}fold_vs_bet:{s}", folded)
                     book.count(f"{VS_HERO}call_vs_bet:{s}", called)
                     book.count(f"{VS_HERO}raise_vs_bet:{s}", raised)
-                    if first_bettor is not None and bettor_had_initiative:
+                    if facing_cbet:
                         book.count(f"{VS_HERO}fold_to_cbet:{s}", folded)
                 if d.seat in checked:
                     # first_face again: in a raise war a player faces a bet,
@@ -649,11 +684,14 @@ def _results(hand: Hand, view: HandView, books: Books, reg: str,
         net_bb = seat.net / bb
         book.measure("net_bb", net_bb)
         saw_flop = seat.seat in view.saw.get(Street.FLOP, set()) and hand.reached(Street.FLOP)
+        # Won means collected a share of a pot. ``net > 0`` scored every chop
+        # as a loss for both players, and a raked chop as a losing hand.
+        took_pot = seat.won > 0
         if saw_flop:
-            book.count("wwsf", seat.net > 0)
+            book.count("wwsf", took_pot)
             book.count("wtsd", seat.seat in showdown)
         if seat.seat in showdown:
-            book.count("wsd", seat.net > 0)
+            book.count("wsd", took_pot)
             book.measure("sd_net_bb", net_bb)
         else:
             book.measure("nonsd_net_bb", net_bb)
@@ -700,11 +738,12 @@ def _all_in_ev(hand: Hand, view: HandView, books: Books, reg: str,
     at 80% and losing costs what punting costs -- so a pot that went in face up
     is also credited by equity at that moment.
 
-    A player can only win what they matched, so each seat's eligible pot is
-    capped at ``sum(min(other.invested, mine))``; uncapped, aces in for 10
-    against two 100bb stacks score +75bb of equity in a +10bb pot. A genuine
-    side pot (three-plus all-in at different depths) is still approximate, and
-    flagged."""
+    Pots are layered by how deep each seat went, the way they are paid. Each
+    layer is split by equity among the showdown seats that reached it, and a
+    layer only one of them reached is theirs outright. Applying one equity to
+    everything a seat could win charged a big stack its all-in odds on a side
+    pot it won uncontested: kings that called a short stack's aces and then
+    took a 600 side pot scored -24.5bb for a +25.2bb decision."""
     all_in_actions = [a for a in hand.actions if a.all_in]
     if not all_in_actions or len(showdown) < 2:
         return
@@ -715,24 +754,39 @@ def _all_in_ev(hand: Hand, view: HandView, books: Books, reg: str,
 
     street = max(a.street for a in all_in_actions)
     board = hand.board_at(street)
-    try:
-        shares = equities(list(known.values()), board)
-    except ValueError:
-        return
-    invested = [s.invested for s in hand.seats]
-    depths = {s.invested for s in hand.seats if s.invested > 0}
-    if len(depths) > 1 and len(all_in_actions) > 1:
-        # Unequal stacks all-in: layered pots, which this does not model.
-        hand.flags.add("side_pot")
-    for (seat, _), share in zip(known.items(), shares):
+    invested = {s.seat: s.invested for s in hand.seats}
+    shares_of: dict[tuple[int, ...], dict[int, float]] = {}
+    expected = dict.fromkeys(known, 0.0)
+    prev = 0
+    for level in sorted({v for v in invested.values() if v > 0}):
+        layer = (level - prev) * sum(1 for v in invested.values() if v >= level)
+        prev = level
+        contenders = tuple(seat for seat in known if invested[seat] >= level)
+        if not contenders:
+            # Only folded money this deep: it went to whoever went deepest.
+            contenders = (max(known, key=lambda seat: invested[seat]),)
+        if contenders not in shares_of:
+            if len(contenders) == 1:
+                shares_of[contenders] = {contenders[0]: 1.0}
+            else:
+                try:
+                    split = equities([known[seat] for seat in contenders], board)
+                except ValueError:
+                    return
+                shares_of[contenders] = dict(zip(contenders, split))
+        for seat, share in shares_of[contenders].items():
+            expected[seat] += share * layer
+    if sum(1 for group in shares_of if len(group) > 1) > 1:
+        hand.flags.add("side_pot")      # contested by different groups
+    for seat in known:
         book = book_for(books, hand.seat(seat).player_id, reg)
         player = hand.seat(seat)
-        eligible = sum(min(other, player.invested) for other in invested)
-        book.measure("ev_net_bb", (share * eligible - player.invested) / hand.big_blind)
+        book.measure("ev_net_bb", (expected[seat] - player.invested) / hand.big_blind)
         # The realized result of the same pots, so a rating can swap one for
         # the other instead of counting the all-in twice.
         book.measure("allin_realised_bb", player.net / hand.big_blind)
-        book.measure("allin_equity", share)
+        book.measure("allin_equity", shares_of[tuple(known)][seat]
+                     if tuple(known) in shares_of else 1.0 / len(known))
 
 
 def _showdown_strengths(board: list[str], known: dict[int, tuple[str, ...]]) -> dict[int, float]:

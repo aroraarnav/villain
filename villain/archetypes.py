@@ -429,7 +429,11 @@ def match(profile: Profile) -> tuple[str, float, list[tuple[str, float]]]:
             # the exact failure this module's docstring warns about. On a real
             # pool 24% of the counts were borrowed, and the players the matcher
             # got most confidently wrong were the ones borrowing most.
-            n = est.native_opps or est.opps
+            # Zero is an answer, not a missing value: `or` fell back to the
+            # borrowed count for exactly the stats that had nothing native.
+            n = est.native_opps
+            if n <= 0:
+                continue
             # Cap how much evidence one feature may contribute. The
             # log-likelihood grows with the opportunity count, and those are
             # unequal by *where the spot occurs* rather than by how much the

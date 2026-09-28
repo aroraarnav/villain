@@ -339,7 +339,11 @@ class Handler(BaseHTTPRequestHandler):
             entry = stat_help(stat) or {}
             reading = entry.get("high" if rate >= pop else "low", "")
         return self._send(200, {
-            "stat": stat, "count": len(found), "hits": len(hits),
+            # Chances and times as the statistic counts them, which is per
+            # decision for some: one row per hand, but a hand with two snap
+            # calls is two of each, or the panel disagrees with the number.
+            "stat": stat, "count": round(sum(e.chances for e in found), 2),
+            "hits": round(sum(e.times for e in found), 2), "misses": len(misses),
             "rate": rate,
             "population": pop,
             "compared_to": against,

@@ -35,13 +35,15 @@ def test_evidence_count_matches_the_statistic(hands):
     books = record_hands(hands)
     for player_key, by_regime in books.items():
         for regime, book in by_regime.items():
-            for stat in ("vpip", "pfr", "fold_vs_bet:flop", "cbet:flop"):
+            for stat in ("vpip", "pfr", "fold_vs_bet:flop", "cbet:flop", "snap_call"):
                 ratio = book.ratios.get(stat)
                 if not ratio or ratio.opps < 2:
                     continue
                 found = [e for e in find(hands, player_key, stat) if e.regime == regime]
-                assert len(found) == ratio.opps, f"{player_key} {regime} {stat}"
-                assert sum(1 for e in found if e.hit) == ratio.hits
+                # Totals, not rows: snap_call counts per decision, and a hand
+                # with two calls was one row but two chances.
+                assert sum(e.chances for e in found) == ratio.opps, f"{player_key} {regime} {stat}"
+                assert sum(e.times for e in found) == ratio.hits
 
 
 def test_evidence_includes_the_misses(hands):

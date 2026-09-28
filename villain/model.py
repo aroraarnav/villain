@@ -92,17 +92,37 @@ _POSITIONS = {
 
 
 
-def positions_for(seats: list[int], dealer_seat: int) -> dict[int, str]:
+def positions_for(seats: list[int], dealer_seat: int, sb_seat: int | None = None,
+                  bb_seat: int | None = None) -> dict[int, str]:
     """Map seat number -> position label, walking clockwise from the button.
 
     ``seats`` is the occupied seats in table order. Heads-up the dealer *is* the
-    small blind, which the ``_POSITIONS`` table encodes by starting at BTN."""
+    small blind, which the ``_POSITIONS`` table encodes by starting at BTN.
+
+    The blind posters, when known, outrank the dealer seat. A dealer seat that
+    has emptied (dead button) or a small blind nobody posted (dead small blind)
+    both leave ``dealer_seat`` pointing one seat away from the real order; the
+    posts say where it is."""
     n = len(seats)
     if n < 2:
         return {}
     if n > 10:
         raise ValueError(f"unsupported table size {n}")
     order = sorted(seats)
+    if n > 2 and bb_seat in order:
+        at_bb = order.index(bb_seat)
+        before_bb = order[(at_bb - 1) % n]
+        if sb_seat == before_bb:
+            rotated = [order[(at_bb - 1 + i) % n] for i in range(n)]
+            return dict(zip(rotated, _POSITIONS[n]))
+        if sb_seat is None and n < 10:
+            # Dead small blind: nobody sits in it, so the labels are the
+            # next size up without "SB", starting from the big blind.
+            labels = [x for x in _POSITIONS[n + 1] if x != "SB"]
+            rotated = [order[(at_bb + i) % n] for i in range(n)]
+            return dict(zip(rotated, labels))
+    if n == 2 and bb_seat in order:
+        return {bb_seat: "BB", next(s for s in order if s != bb_seat): "BTN"}
     if dealer_seat not in order:
         # Dead button: the dealer seat left the table. Anchor on the next
         # occupied seat instead so positions stay contiguous.
@@ -186,6 +206,12 @@ class Hand:
     #: here would go stale the first time two of them were merged. Seat numbers
     #: are a fact about the hand and survive that. See :mod:`villain.hero`.
     hero_seat: int | None = None
+    #: What the site wrote, for parsers that can read a hand back from it.
+    #: Stored in place of the decoded hand, so a decoder fix reaches hands
+    #: already in the database the next time they are read, instead of only
+    #: hands imported after it -- a straddle fix once left 3,317 stored hands
+    #: (4.6%) decoded by the parser that had been wrong about them.
+    source: dict | None = field(default=None, repr=False, compare=False)
 
     # -- lookups ---------------------------------------------------------
     def seat(self, seat: int) -> Seat:
@@ -250,7 +276,24 @@ def hand_to_dict(hand: Hand) -> dict:
     }
 
 
+def stored_form(hand: Hand) -> dict:
+    """What the database keeps for a hand: its source when the parser can
+    read one back, the decoded dict otherwise."""
+    decoded = hand_to_dict(hand)
+    if hand.source is not None:
+        # Only while it still says the same thing. A caller that renamed a
+        # seat or re-keyed the hand after parsing would otherwise have the
+        # change silently undone the next time the hand is read.
+        from .parsers.base import from_source
+        if hand_to_dict(from_source(hand.source)) == decoded:
+            return {"source": hand.source}
+    return decoded
+
+
 def hand_from_dict(data: dict) -> Hand:
+    if "source" in data:
+        from .parsers.base import from_source
+        return from_source(data["source"])
     hand = Hand(
         hand_id=data["hand_id"], site=data["site"], table_id=data["table_id"],
         started_at=data["started_at"], big_blind=data["big_blind"],

@@ -352,3 +352,97 @@ def test_cli_rejects_unknown_files(tmp_path, capsys):
     junk = tmp_path / "notes.txt"
     junk.write_text("this is not a hand history")
     assert main(["--db", str(tmp_path / "v.db"), "import", str(junk)]) == 1
+
+
+def test_stored_hands_are_read_with_todays_parser(tmp_path, hands, monkeypatch):
+    """Only the decoded hand used to be kept, so a parser fix never reached a
+    hand already stored: 3,317 real hands stayed dropped after the straddle
+    fix. Kept as the site wrote them, they are decoded fresh on every read."""
+    import gzip
+
+    from villain.parsers import pokernow
+
+    with Store(tmp_path / "v.db") as store:
+        store.add_hands(hands)
+        row = store.conn.execute("SELECT payload, source FROM hands LIMIT 1").fetchone()
+        assert row["source"] == 1
+        assert "source" in json.loads(gzip.decompress(row["payload"]))
+
+        real = pokernow._parse_hand
+
+        def fixed(raw, table_id, exporter=None):
+            hand = real(raw, table_id, exporter)
+            hand.flags.add("decoded-by-the-new-parser")
+            return hand
+
+        monkeypatch.setattr(pokernow, "_parse_hand", fixed)
+        assert all("decoded-by-the-new-parser" in h.flags for h in store.stored_hands())
+
+
+def test_reimporting_upgrades_hands_an_older_parser_stored(tmp_path, hands):
+    """Before sources were kept, a re-import skipped every known hand -- the
+    one moment the original was in hand again, and it was thrown away."""
+    import dataclasses
+
+    legacy = [dataclasses.replace(h, source=None) for h in hands]
+    with Store(tmp_path / "v.db") as store:
+        store.add_hands(legacy)
+        assert store.conn.execute("SELECT SUM(source) s FROM hands").fetchone()["s"] == 0
+        report = store.add_hands(hands)
+        assert report.hands_new == 0
+        assert report.reread == len(hands)
+        assert store.conn.execute(
+            "SELECT COUNT(*) c FROM hands WHERE source = 0").fetchone()["c"] == 0
+        # Once upgraded, a third import has nothing left to re-read.
+        assert store.add_hands(hands).reread == 0
+
+
+def test_a_hand_changed_after_parsing_is_stored_as_changed(tmp_path, hands):
+    """Storing the source of a hand somebody edited would undo the edit on
+    the next read."""
+    import copy
+
+    edited = copy.deepcopy(hands[:1])
+    edited[0].hand_id += "-copy"
+    with Store(tmp_path / "v.db") as store:
+        store.add_hands(edited)
+        assert [h.hand_id for h in store.stored_hands()] == [edited[0].hand_id]
+
+
+def test_one_player_is_booked_one_seat_per_hand():
+    """Accounts that shared a few hands can be merged; in those hands both
+    seats resolved to one player, who was dealt two hands at once and folded
+    to their own bet."""
+    from helpers import ev, pokernow_hand
+
+    from villain.db import UNATTRIBUTED, key_seats
+
+    hand = pokernow_hand([(1, 1000, None), (2, 1000, None), (3, 1000, None)], 1, [
+        ev(3, 2, 5), ev(2, 3, 10), ev(8, 1, 30), ev(7, 2, 30), ev(11, 3),
+        ev(9, cards=["2c", "7d", "Kh"], turn=1), ev(0, 2), ev(8, 1, 40), ev(11, 2),
+        ev(16, 1, 40), ev(15), ev(10, 1, value=70)])
+    merged = {"id1": 42, "id2": 42, "id3": 7}
+    key_seats(hand, lambda site, account, name: merged.get(account))
+    ids = [s.player_id for s in hand.seats]
+    assert ids.count("42") == 1
+    assert sum(i.startswith(UNATTRIBUTED) for i in ids) == 1
+
+
+def test_a_narrowed_rebuild_keeps_the_databases_hero(tmp_path, hands):
+    """Resolved over a narrowed batch, "you" could be whoever dominated those
+    few hands, and every vs: counter went to them."""
+    from villain import hero as hero_module
+
+    with Store(tmp_path / "v.db") as store:
+        store.add_hands(hands)
+        recorded = store.conn.execute(
+            "SELECT value FROM meta WHERE key = 'hero_player'").fetchone()
+        assert recorded is not None
+        seen = []
+        real = hero_module.hero_of
+        try:
+            hero_module.hero_of = lambda hs: seen.append(len(hs)) or real(hs)
+            store.rebuild(only=[int(store.players()[-1]["id"])])
+        finally:
+            hero_module.hero_of = real
+        assert not seen, "a narrowed rebuild re-resolved the hero from its own hands"

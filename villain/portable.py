@@ -30,7 +30,7 @@ from pathlib import Path
 from .model import Hand, hand_from_dict
 
 #: Bumped only when a reader would get a hand *wrong*, not when one is added.
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2          # 2: a line may be {"source": ...}, the site's own hand
 
 #: Hands per batch handed to the store. Large enough that the per-batch
 #: overhead disappears, small enough that a 500k-hand file does not have to
@@ -62,9 +62,9 @@ def export_hands(store, path: Path) -> ExportReport:
             "villain_export": FORMAT_VERSION,
             "hands": rows,
         }) + "\n")
-        # Straight from the payload column: it is already the exact dict
-        # hand_to_dict produced on the way in, so a round trip through Hand
-        # would only add a chance to lose something.
+        # Straight from the payload column: it is already exactly what the
+        # store keeps (the site's own hand, or an older decoding of it), so a
+        # round trip through Hand would only add a chance to lose something.
         for row in store.conn.execute(
                 "SELECT payload FROM hands ORDER BY started_at"):
             fh.write(json.dumps(

@@ -292,7 +292,10 @@ def _exploitability_component(exploitability: float, profile: Profile) -> Compon
 
 def _adjusted_winrate(profile: Profile) -> float | None:
     """Winrate in bb/100 with all-in pots scored by equity, heavily shrunk."""
-    net = profile.means.get("net_bb")
+    # The raw result: the shrink is applied once, below. Starting from the
+    # already-shrunk mean shrank it twice -- a true +10 bb/100 over a
+    # thousand hands came out 3.97 instead of 5.56.
+    net = profile.means.get("net_bb#raw", profile.means.get("net_bb"))
     hands = profile.means.get("net_bb#n", 0)
     if net is None or hands < 20:
         return None

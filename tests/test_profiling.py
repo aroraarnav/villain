@@ -346,12 +346,28 @@ def test_limps_priced_as_preflop_isolation_not_flop_bluff():
     profile = build_profile(book)
     profile.hands = 100
     profile.stats["limp"] = shrink(30, 100, 0.15, 40)
-    profile.means["open_bb"] = 3.0
+    profile.means["open_bb"] = 3.0         # theirs; the isolation risk is yours
     rule = next(r for r in RULES if r.id == "limps")
     assert rule.spot == "preflop" and rule.ev == "steal"
-    # Excess limp 0.15 × (open 3 + blinds+limp 2.5) × capture 0.5 × 100 spots
-    # = 0.15 * 5.5 * 0.5 * 100 = 41.25
-    assert _severity(profile, rule, 0.30, 0.15) == pytest.approx(41.25)
+    # Excess limp 0.15 × (your 2.5 + blinds+limp 2.5) × capture 0.5 × 100 spots
+    # = 0.15 * 5.0 * 0.5 * 100 = 37.5
+    assert _severity(profile, rule, 0.30, 0.15) == pytest.approx(37.5)
+
+
+def test_a_does_too_little_leak_has_a_price():
+    """``value - threshold`` is negative below the line, so every "low" rule
+    priced as a bluff or a steal came out at exactly zero."""
+    from villain.exploits import RULES, _severity
+    from villain.priors import shrink
+
+    book = StatBook(player_id="x", name="X", regime="6max", hands=300)
+    book.meters["table_size"].add(6, 1)
+    profile = build_profile(book)
+    profile.hands = 300
+    profile.stats["bb_defend"] = shrink(48, 300, 0.4, 40)
+    rule = next(r for r in RULES if r.id == "no_defend")
+    assert rule.direction == "low"
+    assert _severity(profile, rule, 0.16, 0.375) > 0
 
 
 def test_overlapping_leaks_do_not_double_count_skill():
@@ -488,3 +504,64 @@ def test_skill_prices_leaks_at_the_same_bar_as_the_profile(synth_profile):
     listed = find_leaks(profile, min_confidence=MIN_CONFIDENCE)
     from villain.skill import deduped_exploitability
     assert skill.exploitability == pytest.approx(deduped_exploitability(listed), abs=0.01)
+
+
+def test_a_slice_two_deep_inherits_its_stats_prior():
+    """``three_bet:BB:vs:BTN`` lost one segment to ``three_bet:BB:vs`` and fell
+    to a 0.5 prior, so 1 3-bet in 20 read as 30%."""
+    from villain.priors import prior_for
+
+    assert prior_for("three_bet:BB:vs:BTN", "6max")[0] == prior_for("three_bet", "6max")[0]
+    assert prior_for("rfi:BTN:deep", "6max")[0] == prior_for("rfi:BTN", "6max")[0]
+    assert prior_for("fold_vs_bet:flop:stk:deep", "6max")[0] \
+        == prior_for("fold_vs_bet:flop", "6max")[0]
+
+
+def test_uneven_samples_do_not_hide_their_noise():
+    """Everyone at the same true rate, on very different sample sizes: all of
+    the scatter is noise, so the fitted prior should be strong. Noise taken
+    at the mean sample size read most of it as real spread."""
+    import numpy as np
+
+    from villain.priors import fit_empirical
+
+    rng = np.random.default_rng(0)
+    sizes = [6, 8, 10, 12, 400, 500, 600, 800] * 4
+    rows = [(float(rng.binomial(n, 0.35)), float(n)) for n in sizes]
+    _, strength = fit_empirical({"stat": rows})["stat"]
+    assert strength >= 100
+
+
+def test_another_table_size_bends_the_prior_on_this_ones_scale():
+    """1,000 heads-up hands at 70% VPIP and 60 six-max hands at 25%. Pooled
+    raw, the heads-up rate dragged the six-max read to 62.8%; loose for
+    heads-up is not loose-by-that-much at six-max."""
+    from villain.profile import build_profiles
+
+    hu = StatBook(player_id="x", name="X", regime="hu", hands=1000)
+    hu.ratios["vpip"].hits, hu.ratios["vpip"].opps = 700, 1000
+    six = StatBook(player_id="x", name="X", regime="6max", hands=60)
+    six.ratios["vpip"].hits, six.ratios["vpip"].opps = 15, 60
+    six.meters["table_size"].add(6, 1)
+    profile = next(p for p in build_profiles({"hu": hu, "6max": six}) if p.regime == "6max")
+    assert profile.stats["vpip"].value < 0.45
+
+
+def test_a_stat_seen_only_at_another_table_size_has_no_native_evidence():
+    """Borrowed pseudo-counts were scored as the player's own observations,
+    and aggression rebuilt from five separately shrunk counters drifted to
+    the middle."""
+    from villain.profile import build_unified
+
+    home = StatBook(player_id="x", name="X", regime="6max", hands=300)
+    home.ratios["vpip"].hits, home.ratios["vpip"].opps = 75, 300
+    home.meters["table_size"].add(6, 300)
+    away = StatBook(player_id="x", name="X", regime="hu", hands=40)
+    for act, n in (("bet", 4), ("raise", 4), ("call", 12), ("fold", 10), ("check", 10)):
+        away.ratios[f"act:flop:{act}"].hits = n
+        away.ratios[f"act:flop:{act}"].opps = 40
+    profile = build_unified({"6max": home, "hu": away})
+    aggression = profile.stats["aggression:flop"]
+    assert aggression.native_opps == 0
+    assert aggression.opps == pytest.approx(0.35 * 40)
+    assert profile.stats["vpip"].native_opps == 300

@@ -161,7 +161,9 @@ class Profile:
 
     @property
     def winrate_bb100(self) -> float | None:
-        v = self.means.get("net_bb")
+        """What they actually won, per 100. Shown as "observed", so it is the
+        raw result; the shrunk one is what skill ratings reason from."""
+        v = self.means.get("net_bb#raw", self.means.get("net_bb"))
         return v * 100 if v is not None else None
 
     @property
@@ -178,7 +180,8 @@ class Profile:
 
 def build_profile(book: StatBook, others: dict[str, StatBook] | None = None,
                   priors: dict[str, tuple[float, float]] | None = None,
-                  native: dict[str, float] | None = None) -> Profile:
+                  native: dict[str, float] | None = None,
+                  populations: dict[str, dict] | None = None) -> Profile:
     """Shrink one regime's book into a profile.
 
     ``others`` is the same player's books in other regimes, used as a personal
@@ -198,9 +201,11 @@ def build_profile(book: StatBook, others: dict[str, StatBook] | None = None,
 
     def estimate(stat: str, hits: float, opps: float) -> Estimate:
         mean, strength = priors.get(stat) or prior_for(stat, reg)
-        mean, strength = _personal_prior(stat, others, mean, strength)
+        mean, strength = _personal_prior(stat, others, reg, mean, strength, populations)
         est = shrink(hits, opps, mean, strength)
-        return replace(est, native_opps=(native or {}).get(stat, opps))
+        # A stat seen only at other table sizes has no native observations;
+        # defaulting to ``opps`` scored the borrowed pseudo-counts as its own.
+        return replace(est, native_opps=opps if native is None else native.get(stat, 0.0))
 
     for stat, ratio in book.ratios.items():
         # seat:/saw: are bookkeeping. vs: is left out for a different reason:
@@ -213,6 +218,8 @@ def build_profile(book: StatBook, others: dict[str, StatBook] | None = None,
         profile.stats[stat] = estimate(stat, ratio.hits, ratio.opps)
 
     for stat, (num_keys, den_keys) in DERIVED.items():
+        if stat in book.ratios:
+            continue            # carried whole, not rebuilt from its parts
         hits = sum(book.ratios[k].hits for k in num_keys if k in book.ratios)
         opps = sum(book.ratios[k].hits for k in den_keys if k in book.ratios)
         if opps:
@@ -226,20 +233,26 @@ def build_profile(book: StatBook, others: dict[str, StatBook] | None = None,
         profile.means[stat] = (meter.mean if prior_mean is None
                                else (meter.total + prior_mean * prior_n) / (meter.n + prior_n))
         profile.means[f"{stat}#n"] = meter.n
+        profile.means[f"{stat}#raw"] = meter.mean
         if meter.sd is not None:
             profile.means[f"{stat}#sd"] = meter.sd
 
     return profile
 
 
-def _personal_prior(stat: str, others: dict[str, StatBook], pop_mean: float,
-                    pop_strength: float) -> tuple[float, float]:
-    """Bend the population prior toward what this player does elsewhere."""
+def _personal_prior(stat: str, others: dict[str, StatBook], reg: str, pop_mean: float,
+                    pop_strength: float, populations: dict[str, dict] | None = None,
+                    ) -> tuple[float, float]:
+    """Bend the population prior toward what this player does elsewhere.
+
+    Translated onto this table's scale first, as :func:`unified_book` does.
+    Raw, a heads-up 70% VPIP pulled a six-max prior toward 70%: sixty six-max
+    hands at 25% read as 62.8%."""
     hits = opps = 0.0
-    for book in others.values():
+    for other, book in others.items():
         ratio = book.ratios.get(stat)
-        if ratio:
-            hits += ratio.hits
+        if ratio and ratio.opps > 0:
+            hits += _translate_rate(stat, ratio, other, reg, populations) * ratio.opps
             opps += ratio.opps
     if opps <= 0:
         return pop_mean, pop_strength
@@ -259,7 +272,8 @@ def build_profiles(by_regime: dict[str, StatBook], min_hands: int = 1,
         if book.hands < min_hands:
             continue
         blob = (populations or {}).get(reg) or priors
-        profiles.append(build_profile(book, others=by_regime, priors=blob))
+        profiles.append(build_profile(book, others=by_regime, priors=blob,
+                                      populations=populations))
     profiles.sort(key=lambda p: -p.hands)
     return profiles
 
@@ -402,10 +416,23 @@ def unified_book(by_regime: dict[str, StatBook],
         native[stat] = ratio.opps
     for stat, meter in source.meters.items():
         merged.meters[stat].merge(meter)
+    # Aggression is a share of five action counters. Translated one by one,
+    # each is shrunk toward its own prior and the share rebuilt from them
+    # drifts toward the middle: a borrowed 20% over 40 actions came out 32%.
+    # So it is carried as one rate, native and translated alike.
+    for stat, derived in _derived_ratios(source).items():
+        merged.ratios[stat].hits = derived.hits
+        merged.ratios[stat].opps = derived.opps
+        native[stat] = derived.opps
 
     for reg, book in live.items():
         if reg == home:
             continue
+        for stat, derived in _derived_ratios(book).items():
+            translated = _translate_rate(stat, derived, reg, home, populations=populations)
+            weight = CROSS_REGIME_DISCOUNT * derived.opps
+            merged.ratios[stat].hits += translated * weight
+            merged.ratios[stat].opps += weight
         for stat, ratio in book.ratios.items():
             # Translation re-expresses a rate against another table size's
             # population. There is no population for a vs: counter, so pooling
@@ -436,6 +463,17 @@ def unified_book(by_regime: dict[str, StatBook],
     contributions = {r: b.hands for r, b in sorted(
         live.items(), key=lambda kv: -kv[1].hands)}
     return merged, contributions, native
+
+
+def _derived_ratios(book: StatBook) -> dict[str, Ratio]:
+    """Each :data:`DERIVED` share, as one ratio from this book's own counts."""
+    out = {}
+    for stat, (num_keys, den_keys) in DERIVED.items():
+        opps = sum(book.ratios[k].hits for k in den_keys if k in book.ratios)
+        if opps > 0:
+            out[stat] = Ratio(sum(book.ratios[k].hits for k in num_keys if k in book.ratios),
+                              opps)
+    return out
 
 
 def _pop_mean_strength(stat: str, regime: str,

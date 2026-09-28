@@ -1,6 +1,7 @@
 """Statistic definitions, checked against a hand whose answers are known by hand."""
 
 import pytest
+from helpers import ev, pokernow_hand
 
 from villain.features import record_hand, record_hands
 from villain.model import Act, Action, Hand, Seat, Street
@@ -517,3 +518,67 @@ def test_a_worker_failure_falls_back_instead_of_failing_the_import(monkeypatch):
     monkeypatch.setattr(features, "ProcessPoolExecutor", Boom)
     books = features.record_hands(hands)
     assert books, "fallback must still produce books"
+
+
+def test_a_side_pot_won_uncontested_is_not_priced_at_all_in_odds():
+    """BTN is all in for 100 with aces; SB and BB call, bet on, and SB folds
+    the turn. BB's kings win a 600 side pot nobody else could win, so the
+    all-in decision was +25bb -- one equity over the whole pot scored -24.5."""
+    hand = pokernow_hand([(1, 100, ["As", "Ah"]), (2, 5000, None), (3, 5000, ["Ks", "Kh"])], 1, [
+        ev(3, 2, 5), ev(2, 3, 10), ev(8, 1, 100, allIn=True), ev(7, 2, 100), ev(7, 3, 100),
+        ev(9, cards=["2c", "7d", "9h"], turn=1), ev(0, 2), ev(8, 3, 300), ev(7, 2, 300),
+        ev(9, cards=["3c"], turn=2), ev(0, 2), ev(8, 3, 1000), ev(11, 2), ev(16, 3, 1000),
+        ev(9, cards=["4d"], turn=3), ev(15),
+        ev(10, 3, value=600), ev(10, 1, value=300, cards=["As", "Ah"])])
+    books = {}
+    record_hand(hand, books)
+    kings = books["id3"]["3max"]
+    equity = kings.meters["allin_equity"].total
+    assert 0.1 < equity < 0.25
+    assert kings.meters["ev_net_bb"].total == pytest.approx((equity * 300 + 600 - 400) / 10)
+
+
+def _hu_flop(*flop_events, river=None):
+    """BTN (seat 1) opens, BB (seat 2) calls; then the given flop action."""
+    return pokernow_hand([(1, 1000, None), (2, 1000, None)], 1, [
+        ev(3, 1, 5), ev(2, 2, 10), ev(8, 1, 25), ev(7, 2, 25),
+        ev(9, cards=["2c", "7d", "Kh"], turn=1), *flop_events])
+
+
+def test_the_cbettor_folding_to_a_check_raise_is_not_folding_to_a_cbet():
+    hand = _hu_flop(ev(0, 2), ev(8, 1, 30), ev(8, 2, 100), ev(11, 1),
+                    ev(16, 2, 70), ev(10, 2, value=110))
+    books = {}
+    record_hand(hand, books)
+    cbettor = books["id1"]["hu"]
+    assert cbettor.ratios["cbet:flop"].hits == 1
+    assert cbettor.ratios.get("fold_to_cbet:flop") is None \
+        or cbettor.ratios["fold_to_cbet:flop"].opps == 0
+    # The check-raiser did face the c-bet itself, and did not fold to it.
+    assert books["id2"]["hu"].ratios["fold_to_cbet:flop"].opps == 1
+
+
+def test_a_raise_takes_the_lead_back_like_a_bet_does():
+    """The raiser checks the flop, check-raises the turn, and bets the river:
+    that river bet is a continuation bet, not a delayed one."""
+    hand = _hu_flop(ev(0, 2), ev(0, 1),
+                    ev(9, cards=["3s"], turn=2), ev(8, 2, 20), ev(8, 1, 60), ev(7, 2, 60),
+                    ev(9, cards=["9s"], turn=3), ev(0, 2), ev(8, 1, 80), ev(11, 2),
+                    ev(16, 1, 80), ev(10, 1, value=170))
+    books = {}
+    record_hand(hand, books)
+    raiser = books["id1"]["hu"]
+    assert raiser.ratios["cbet:river"].hits == 1
+    assert "delayed_cbet:river" not in raiser.ratios
+
+
+def test_a_chop_is_a_showdown_won_not_lost():
+    hand = _hu_flop(ev(0, 2), ev(0, 1),
+                    ev(9, cards=["3s"], turn=2), ev(0, 2), ev(0, 1),
+                    ev(9, cards=["9s"], turn=3), ev(0, 2), ev(0, 1),
+                    ev(10, 1, value=25, cards=["Ac", "Qd"]),
+                    ev(10, 2, value=25, cards=["Ad", "Qc"]))
+    books = {}
+    record_hand(hand, books)
+    for account in ("id1", "id2"):
+        assert books[account]["hu"].ratios["wsd"].hits == 1

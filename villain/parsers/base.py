@@ -16,10 +16,20 @@ Parser = Callable[[Path], Iterator[Hand]]
 Sniffer = Callable[[Path], bool]
 
 _REGISTRY: list[tuple[str, Sniffer, Parser]] = []
+_FROM_SOURCE: dict[str, Callable[[dict], Hand]] = {}
 
 
-def register(site: str, sniff: Sniffer, parse: Parser) -> None:
+def register(site: str, sniff: Sniffer, parse: Parser,
+             from_source: Callable[[dict], Hand] | None = None) -> None:
     _REGISTRY.append((site, sniff, parse))
+    if from_source is not None:
+        _FROM_SOURCE[site] = from_source
+
+
+def from_source(source: dict) -> Hand:
+    """Decode a stored hand from what its site wrote, with today's parser."""
+    from . import pokernow  # noqa: F401  (registers itself)
+    return _FROM_SOURCE[source["site"]](source)
 
 
 def detect(path: Path) -> str | None:

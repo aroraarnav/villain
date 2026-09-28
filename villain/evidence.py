@@ -41,6 +41,11 @@ class Evidence:
     hole_cards: list[str] = field(default_factory=list)
     net_bb: float = 0.0
     pot_bb: float = 0.0
+    #: What this hand added to the statistic. Usually 1 and 0-or-1, but a
+    #: per-decision counter (snap calls, say) can take two chances in one
+    #: hand, and the panel's totals have to be the statistic's totals.
+    chances: float = 1.0
+    times: float = 0.0
 
 
 def street_of(stat: str) -> Street | None:
@@ -103,6 +108,8 @@ def find(hands: list[Hand], player_key: str, stat: str,
                 hole_cards=list(seat.hole_cards),
                 net_bb=round(seat.net / hand.big_blind, 2) if hand.big_blind else 0.0,
                 pot_bb=round(hand.pot / hand.big_blind, 1) if hand.big_blind else 0.0,
+                chances=ratio.opps,
+                times=ratio.hits,
             ))
             break
     out.sort(key=lambda e: -e.started_at)
