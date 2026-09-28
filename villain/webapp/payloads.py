@@ -77,6 +77,9 @@ def profile_payload(profile, player_id: int | None = None) -> dict:
     """``as_dict`` plus the reference points the charts need to be readable."""
     enrich(profile)
     payload = as_dict(profile)
+    # Every stat, for the CLI's export. The page draws ``rows`` instead and
+    # never read this: ~28KB per profile of JSON built, sent and parsed.
+    payload.pop("stats", None)
     # Carried so the UI can link a read back to the hands behind it. Absent for
     # an unsaved session, whose hands are not in the database to look up.
     payload["player_id"] = player_id
@@ -185,7 +188,12 @@ def _roster_fingerprint(store: Store) -> tuple:
         "SELECT COUNT(*), SUM(hits), SUM(opps) FROM ratios").fetchone())
     priors = tuple(store.conn.execute(
         "SELECT COUNT(*), SUM(strength) FROM fitted_priors").fetchone())
-    return (hands, players, ratios, priors)
+    # Names too: a rename-only commit changes no count and no counter, and
+    # the roster kept showing the old name.
+    names = store.conn.execute(
+        "SELECT group_concat(id || '=' || display_name, '|')"
+        " FROM (SELECT id, display_name FROM players ORDER BY id)").fetchone()[0]
+    return (hands, players, ratios, priors, names)
 
 
 def roster_payload(store: Store) -> list[dict]:
@@ -301,4 +309,21 @@ def tab_availability(store: Store) -> dict[str, dict]:
     return {
         "hero": {"ok": hero_id is not None, "why": hero_why},
         "play": {"ok": profiled > 0, "why": play_why},
+    }
+
+
+def table_summary(profile) -> dict:
+    """One table size's line in a player's "split by table size" panel.
+
+    Just what the line shows. Each was a whole ``profile_payload`` -- GTO
+    comparison, deviations, timing -- four of them making up 158KB of a 209KB
+    response for a table of six columns."""
+    enrich(profile)
+    return {
+        "regime_label": profile.regime_label,
+        "hands": profile.hands,
+        "archetype": profile.archetype,
+        "archetype_confidence": profile.archetype_confidence,
+        "skill": {"score": profile.skill.score},
+        "leaks": [{"headline": leak.headline} for leak in profile.tags[:1]],
     }

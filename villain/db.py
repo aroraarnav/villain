@@ -126,6 +126,17 @@ CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+-- What each hand's cards say -- all-in equity, showdown and per-street
+-- strength percentiles -- which depends on nothing but the hand. Scoring it
+-- was about 70% of a rebuild and all of a Hero build's reading phase, redone
+-- after every import and merge for answers that could not have changed.
+-- Disposable: rows from another DERIVED_VERSION are recomputed.
+CREATE TABLE IF NOT EXISTS hand_derived (
+    hand_id TEXT PRIMARY KEY,
+    version TEXT NOT NULL,
+    payload TEXT NOT NULL
+) WITHOUT ROWID;
 """
 
 DEFAULT_PATH = Path.home() / ".villain" / "villain.db"
@@ -155,6 +166,9 @@ PROGRESS_HOOK = None
 #: route, so a GET that migrated reads as a read and the stamp never lands.
 _CACHE_DIRTY = False
 
+#: ``Store.sessions()`` by database path: ((hand count, start-time sum), sittings).
+_SESSIONS_CACHE: dict[str, tuple[tuple, list[dict]]] = {}
+
 #: Two request threads can both see a stale stamp and each start a full
 #: rebuild. The second re-reads the version after waiting, and does nothing.
 _ENSURE_LOCK = threading.Lock()
@@ -181,6 +195,15 @@ def _report(done: int, total: int, phase: str) -> None:
 #: account is any string, so the marker must be one no integer id can start
 #: with.
 UNATTRIBUTED = "?"
+
+
+def _derived_version() -> str:
+    """Stamp on stored card-scored facts. The definitions stamp is part of it:
+    stored hands are decoded fresh on every read, so a parser fix -- which
+    bumps the definitions -- can change the cards and pots they were scored
+    from."""
+    from .features import DERIVED_VERSION
+    return f"{DERIVED_VERSION}/{DEFINITIONS_VERSION}"
 
 
 def key_seats(hand: Hand, resolve, names: dict[str, str] | None = None,
@@ -288,6 +311,13 @@ class Store:
         for col in ("spread", "floor", "ceiling"):
             if col not in cols:
                 self.conn.execute(f"ALTER TABLE fitted_priors ADD COLUMN {col} REAL")
+        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(hand_seats)")}
+        if "cards" not in cols:
+            # Whether that seat's hole cards are known. Finding the hero is a
+            # count of exactly this per player, and without it every page
+            # load decoded all 71k hands to take it (2.1s natively, far longer
+            # in the browser). NULL until backfilled; see seat_visibility.
+            self.conn.execute("ALTER TABLE hand_seats ADD COLUMN cards INTEGER")
         cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(hands)")}
         if "source" not in cols:
             # Whether the payload is what the site wrote (1) or an older
@@ -306,12 +336,12 @@ class Store:
         for row in self.conn.execute("SELECT hand_id, site, payload FROM hands"):
             hand = hand_from_dict(json.loads(gzip.decompress(row["payload"])))
             for seat in hand.seats:
-                rows.append((row["hand_id"], row["site"],
-                             seat.player_id or "", seat.name or ""))
+                rows.append((row["hand_id"], row["site"], seat.player_id or "",
+                             seat.name or "", int(len(seat.hole_cards) == 2)))
         if rows:
             self.conn.executemany(
-                "INSERT OR IGNORE INTO hand_seats (hand_id, site, account, name)"
-                " VALUES (?, ?, ?, ?)", rows)
+                "INSERT OR IGNORE INTO hand_seats (hand_id, site, account, name, cards)"
+                " VALUES (?, ?, ?, ?, ?)", rows)
 
     def _ensure_definitions(self) -> None:
         """Rebuild cached books when feature definitions moved under them."""
@@ -589,6 +619,8 @@ class Store:
                     self.conn.execute(
                         "UPDATE hands SET payload = ?, source = 1 WHERE hand_id = ?",
                         (payload, hand.hand_id))
+                    self.conn.execute(
+                        "DELETE FROM hand_derived WHERE hand_id = ?", (hand.hand_id,))
                     reread.append(hand)
                     report.reread += 1
                 continue
@@ -599,9 +631,10 @@ class Store:
                  len(hand.seats), payload, int(hand.source is not None)),
             )
             self.conn.executemany(
-                "INSERT OR IGNORE INTO hand_seats (hand_id, site, account, name)"
-                " VALUES (?, ?, ?, ?)",
-                [(hand.hand_id, hand.site, seat.player_id, seat.name or "")
+                "INSERT OR IGNORE INTO hand_seats (hand_id, site, account, name, cards)"
+                " VALUES (?, ?, ?, ?, ?)",
+                [(hand.hand_id, hand.site, seat.player_id, seat.name or "",
+                  int(len(seat.hole_cards) == 2))
                  for seat in hand.seats])
             fresh.append(hand)
             report.hands_new += 1
@@ -764,6 +797,7 @@ class Store:
                 hero = None
             if hero is None:
                 hero = hero_of(hands)
+        self._derive(hands)
         # Two-pass timing: freeze each player's snap/tank cutoffs from the
         # full sample, then tag every hand with those same thresholds.
         books = record_hands(hands, progress=_report, hero=hero)
@@ -908,7 +942,19 @@ class Store:
 
         Nothing records a session id -- the hands are the source of truth and a
         sitting is just a run of them close together in time. Deriving it means
-        no migration and no second thing to keep correct."""
+        no migration and no second thing to keep correct.
+
+        Cached on which hands there are, which is all it reads: 280ms of joins
+        per call, and opening one sitting called it again just to find it."""
+        count = tuple(self.conn.execute(
+            "SELECT COUNT(*), TOTAL(started_at) FROM hands").fetchone())
+        cached = _SESSIONS_CACHE.get(str(self.path))
+        if cached is None or cached[0] != count:
+            cached = (count, self._sessions())
+            _SESSIONS_CACHE[str(self.path)] = cached
+        return [dict(sess, hand_ids=list(sess["hand_ids"])) for sess in cached[1]]
+
+    def _sessions(self) -> list[dict]:
         rows = list(self.conn.execute(
             "SELECT hand_id, started_at FROM hands ORDER BY started_at"))
         out: list[dict] = []
@@ -962,6 +1008,7 @@ class Store:
             # whole sitting down.
             key_seats(hand, resolve)
             hands.append(hand)
+        self._attach_derived(hands)
         return record_hands(hands)
 
     #: Only statistics with a per-*hand* denominator are compared session to
@@ -1180,6 +1227,67 @@ class Store:
         from .priors import REGIMES
         return {r: blob for r in REGIMES if (blob := self.fitted_priors(r))}
 
+    def _attach_derived(self, hands: list[Hand]) -> list[Hand]:
+        """Hang each hand's stored card-scored facts on it, where current."""
+        from .features import load_derived
+        by_id = {hand.hand_id: hand for hand in hands}
+        ids = list(by_id)
+        for at in range(0, len(ids), 900):         # under SQLite's variable cap
+            chunk = ids[at:at + 900]
+            for row in self.conn.execute(
+                    "SELECT hand_id, payload FROM hand_derived WHERE version = ?"
+                    f" AND hand_id IN ({','.join('?' * len(chunk))})",
+                    (_derived_version(), *chunk)):
+                by_id[row["hand_id"]].derived = load_derived(row["payload"])
+        return hands
+
+    def _derive(self, hands: list[Hand]) -> None:
+        """Attach every hand's card-scored facts, scoring and storing only the
+        hands the store has no current record for."""
+        from .features import derive_many, load_derived
+        self._attach_derived(hands)
+        missing = [hand for hand in hands if hand.derived is None]
+        if not missing:
+            return
+        payloads = derive_many(missing, progress=_report)
+        self.conn.executemany(
+            "INSERT OR REPLACE INTO hand_derived (hand_id, version, payload) VALUES (?, ?, ?)",
+            [(hand.hand_id, _derived_version(), text) for hand, text in zip(missing, payloads)])
+        for hand, text in zip(missing, payloads):
+            hand.derived = load_derived(text)
+
+    def seat_visibility(self) -> dict[int, tuple[int, int]]:
+        """``player_id -> (hands seated, hands with their cards known)``.
+
+        From the seat index, not the hands. Rows stored before the index
+        recorded cards are filled in once, here, and kept."""
+        missing = self.conn.execute(
+            "SELECT DISTINCT hand_id FROM hand_seats WHERE cards IS NULL").fetchall()
+        if missing:
+            updates = []
+            for row in self.conn.execute(
+                    "SELECT payload FROM hands WHERE hand_id IN"
+                    " (SELECT DISTINCT hand_id FROM hand_seats WHERE cards IS NULL)"):
+                hand = hand_from_dict(json.loads(gzip.decompress(row["payload"])))
+                updates += [(int(len(s.hole_cards) == 2), hand.hand_id, s.player_id)
+                            for s in hand.seats]
+            self.conn.executemany(
+                "UPDATE hand_seats SET cards = ? WHERE hand_id = ? AND account = ?", updates)
+            self.conn.execute("UPDATE hand_seats SET cards = 0 WHERE cards IS NULL")
+            self.conn.commit()
+        _, resolve = self.alias_resolver()
+        out: dict[int, list[int]] = {}
+        for row in self.conn.execute(
+                "SELECT site, account, name, COUNT(*) n, SUM(cards) seen"
+                " FROM hand_seats GROUP BY site, account, name"):
+            pid = resolve(row["site"], row["account"], row["name"])
+            if pid is None:
+                continue
+            tally = out.setdefault(pid, [0, 0])
+            tally[0] += row["n"]
+            tally[1] += row["seen"] or 0
+        return {pid: (n, seen) for pid, (n, seen) in out.items()}
+
     def alias_resolver(self):
         """``resolve(site, account, name) -> player_id | None``, split key first.
 
@@ -1217,10 +1325,22 @@ class Store:
         and SQLite caps bound variables per statement, so IN fails with "too
         many SQL variables" on exactly the large imports that most need the
         narrowing."""
+        # Candidates through the account index, then the exact rule in Python:
+        # scanning every seat row in Python cost 169ms per call whatever the
+        # player's size, and this runs on every link, split and evidence open.
+        # A split key ("account#name") still narrows on its account.
+        self.conn.execute("DROP TABLE IF EXISTS temp.narrow_accounts")
+        self.conn.execute(
+            "CREATE TEMP TABLE narrow_accounts (site TEXT, account TEXT,"
+            " PRIMARY KEY (site, account))")
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO temp.narrow_accounts VALUES (?, ?)",
+            [(site, key.split("#", 1)[0]) for site, key in keys])
         wanted = {
             row["hand_id"]
             for row in self.conn.execute(
-                "SELECT hand_id, site, account, name FROM hand_seats")
+                "SELECT s.hand_id, s.site, s.account, s.name FROM temp.narrow_accounts a"
+                " JOIN hand_seats s ON s.site = a.site AND s.account = a.account")
             if (row["site"], row["account"]) in keys
             or (row["site"], split_key(row["account"], row["name"])) in keys
         }
@@ -1307,7 +1427,7 @@ class Store:
                 progress(at + 1, total)
         if progress is not None:
             progress(total, total)
-        return out
+        return self._attach_derived(out)
 
     def delete_player(self, player_id: int) -> dict:
         """Forget one person. Their hands stay exactly where they are.
@@ -1352,7 +1472,7 @@ class Store:
             "players": self.conn.execute("SELECT COUNT(*) c FROM players").fetchone()["c"],
         }
         for table in ("ratios", "meters", "books", "notes", "distinct_pairs", "hand_seats",
-                      "aliases", "fitted_priors", "hands", "players"):
+                      "aliases", "fitted_priors", "hands", "players", "hand_derived"):
             self.conn.execute(f"DELETE FROM {table}")
         self.conn.execute("DELETE FROM sqlite_sequence WHERE name = 'players'")
         self.conn.commit()

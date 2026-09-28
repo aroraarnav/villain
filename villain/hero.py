@@ -30,7 +30,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .model import STREET_LABELS, Act, Street
-from .reads import StrengthModel, build_dataset, strength_by_street, texture
+from .reads import StrengthModel, build_dataset, stored_strengths, texture
 from .reads import fit as fit_strength
 from .stats import Decision, HandView
 
@@ -62,19 +62,19 @@ def find_hero(store, min_hands: int = MIN_HERO_HANDS, progress=None,
 
     ``min_hands`` is overridable for testing against small fixtures; it exists so
     a villain who showed a few hands in a short sample cannot look like hero."""
+    if hands is None:
+        # A count per player of seats and seats with cards known, which the
+        # seat index answers without decoding a single hand.
+        tallies = store.seat_visibility()
+        return _most_visible({p: n for p, (n, _) in tallies.items()},
+                             {p: k for p, (_, k) in tallies.items()}, min_hands)
     seen: dict[int, int] = {}
     total: dict[int, int] = {}
     # `hands` lets a caller that has already loaded them hand them over. A cold
     # Hero build needs the same list twice -- once to work out whose seat is
     # whose, once to fit the model -- and loading it twice meant decompressing
     # and parsing the whole database twice for one page.
-    #
-    # Counted when it does load: on a cold build this is the first thing that
-    # happens, so it is the first thing anybody waiting is waiting for.
     seq = hands
-    if seq is None:
-        seq = store.player_hands(progress=progress)
-        progress = None          # the load already counted itself
     n = len(seq)
     every = 200
     if progress is not None:
@@ -92,7 +92,10 @@ def find_hero(store, min_hands: int = MIN_HERO_HANDS, progress=None,
             progress(at + 1, n)
     if progress is not None:
         progress(n, n)
+    return _most_visible(total, seen, min_hands)
 
+
+def _most_visible(total: dict[int, int], seen: dict[int, int], min_hands: int) -> int | None:
     best, best_frac = None, 0.0
     for pid, count in total.items():
         if count < min_hands:
@@ -295,7 +298,11 @@ def _hero_spots(hands: list, hero_id: int, progress=None):
         if hand.board:
             seat = next((s for s in hand.seats if s.player_id == str(hero_id)), None)
             if seat is not None and len(seat.hole_cards) == 2:
-                yield hand, seat, strength_by_street(hand, {seat.seat: seat})
+                # Every known holding, not just hero's: that is the key the
+                # dataset pass already scored this hand under, so asking with
+                # hero alone missed the cache on every hand (19s of a build).
+                known = {s.seat: s for s in hand.seats if len(s.hole_cards) == 2}
+                yield hand, seat, stored_strengths(hand, known)
         if progress is not None and (at + 1) % every == 0:
             progress(at + 1, total)
     if progress is not None:
@@ -427,7 +434,7 @@ class GradeReport:
 def fold_grades(hands: list, hero_id: int, model: StrengthModel,
                 progress=None) -> GradeReport:
     """Grade every postflop fold hero made against the hand hero actually held."""
-    grades: list[Grade] = []
+    pending: list[tuple[dict, list[float]]] = []
     for hand, seat, strengths in _hero_spots(hands, hero_id, progress):
         view = HandView(hand)
         current_street = Street.PREFLOP
@@ -442,22 +449,30 @@ def fold_grades(hands: list, hero_id: int, model: StrengthModel,
                 to_call = decision.action.to_call
                 pot_before = decision.action.pot_before
                 if strength is not None and to_call > 0 and hand.big_blind:
-                    grades.append(Grade(
-                        FOLD, hand_id=hand.hand_id, street=int(decision.street),
-                        hole_cards=seat.hole_cards, board=hand.board_at(decision.street),
-                        strength=strength,
-                        faced_strength=_predict_strength(model, hand, last_aggro),
-                        required_equity=to_call / (pot_before + to_call),
-                        pot_before_bb=pot_before / hand.big_blind,
-                        to_call_bb=to_call / hand.big_blind,
-                    ))
+                    pending.append(({
+                        "hand_id": hand.hand_id, "street": int(decision.street),
+                        "hole_cards": seat.hole_cards,
+                        "board": hand.board_at(decision.street),
+                        "strength": strength,
+                        "required_equity": to_call / (pot_before + to_call),
+                        "pot_before_bb": pot_before / hand.big_blind,
+                        "to_call_bb": to_call / hand.big_blind,
+                    }, _strength_features(hand, last_aggro)))
             if act.is_aggressive:
                 last_aggro = decision
-    return GradeReport(grades=grades)
+    return _graded(FOLD, pending, model)
 
 
-def _predict_strength(model: StrengthModel, hand, decision: Decision) -> float:
-    """What the population model expects a line like this one to represent.
+def _graded(kind, pending: list[tuple[dict, list[float]]], model: StrengthModel) -> GradeReport:
+    """Grades for collected spots, with the population's read of each line
+    predicted in one call rather than one call per spot."""
+    faced = model.predict_many([features for _, features in pending])
+    return GradeReport(grades=[Grade(kind, faced_strength=f, **fields)
+                               for (fields, _), f in zip(pending, faced)])
+
+
+def _strength_features(hand, decision: Decision) -> list[float]:
+    """The model's input for what a line like this one represents.
 
     Used for both a bet hero folded to and a check hero made -- the feature
     vector states its own action type, so one call answers both.
@@ -479,13 +494,13 @@ def _predict_strength(model: StrengthModel, hand, decision: Decision) -> float:
         float(decision.players_in),
         *texture(hand.board_at(decision.street)),
     ]
-    return model.predict(features)
+    return features
 
 
 def missed_value(hands: list, hero_id: int, model: StrengthModel,
                  progress=None) -> GradeReport:
     """Grade every postflop check hero made against the hand hero actually held."""
-    grades: list[Grade] = []
+    pending: list[tuple[dict, list[float]]] = []
     for hand, seat, strengths in _hero_spots(hands, hero_id, progress):
         for decision in HandView(hand).decisions():
             if (decision.seat != seat.seat or decision.street is Street.PREFLOP
@@ -494,14 +509,13 @@ def missed_value(hands: list, hero_id: int, model: StrengthModel,
             strength = strengths.get((seat.seat, decision.street))
             if strength is None or not hand.big_blind:
                 continue
-            grades.append(Grade(
-                CHECK, hand_id=hand.hand_id, street=int(decision.street),
-                hole_cards=seat.hole_cards, board=hand.board_at(decision.street),
-                strength=strength,
-                faced_strength=_predict_strength(model, hand, decision),
-                pot_before_bb=decision.action.pot_before / hand.big_blind,
-            ))
-    return GradeReport(grades=grades)
+            pending.append(({
+                "hand_id": hand.hand_id, "street": int(decision.street),
+                "hole_cards": seat.hole_cards, "board": hand.board_at(decision.street),
+                "strength": strength,
+                "pot_before_bb": decision.action.pot_before / hand.big_blind,
+            }, _strength_features(hand, decision)))
+    return _graded(CHECK, pending, model)
 
 
 # -- tells: does something visible about hero's bet change with the hand behind it ---

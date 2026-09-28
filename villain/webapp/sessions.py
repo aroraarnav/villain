@@ -87,6 +87,20 @@ def database_merges(store: Store, hands: list) -> dict:
     return merges
 
 
+def _co_occurrence(session: dict) -> dict:
+    """Who sat with whom in the upload, counted once per batch of hands.
+
+    Every identity answer asked again -- a walk over every uploaded hand on
+    each click, 0.2s on a large import -- for a count only new hands change."""
+    from ..identity import _incoming_co_occurrence
+
+    hands = session.get("hands") or []
+    cached = session.get("_co_occurrence")
+    if cached is None or cached[0] != len(hands):
+        cached = session["_co_occurrence"] = (len(hands), _incoming_co_occurrence(hands))
+    return cached[1]
+
+
 def merged_hands(session: dict, extra: dict | None = None) -> list:
     """The session's hands with confirmed same-person accounts pooled, on a
     copy: stored hands keep the ids the site wrote, because identity is a
@@ -139,7 +153,6 @@ def _conflicting_pairs(session: dict) -> list[list[str]]:
     knot of similar names together while keeping those pairs apart and saying
     why, rather than accepting the drop and failing after. Handful-sized."""
     from ..db import SPURIOUS_OVERLAP
-    from ..identity import _incoming_co_occurrence
 
     questions = session.get("questions") or []
     interesting = set()
@@ -150,7 +163,7 @@ def _conflicting_pairs(session: dict) -> list[list[str]]:
     if len(interesting) < 2:
         return []
 
-    overlaps = _incoming_co_occurrence(session.get("hands") or [])
+    overlaps = _co_occurrence(session)
     out = []
     for key, count in overlaps.items():
         if count <= SPURIOUS_OVERLAP:
@@ -305,12 +318,11 @@ def apply_answers(session: dict, answers: dict) -> None:
     here — ``commit_session`` would refuse the link, and showing a merged
     profile the save step cannot keep is worse than leaving them apart."""
     from ..db import SPURIOUS_OVERLAP
-    from ..identity import _incoming_co_occurrence
 
     merged_answers = dict(session.get("answers") or {})
     merged_answers.update(answers or {})
     session["answers"] = merged_answers
-    blocked = _incoming_co_occurrence(session.get("hands") or [])
+    blocked = _co_occurrence(session)
     merges: dict[tuple[str, str], dict] = {}
     for question in session.get("questions", []):
         answer = merged_answers.get(question.id) or {}

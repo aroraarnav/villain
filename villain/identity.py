@@ -13,6 +13,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
+from functools import lru_cache
 
 from .archetypes import _log_beta_binomial
 from .db import SPURIOUS_OVERLAP
@@ -48,6 +49,7 @@ class Suggestion:
     matched_b: str = ""
 
 
+@lru_cache(maxsize=4096)
 def normalize(name: str) -> str:
     """Strip the noise a screen name accumulates across sessions."""
     text = re.sub(r"[^a-z0-9]+", "", name.lower())
@@ -63,18 +65,29 @@ def display_key(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", name.lower())
 
 
-def name_similarity(a: str, b: str) -> float:
+def name_similarity(a: str, b: str, floor: float = 0.0) -> float:
     """Similarity of two screen names, 0-1: the better of shared runs
     (additions, truncations) and edit distance (transpositions, typos).
-    ``PlayerK``/``PlaeyrK`` scores 0.73 on the first and 0.82 on the second."""
+    ``PlayerK``/``PlaeyrK`` scores 0.73 on the first and 0.82 on the second.
+
+    ``floor`` is the caller's bar. When the lengths alone rule both expensive
+    measures out below it, they are skipped and the cheap score returned --
+    exact whenever it matters, since a score under the bar is discarded
+    either way. Every pair of names in an import runs through here."""
     na, nb = normalize(a), normalize(b)
     if not na or not nb:
         return 0.0
     if na == nb:
         return 1.0
+    cheap = max(_skeleton_score(na, nb), _containment_score(na, nb))
+    la, lb = len(na), len(nb)
+    # Bounds: a matching-blocks ratio is at most 2*min/(sum), and an edit
+    # distance is at least the length difference.
+    if max(2 * min(la, lb) / (la + lb), 1.0 - abs(la - lb) / max(la, lb)) < floor:
+        return cheap
     blocks = SequenceMatcher(None, na, nb).ratio()
     edits = 1.0 - _levenshtein(na, nb) / max(len(na), len(nb))
-    return max(blocks, edits, _skeleton_score(na, nb), _containment_score(na, nb))
+    return max(blocks, edits, cheap)
 
 
 #: Shortest stem a name-plus-suffix match accepts. At 3+ it proposes
@@ -99,6 +112,7 @@ def _containment_score(na: str, nb: str) -> float:
     return 0.93
 
 
+@lru_cache(maxsize=4096)
 def _skeleton(name: str) -> str:
     """The consonants, in order. ``PlayerD`` and ``PlyrD`` share one."""
     return re.sub(r"[aeiou]", "", name)
@@ -174,7 +188,7 @@ def suggest_links(store, min_name_score: float = HIGH_NAME_SCORE) -> list[Sugges
             best = (0.0, "", "")
             for x in aliases.get(a, []):
                 for y in aliases.get(b, []):
-                    score = name_similarity(x, y)
+                    score = name_similarity(x, y, min_name_score)
                     if score > best[0]:
                         best = (score, x, y)
             score, matched_a, matched_b = best
@@ -555,7 +569,7 @@ def session_questions(store, hands, min_name_score: float = HIGH_NAME_SCORE) -> 
                 continue
             if already_one_player(key, other_key):
                 continue
-            score = name_similarity(entry["name"], other["name"])
+            score = name_similarity(entry["name"], other["name"], min_name_score)
             if score < min_name_score:
                 continue
             # Identical screen names are handled as one cluster above, not as
@@ -580,7 +594,7 @@ def session_questions(store, hands, min_name_score: float = HIGH_NAME_SCORE) -> 
         for player_id, row in db_players.items():
             best = (0.0, "")
             for n in db_aliases.get(player_id, []):
-                score = name_similarity(entry["name"], n)
+                score = name_similarity(entry["name"], n, min_name_score)
                 if score > best[0]:
                     best = (score, n)
             if best[0] < min_name_score:

@@ -65,9 +65,17 @@ class StrengthModel:
     _model: object | None = None
 
     def predict(self, features: list[float]) -> float:
+        return self.predict_many([features])[0]
+
+    def predict_many(self, rows: list[list[float]]) -> list[float]:
+        """One call for many rows. Each predict call walks every tree in
+        Python, so a grader asking one row at a time spent 160s of a Hero
+        build on call overhead for 16,000 predictions."""
+        if not rows:
+            return []
         if self._model is None:
-            return 0.5
-        return float(np.clip(self._model.predict(np.array(features)[None, :])[0], 0.0, 1.0))
+            return [0.5] * len(rows)
+        return [float(v) for v in np.clip(self._model.predict(np.array(rows, dtype=float)), 0.0, 1.0)]
 
     def offset(self, player_id: str, street: int, action: str) -> tuple[float, float]:
         """(shrunk residual, rows) for one player on one street x action cell.
@@ -121,7 +129,7 @@ def build_dataset(hands: list[Hand], progress=None) -> list[Row]:
         known = {s.seat: s for s in hand.seats if len(s.hole_cards) == 2}
         if not known:
             continue
-        strengths = strength_by_street(hand, known)
+        strengths = stored_strengths(hand, known)
         for decision in view.decisions():
             seat = known.get(decision.seat)
             if seat is None or decision.street is Street.PREFLOP:
@@ -177,15 +185,21 @@ def fit(rows: list[Row], random_state: int = 0, progress=None) -> StrengthModel:
             "keep importing sessions")
 
     from sklearn.base import clone
-    from sklearn.ensemble import GradientBoostingRegressor
+    from sklearn.ensemble import HistGradientBoostingRegressor
     from sklearn.model_selection import KFold
 
     x = np.array([r.features for r in rows], dtype=float)
     y = np.array([r.strength for r in rows], dtype=float)
 
-    model = GradientBoostingRegressor(
-        n_estimators=180, max_depth=3, learning_rate=0.06,
-        subsample=0.85, random_state=random_state)
+    # Histogram-binned boosting at the same depth, rounds and rate. On a real
+    # 104k-row pool: out-of-fold MAE 0.2058 either way, 0.997 correlation, the
+    # per-player residual reads within 0.0093 -- and 1.9s for five folds
+    # against 34.1s, which in the browser was the difference between a
+    # coffee and a lunch. Early stopping off so every fit uses every row and
+    # the same row set always fits the same model.
+    model = HistGradientBoostingRegressor(
+        max_iter=180, max_depth=3, learning_rate=0.06,
+        early_stopping=False, random_state=random_state)
     # Residuals come from out-of-fold predictions: a player's read must not be
     # measured against a model that already memorised their hands.
     # Same splitter ``cross_val_predict(cv=n)`` uses for a regressor --
@@ -285,6 +299,15 @@ def _board_universe(board: tuple[str, ...]):
             del _BOARD_CACHE[old_key]
     _BOARD_CACHE[board] = result
     return result
+
+
+def stored_strengths(hand: Hand, known: dict) -> dict[tuple[int, Street], float]:
+    """:func:`strength_by_street` for every known holding, from the store's
+    per-hand record when it has one -- the reading phase of a Hero build was
+    this, recomputed for every hand on every build."""
+    if hand.derived is not None and "strength" in hand.derived:
+        return hand.derived["strength"]
+    return strength_by_street(hand, known)
 
 
 def strength_by_street(hand: Hand, known: dict) -> dict[tuple[int, Street], float]:

@@ -133,3 +133,23 @@ def test_replay_is_serialisable(hands):
     for hand in hands[:5]:
         json.dumps(replay(hand))
 
+
+
+def test_skipping_the_card_scoring_changes_no_other_ratio(hands):
+    """Evidence skips equity and showdown scoring unless the stat needs it.
+    Safe only while every ratio that depends on them is listed."""
+    from villain.features import EVALUATED_RATIOS, record_hand
+
+    full, lean = {}, {}
+    for hand in hands:
+        record_hand(hand, full)
+        record_hand(hand, lean, score_cards=False)
+    for player, by_regime in full.items():
+        for regime, book in by_regime.items():
+            other = lean[player][regime]
+            for stat, ratio in book.ratios.items():
+                base = stat.split(":")[-1] if stat.startswith("vs:") else stat
+                if base in EVALUATED_RATIOS or stat in EVALUATED_RATIOS:
+                    continue
+                assert (other.ratios[stat].hits, other.ratios[stat].opps) \
+                    == (ratio.hits, ratio.opps), stat

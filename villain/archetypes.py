@@ -323,6 +323,16 @@ def prototype_scale(arch: Archetype, profile: Profile | None) -> float:
     prototype's traits, never from an individual."""
     if not PROTOTYPE_RESCALE or profile is None or not profile.priors:
         return 1.0
+    # Asked once per feature per prototype -- 38,000 times for one roster --
+    # for an answer that depends only on the prototype and the population the
+    # profile was built against, neither of which changes after it is built.
+    memo = profile.__dict__.setdefault("_prototype_scales", {})
+    if arch.name not in memo:
+        memo[arch.name] = _prototype_scale(arch, profile)
+    return memo[arch.name]
+
+
+def _prototype_scale(arch: Archetype, profile: Profile) -> float:
     scale = 1.0
     for feature, deviation in arch.traits.items():
         band = profile.priors.get(f"range:{feature}")

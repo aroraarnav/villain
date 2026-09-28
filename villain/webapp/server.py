@@ -29,7 +29,7 @@ from ..stats import VS_HERO
 from .assets import page, static
 from .heroview import _cached_hero_id, forget_hero, forget_hero_failure, hero_begin, hero_payload, hero_peek, hero_status
 from .jsonutil import encode as json_encode
-from .payloads import MIN_ROSTER_HANDS, profile_payload, roster_payload, tab_availability
+from .payloads import MIN_ROSTER_HANDS, profile_payload, roster_payload, tab_availability, table_summary
 from .sessions import SESSIONS, SIM_GAMES, _reap_sessions, apply_answers, commit_session, parse_upload, question_payload, session_brief, session_payload
 
 #: Hostnames the UI may be reached on. Anything else is a rebinding attempt.
@@ -237,7 +237,7 @@ class Handler(BaseHTTPRequestHandler):
             profiles = [profile_payload(unified, player_id)] if unified else []
             # The per-table breakdown stays available for anyone who
             # wants to check that the pooling is not hiding something.
-            by_table = [profile_payload(p)
+            by_table = [table_summary(p)
                         for p in store.profiles(player_id,
                                                 min_hands=MIN_ROSTER_HANDS)]
             aliases = [dict(r) for r in store.conn.execute(

@@ -446,3 +446,39 @@ def test_a_narrowed_rebuild_keeps_the_databases_hero(tmp_path, hands):
         finally:
             hero_module.hero_of = real
         assert not seen, "a narrowed rebuild re-resolved the hero from its own hands"
+
+
+def _books(store):
+    return sorted(tuple(r) for r in store.conn.execute("SELECT * FROM ratios")), \
+        sorted(tuple(r) for r in store.conn.execute("SELECT * FROM meters"))
+
+
+def test_card_scoring_is_stored_once_and_changes_no_number(tmp_path, hands, monkeypatch):
+    """Scoring cards was most of every rebuild and depends only on the hand.
+    Stored, a second rebuild scores nothing -- and reads the same books."""
+    from villain import features
+
+    with Store(tmp_path / "v.db") as store:
+        store.add_hands(hands)
+        first = _books(store)
+        assert store.conn.execute("SELECT COUNT(*) c FROM hand_derived").fetchone()["c"] \
+            == len(hands)
+        scored = []
+        real = features.derive_many
+        monkeypatch.setattr(features, "derive_many",
+                            lambda hs, **kw: scored.append(len(hs)) or real(hs, **kw))
+        store.rebuild()
+        assert not scored
+        assert _books(store) == first
+
+
+def test_stored_scoring_from_other_definitions_is_redone(tmp_path, hands):
+    with Store(tmp_path / "v.db") as store:
+        store.add_hands(hands)
+        good = _books(store)
+        store.conn.execute("UPDATE hand_derived SET version = 'stale', payload = "
+                           "'{\"allin\": [], \"sd\": [], \"strength\": []}'")
+        store.rebuild()
+        assert _books(store) == good
+        assert store.conn.execute(
+            "SELECT COUNT(*) c FROM hand_derived WHERE version = 'stale'").fetchone()["c"] == 0

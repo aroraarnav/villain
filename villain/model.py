@@ -212,6 +212,9 @@ class Hand:
     #: hands imported after it -- a straddle fix once left 3,317 stored hands
     #: (4.6%) decoded by the parser that had been wrong about them.
     source: dict | None = field(default=None, repr=False, compare=False)
+    #: Card-scored facts the store already worked out for this hand, keyed by
+    #: part; see :func:`villain.features.derived`. Never serialized.
+    derived: dict | None = field(default=None, repr=False, compare=False)
 
     # -- lookups ---------------------------------------------------------
     def seat(self, seat: int) -> Seat:

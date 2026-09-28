@@ -2,11 +2,13 @@
 
 Hero analysis walks every hand the exporting player appears in and fits a
 strength model over it -- seconds, not milliseconds. The result is cached
-against the hand count that produced it and reused until the database grows.
+against a fingerprint of everything that produced it (see :func:`_hand_count`)
+and reused until one of those changes.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 from pathlib import Path
@@ -14,8 +16,8 @@ from pathlib import Path
 from ..db import Store
 from .payloads import profile_payload
 
-_HERO_MODEL_CACHE: dict[str, tuple[int, object]] = {}
-_HERO_PAYLOAD_CACHE: dict[tuple[str, int | None], tuple[int, dict | None]] = {}
+_HERO_MODEL_CACHE: dict[str, tuple[str, object]] = {}
+_HERO_PAYLOAD_CACHE: dict[tuple[str, int | None], tuple[str, dict | None]] = {}
 #: The server handles requests on their own thread, so two Hero tab loads
 #: landing close together used to each start their own fit -- the actual
 #: incident this guards against: two ~40s fits running at once pegged every
@@ -25,14 +27,30 @@ _HERO_PAYLOAD_CACHE: dict[tuple[str, int | None], tuple[int, dict | None]] = {}
 _HERO_LOCK = threading.Lock()
 
 
-def _hand_count(store: Store) -> int:
-    return store.conn.execute("SELECT COUNT(*) c FROM hands").fetchone()["c"]
+def _hand_count(store: Store) -> str:
+    """What every hero cache is keyed on: the hands, and everything else the
+    page is computed from.
+
+    Once just the hand count, which is exactly what most changes leave alone:
+    a split or a merge moves hands between players, a definitions bump or a
+    prior refit rereads the same hands, a rename changes a label. Each of those
+    kept serving the old page -- from disk, across restarts. A few small
+    aggregate queries, so it is checked on every request rather than trusted
+    to an invalidation some route forgets to make."""
+    row = store.conn.execute(
+        "SELECT (SELECT COUNT(*) FROM hands),"
+        " (SELECT group_concat(site || '/' || account || '=' || player_id, '|')"
+        "    FROM (SELECT site, account, player_id FROM aliases ORDER BY site, account)),"
+        " (SELECT group_concat(id || '=' || display_name, '|')"
+        "    FROM (SELECT id, display_name FROM players ORDER BY id)),"
+        " (SELECT COUNT(*) || ':' || TOTAL(mean) || ':' || TOTAL(strength) FROM fitted_priors),"
+        " (SELECT value FROM meta WHERE key = 'definitions_version')").fetchone()
+    return hashlib.sha1(repr(tuple(row)).encode()).hexdigest()
 
 
-#: find_hero() itself is cheap (no model fit, just a scan of every seat), but
-#: the roster loads on every visit to the Database tab, so it is cached the
-#: same way -- by hand count -- rather than re-scanning every hand each time.
-_HERO_ID_CACHE: dict[str, tuple[int, int | None]] = {}
+#: find_hero() itself is cheap (a count over the seat index), but the shell
+#: asks on every page load, so it is cached the same way as the page.
+_HERO_ID_CACHE: dict[str, tuple[str, int | None]] = {}
 
 
 def _cached_hero_id(store: Store, progress=None, hands=None) -> int | None:
@@ -64,7 +82,7 @@ def _hero_model(store: Store, progress=None, hands=None):
 #: Bump whenever _build_hero_payload's returned shape changes, so an old
 #: cache file from a previous version of this module is a miss rather than a
 #: served-stale response with fields the current frontend does not expect.
-_HERO_CACHE_VERSION = 9
+_HERO_CACHE_VERSION = 10
 
 
 def forget_hero(store: Store) -> None:
@@ -97,7 +115,7 @@ def _hero_disk_cache_path(store: Store) -> Path:
 
 
 def _hero_disk_cache_load(store: Store, hero_id: int | None,
-                          hand_count: int) -> tuple[bool, dict | None]:
+                          hand_count: str) -> tuple[bool, dict | None]:
     """(hit, payload). ``hit`` is separate from ``payload`` because a cached
     "no hero found" answer is a legitimate ``None`` that should not trigger
     a recompute -- only a genuine cache miss should."""
@@ -131,7 +149,7 @@ def consume_hero_dirty() -> bool:
     return dirty
 
 
-def _hero_disk_cache_save(store: Store, hero_id: int | None, hand_count: int,
+def _hero_disk_cache_save(store: Store, hero_id: int | None, hand_count: str,
                           payload: dict | None) -> None:
     global _HERO_DIRTY
     path = _hero_disk_cache_path(store)

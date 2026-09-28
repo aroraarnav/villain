@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 
-from .priors import CONTINUOUS, NEIGHBORS, REGIME_LABELS, SHORT, Estimate, logit, prior_for, regime, shrink, sigmoid
+from .priors import CONTINUOUS, NEIGHBORS, REGIME_LABELS, SHORT, Estimate, logit, population_mean, prior_for, regime, shrink, sigmoid
 from .stats import VS_HERO, Meter, Ratio, StatBook
 
 # The features that define a player, in the order clustering expects.
@@ -110,7 +110,6 @@ class Profile:
 
     def population(self, stat: str) -> float:
         """The population frequency this profile is measured against."""
-        from .priors import population_mean
         fitted = self.priors.get(stat)
         return fitted[0] if fitted else population_mean(stat, self.regime)
     #: hands played at each table size, busiest first. Empty for a profile

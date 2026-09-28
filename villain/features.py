@@ -7,6 +7,7 @@ timing, and showdown truth for the hand-strength model.
 
 from __future__ import annotations
 
+import json
 import math
 import os
 from collections.abc import Iterable
@@ -18,12 +19,12 @@ try:
 except ImportError:              # no process model (e.g. Pyodide/WASM)
     ProcessPoolExecutor = None
 
-from .cards import card_ids, evaluate
+from .cards import card_ids
 from .equity import equities
 from .hero import hero_of
 from .model import Act, Hand, Street, postflop_rank
 from .priors import regime as regime_of
-from .reads import texture
+from .reads import _board_universe, strength_by_street, texture
 from .stats import VS_HERO, HandView, StatBook, size_bucket, stack_bucket
 
 #: player id -> table-size regime -> book
@@ -138,9 +139,15 @@ def record_hands(hands: Iterable[Hand], books: Books | None = None,
     return books
 
 
+#: The only counters that need a hand's cards scored. Equity and showdown
+#: percentiles are nearly all of the cost of reading a hand, and everything
+#: else they feed is a meter, which evidence never asks about.
+EVALUATED_RATIOS = frozenset({"river_bet_bluff", "sd_light_call"})
+
+
 def record_hand(hand: Hand, books: Books,
                 pace_locks: PaceLocks | None = None,
-                hero: str | None = None) -> None:
+                hero: str | None = None, score_cards: bool = True) -> None:
     """Fold one hand into every participating player's book for this regime.
 
     ``pace_locks`` freezes snap/tank cutoffs (from :func:`record_hands`).
@@ -173,7 +180,7 @@ def record_hand(hand: Hand, books: Books,
         _preflop(hand, view, books, reg, pace_locks=pace_locks, hero_seat=hero_seat)
     pace_events = _postflop(hand, view, books, reg, pace_locks=pace_locks,
                             hero_seat=hero_seat)
-    _results(hand, view, books, reg, pace_events)
+    _results(hand, view, books, reg, pace_events, score_cards=score_cards)
 
 
 def _ip_against(hand: Hand, seat: int, other: int | None) -> str:
@@ -672,8 +679,8 @@ def _timing(book: StatBook, d, street_label: str,
 # -- results and showdown truth ------------------------------------------------
 
 def _results(hand: Hand, view: HandView, books: Books, reg: str,
-             pace_events: dict[tuple[int, str], tuple[str, str]] | None = None
-             ) -> None:
+             pace_events: dict[tuple[int, str], tuple[str, str]] | None = None,
+             score_cards: bool = True) -> None:
     bb = hand.big_blind
     showdown = view.showdown()
     complete_board = len(hand.board) >= 5
@@ -704,16 +711,15 @@ def _results(hand: Hand, view: HandView, books: Books, reg: str,
             book.count(f"after:{pace}:{street}:{action}:won", seat.net > 0)
             book.count(f"after:{pace}:{street}:{action}:wtsd", seat.seat in showdown)
 
-    _all_in_ev(hand, view, books, reg, showdown)
+    if not score_cards:
+        return
+    _all_in_ev(hand, books, reg, derived(hand, "allin"))
 
     if not complete_board:
         return
-
-    known = {s.seat: s.hole_cards for s in hand.seats
-             if len(s.hole_cards) == 2 and s.seat in showdown}
-    if not known:
+    strengths = derived(hand, "sd")
+    if not strengths:
         return
-    strengths = _showdown_strengths(hand.board, known)
     aggressors = {view.aggressor[st] for st in Street if view.aggressor[st] is not None}
 
     for seat, pct in strengths.items():
@@ -730,9 +736,8 @@ def _results(hand: Hand, view: HandView, books: Books, reg: str,
                 book.measure(f"after:{pace}:{street}:{action}:sd_strength", pct)
 
 
-def _all_in_ev(hand: Hand, view: HandView, books: Books, reg: str,
-               showdown: set[int]) -> None:
-    """Score all-in pots by equity as well as by outcome.
+def _allin_expected(hand: Hand, showdown: set[int]) -> dict[int, tuple[float, float]]:
+    """``seat -> (chips expected, equity)`` for a pot that went in face up.
 
     Over a few hundred hands a chip graph is mostly variance -- getting it in
     at 80% and losing costs what punting costs -- so a pot that went in face up
@@ -743,14 +748,17 @@ def _all_in_ev(hand: Hand, view: HandView, books: Books, reg: str,
     layer only one of them reached is theirs outright. Applying one equity to
     everything a seat could win charged a big stack its all-in odds on a side
     pot it won uncontested: kings that called a short stack's aces and then
-    took a 600 side pot scored -24.5bb for a +25.2bb decision."""
+    took a 600 side pot scored -24.5bb for a +25.2bb decision.
+
+    A fact about the hand, not about who sat in it, so it is stored once per
+    hand (see :func:`derive`) rather than recomputed by every rebuild."""
     all_in_actions = [a for a in hand.actions if a.all_in]
     if not all_in_actions or len(showdown) < 2:
-        return
+        return {}
     known = {s.seat: list(s.hole_cards) for s in hand.seats
              if s.seat in showdown and len(s.hole_cards) == 2}
     if len(known) != len(showdown):
-        return
+        return {}
 
     street = max(a.street for a in all_in_actions)
     board = hand.board_at(street)
@@ -772,41 +780,128 @@ def _all_in_ev(hand: Hand, view: HandView, books: Books, reg: str,
                 try:
                     split = equities([known[seat] for seat in contenders], board)
                 except ValueError:
-                    return
+                    return {}
                 shares_of[contenders] = dict(zip(contenders, split))
         for seat, share in shares_of[contenders].items():
             expected[seat] += share * layer
-    if sum(1 for group in shares_of if len(group) > 1) > 1:
-        hand.flags.add("side_pot")      # contested by different groups
-    for seat in known:
+    whole = shares_of.get(tuple(known), {})
+    return {seat: (expected[seat], whole.get(seat, 1.0 / len(known))) for seat in known}
+
+
+def _all_in_ev(hand: Hand, books: Books, reg: str,
+               expected: dict[int, tuple[float, float]]) -> None:
+    for seat, (chips, share) in expected.items():
         book = book_for(books, hand.seat(seat).player_id, reg)
         player = hand.seat(seat)
-        book.measure("ev_net_bb", (expected[seat] - player.invested) / hand.big_blind)
+        book.measure("ev_net_bb", (chips - player.invested) / hand.big_blind)
         # The realized result of the same pots, so a rating can swap one for
         # the other instead of counting the all-in twice.
         book.measure("allin_realised_bb", player.net / hand.big_blind)
-        book.measure("allin_equity", shares_of[tuple(known)][seat]
-                     if tuple(known) in shares_of else 1.0 / len(known))
+        book.measure("allin_equity", share)
+
+
+# -- what a hand's cards say, independent of who held them -------------------
+#: Bump when anything :func:`derive` computes changes; stored rows from an
+#: older version are recomputed on the next rebuild.
+DERIVED_VERSION = "1"
+
+
+def derived(hand: Hand, part: str):
+    """One card-scored fact about a hand, from the store when it has it.
+
+    ``allin`` (seat -> chips expected, equity), ``sd`` (seat -> showdown
+    percentile), ``strength`` ((seat, street) -> percentile on that street).
+    Scoring cards was about 70% of reading a hand, and none of it depends on
+    identity, so every rebuild after a merge or an import redid work whose
+    answer could not have changed. Computed here, and kept on the hand, only
+    when nothing stored it."""
+    have = hand.derived if hand.derived is not None else {}
+    if part not in have:
+        have[part] = _DERIVERS[part](hand)
+        hand.derived = have
+    return have[part]
+
+
+def _derive_sd(hand: Hand) -> dict[int, float]:
+    if len(hand.board) < 5:
+        return {}
+    showdown = HandView(hand).showdown()
+    known = {s.seat: s.hole_cards for s in hand.seats
+             if len(s.hole_cards) == 2 and s.seat in showdown}
+    return _showdown_strengths(hand.board, known) if known else {}
+
+
+def _derive_strength(hand: Hand) -> dict:
+    known = {s.seat: s for s in hand.seats if len(s.hole_cards) == 2}
+    return dict(strength_by_street(hand, known)) if hand.board and known else {}
+
+
+_DERIVERS = {
+    "allin": lambda hand: _allin_expected(hand, HandView(hand).showdown()),
+    "sd": _derive_sd,
+    "strength": _derive_strength,
+}
+
+
+def derive(hand: Hand) -> str:
+    """Every derived part, as the JSON the store keeps."""
+    return json.dumps({
+        "allin": [[seat, chips, share] for seat, (chips, share) in derived(hand, "allin").items()],
+        "sd": [[seat, pct] for seat, pct in derived(hand, "sd").items()],
+        "strength": [[seat, int(street), pct]
+                     for (seat, street), pct in derived(hand, "strength").items()],
+    })
+
+
+def load_derived(text: str) -> dict:
+    data = json.loads(text)
+    return {
+        "allin": {seat: (chips, share) for seat, chips, share in data["allin"]},
+        "sd": dict(data["sd"]),
+        "strength": {(seat, Street(street)): pct for seat, street, pct in data["strength"]},
+    }
+
+
+def _derive_chunk(hands: list[Hand]) -> list[str]:
+    return [derive(hand) for hand in hands]
+
+
+def derive_many(hands: list[Hand], workers: int | None = None, progress=None) -> list[str]:
+    """:func:`derive` for a batch, across processes when it is big enough to pay."""
+    n_workers = _default_workers() if workers is None else workers
+    if (ProcessPoolExecutor is not None and n_workers > 1
+            and len(hands) >= PARALLEL_MIN_HANDS and _can_spawn()):
+        size = math.ceil(len(hands) / n_workers)
+        chunks = [hands[i:i + size] for i in range(0, len(hands), size)]
+        try:
+            out: list[str] = []
+            with ProcessPoolExecutor(max_workers=n_workers) as pool:
+                for part in pool.map(_derive_chunk, chunks):
+                    out.extend(part)
+                    if progress is not None:
+                        progress(len(out), len(hands), "scoring cards")
+            return out
+        except Exception:
+            pass                  # same fallback as record_hands
+    out = []
+    for done, hand in enumerate(hands, 1):
+        out.append(derive(hand))
+        if progress is not None and done % 200 == 0:
+            progress(done, len(hands), "scoring cards")
+    return out
 
 
 def _showdown_strengths(board: list[str], known: dict[int, tuple[str, ...]]) -> dict[int, float]:
     """Percentile of each shown hand among every holding the board allows.
 
     "Two pair" says nothing without the board -- two pair on a paired
-    four-flush board is a bluff-catcher."""
-    board5 = board[:5]
-    board_ids = card_ids(board5).astype(np.int64)
-    dead = set(board_ids.tolist())
-    for cards in known.values():
-        dead |= set(card_ids(cards).astype(np.int64).tolist())
-
-    live = [c for c in range(52) if c not in set(board_ids.tolist())]
-    combos = np.array([(a, b) for i, a in enumerate(live) for b in live[i + 1:]], dtype=np.int64)
-    seven = np.concatenate([combos, np.repeat(board_ids[None, :], len(combos), axis=0)], axis=1)
-    universe = np.sort(evaluate(seven))
-
+    four-flush board is a bluff-catcher. The universe is the one the reads
+    already build and cache per board; this rebuilt it, slower, for every
+    showdown."""
+    universe, lookup = _board_universe(tuple(board[:5]))
     out: dict[int, float] = {}
     for seat, cards in known.items():
-        score = int(evaluate(np.concatenate([card_ids(cards).astype(np.int64), board_ids])[None, :])[0])
+        a, b = sorted(int(c) for c in card_ids(cards))
+        score = lookup[a * 52 + b]
         out[seat] = float(np.searchsorted(universe, score, side="left") / len(universe))
     return out

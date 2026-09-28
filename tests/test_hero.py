@@ -107,6 +107,9 @@ class _StubModel:
     def predict(self, features):
         return 0.5
 
+    def predict_many(self, rows):
+        return [0.5] * len(rows)
+
 
 def test_fold_grades_produces_well_formed_grades(stored):
     hero_id = find_hero(stored, min_hands=10)
@@ -504,3 +507,20 @@ def test_the_margin_holds_against_a_frequent_shower(hands):
                 shown += 1
         stripped.append(hand)
     assert hero_of(stripped) == EXPORTER
+
+
+def test_the_seat_index_finds_the_same_hero_as_the_hands(tmp_path, hands):
+    """Found from the seat index so a page load decodes nothing -- which is
+    only safe while it agrees with a count over the hands themselves,
+    including for rows stored before the index recorded cards."""
+    from villain.db import Store
+    from villain.hero import find_hero
+
+    with Store(tmp_path / "v.db") as store:
+        store.add_hands(hands)
+        store.conn.execute("UPDATE hand_seats SET cards = NULL")
+        from_index = find_hero(store, min_hands=5)
+        from_hands = find_hero(store, min_hands=5, hands=store.player_hands())
+        assert from_index == from_hands
+        assert store.conn.execute(
+            "SELECT COUNT(*) c FROM hand_seats WHERE cards IS NULL").fetchone()["c"] == 0

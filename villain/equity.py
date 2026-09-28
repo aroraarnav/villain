@@ -63,7 +63,23 @@ def _runouts(deck: np.ndarray, need: int, samples: int,
     if total <= MAX_EXACT:
         from itertools import combinations
         return np.array(list(combinations(deck.tolist(), need)), dtype=np.int64)
-    rng = rng or np.random.default_rng(0)
+    if rng is None:
+        # The default stream is seeded, so the picks depend on nothing but the
+        # shape: drawn once per shape instead of 20,000 x 45 keys per call.
+        # A third of an import's equity time went to redrawing the same ones.
+        key = (len(deck), need, samples)
+        picks = _PICKS.get(key)
+        if picks is None:
+            picks = _PICKS[key] = _draw(np.random.default_rng(0), len(deck), need, samples)
+        return deck[picks]
+    return deck[_draw(rng, len(deck), need, samples)]
+
+
+#: Index picks for the seeded default stream, by (deck size, cards, samples).
+_PICKS: dict[tuple[int, int, int], np.ndarray] = {}
+
+
+def _draw(rng: np.random.Generator, size: int, need: int, samples: int) -> np.ndarray:
     # Sample without replacement per row by drawing a random key per card and
     # taking the lowest `need` of them.
     #
@@ -71,6 +87,5 @@ def _runouts(deck: np.ndarray, need: int, samples: int,
     # only which ones they are, and a full sort of every row was the single
     # most expensive line in an import -- 13.5s of a 71,000-hand rebuild, to
     # order 45 keys per row and then throw all but the first two away.
-    keys = rng.random((samples, len(deck)))
-    picks = np.argpartition(keys, need - 1, axis=1)[:, :need]
-    return deck[picks]
+    keys = rng.random((samples, size))
+    return np.argpartition(keys, need - 1, axis=1)[:, :need]
