@@ -35,7 +35,7 @@ before any change leaves this repo — read it before opening a PR, not after.
 2. **No real player names anywhere in what you're about to commit** — code,
    comments, docstrings, tests, commit messages, PR title and body. This repo
    analyzes real people from a real home game; nothing that identifies one of
-   them leaves the local database. See "Player anonymity" in
+   them leaves the local database. See rule 2 of "The rules" in
    `CONTRIBUTING.md`. Before committing, skim your own diff for capitalized
    tokens that look like a screen name rather than a variable — if one came
    from a real session or a real read you were investigating, replace it with
