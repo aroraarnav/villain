@@ -148,7 +148,13 @@ def roster_row(profile) -> dict:
     rule that an unmeasured player carries no skill number -- which is what
     keeps the default sort putting them last instead of in the middle at 50 --
     existed twice, and the two tabs would have sorted differently the moment
-    one of them changed."""
+    one of them changed.
+
+    The number is ``score``, the one the player page's ring shows and the
+    tier is computed from. The roster used to show ``base``, the mix before
+    the confidence pull, so a player's row and their own page disagreed by
+    six points on average and up to twenty, with a tier that belonged to the
+    other number."""
     top = profile.tags[0] if profile.tags else None
     return {
         "name": profile.name,
@@ -159,7 +165,7 @@ def roster_row(profile) -> dict:
         "sample_quality": profile.sample_quality,
         "archetype": profile.archetype,
         "confidence": profile.archetype_confidence,
-        "skill": None if not profile.skill.measured else profile.skill.base,
+        "skill": None if not profile.skill.measured else profile.skill.score,
         "skill_tier": profile.skill.tier,
         "skill_confidence": profile.skill.confidence,
         "skill_measured": profile.skill.measured,

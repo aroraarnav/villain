@@ -1503,3 +1503,19 @@ def test_a_rename_refreshes_the_roster(seeded):
     seeded.conn.commit()
     after = {r["name"] for r in roster_payload(seeded)}
     assert "Ghost" in after and after != before
+
+
+def test_the_roster_shows_the_skill_the_player_page_shows(seeded):
+    """One rating, one number. The roster showed the unshrunk ``base`` while
+    the player page showed ``score``, so the same player read differently on
+    the two, next to a tier that matched neither consistently."""
+    from villain.analyze import as_dict, enrich
+    from villain.webapp.payloads import roster_row
+    player = max(seeded.players(), key=lambda r: r["hands"] or 0)
+    profile = enrich(seeded.profile(int(player["id"])))
+    # The seeded sample is too small to be measured; force the case the bug
+    # lived in, where the pulled and unpulled numbers differ.
+    profile.skill.measured = True
+    profile.skill.base = profile.skill.score + 12.0
+    row = roster_row(profile)
+    assert row["skill"] == as_dict(profile)["skill"]["score"]
