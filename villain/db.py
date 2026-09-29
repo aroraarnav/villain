@@ -1090,7 +1090,7 @@ class Store:
                         "archetype": snap.archetype,
                         "confidence": round(snap.archetype_confidence, 3),
                         "skill": (None if not snap.skill.measured
-                                  else snap.skill.base),
+                                  else snap.skill.score),
                         "skill_tier": snap.skill.tier,
                         "sample_quality": snap.sample_quality,
                         "regime_label": snap.regime_label})
