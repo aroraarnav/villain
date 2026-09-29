@@ -707,21 +707,88 @@
     letter-spacing: -0.04em; color: #fff; line-height: 1;
     font-variant-numeric: tabular-nums;
   }
-  .pick-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-               gap: var(--sp-2); margin-bottom: var(--sp-4); }
+  /* Simulate's setup: the table settings and Sit down in one bar, pinned to the
+     top of the page while the roster scrolls under it. Below the list, they
+     were a scroll away from every choice they depend on. */
+  .setup-bar {
+    position: sticky; top: 0; z-index: 5;
+    display: flex; align-items: center; gap: var(--sp-3) var(--sp-5); flex-wrap: wrap;
+    margin: 0 calc(-1 * var(--sp-5)) var(--sp-4);
+    padding: var(--sp-3) var(--sp-5);
+    background: var(--panel); border-block: 1px solid var(--line);
+  }
+  .setup-field { display: inline-flex; align-items: center; gap: var(--sp-2); }
+  .setup-field .k, .setup-seats {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--muted); font-weight: 600;
+  }
+  .setup-field input {
+    background: transparent; border: 1px solid var(--edge); border-radius: 8px;
+    color: var(--ink); padding: 6px 8px; width: 4.6em; font: inherit;
+    font-family: var(--mono); font-size: 15px; font-variant-numeric: tabular-nums;
+  }
+  .setup-field input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .setup-hint { font-family: var(--mono); font-size: 12.5px; color: var(--muted);
+                min-width: 4.5em; }
+  .setup-seats { margin-left: auto; }
+  .setup-seats b { font-family: var(--mono); font-size: 15px; color: var(--ink); }
+  .setup-bar #sit-go { padding-inline: 1.4em; }
+  .pick-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+                margin: 0 0 var(--sp-3); }
+  .pick-tools .label-t { margin: 0 var(--sp-1) 0 0; }
+  .pick-tools .sess-regime-tab { font-size: 12px; }
+  .pick-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+               gap: var(--sp-3); }
   .pick-list > .loading { grid-column: 1 / -1; }
   /* A button, so it does not inherit the page face on its own -- without
      font: inherit the names here rendered in the platform UI font while the
      same names on the Database roster were Space Grotesk. */
-  .pick { text-align: left; border: 1px solid var(--line); border-radius: 10px;
-          padding: 10px 12px; background: var(--panel); cursor: pointer;
-          display: flex; flex-direction: column; gap: 2px;
-          font: inherit; color: var(--ink); }
-  .pick .name { font-size: 14px; }
+  .pick {
+    position: relative; text-align: left; border: 1px solid var(--line);
+    border-radius: 12px; padding: var(--sp-4); background: var(--panel); cursor: pointer;
+    display: flex; flex-direction: column; gap: var(--sp-4);
+    font: inherit; color: var(--ink);
+    transition: border-color .12s, background .12s, opacity .12s;
+  }
+  .pick:hover { border-color: var(--edge); }
+  .pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .pick.on { border-color: var(--red); background: var(--accent-soft); }
-  .sit-controls { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
-  .sit-controls input { background: transparent; border: 1px solid var(--line);
-    border-radius: 6px; color: var(--ink); padding: 5px 8px; width: 66px; font: inherit; }
+  /* All five seats taken: the rest stay readable but stop looking clickable. */
+  .pick.full { opacity: .5; cursor: default; }
+  .pick.full:hover { border-color: var(--line); }
+  .pick-who { display: flex; flex-direction: column; gap: 6px; min-width: 0;
+              padding-right: 28px; }
+  .pick-who .name { font-size: 16px; overflow: hidden; text-overflow: ellipsis;
+                    white-space: nowrap; }
+  .pick-meta { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
+               font-size: 12.5px; }
+  .pick-check {
+    position: absolute; top: var(--sp-4); right: var(--sp-4);
+    width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--edge);
+  }
+  .pick.on .pick-check {
+    background: var(--red); border-color: var(--red);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18'%3E%3Cpath d='M5 9.2l2.6 2.6L13 6.4' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  }
+  .pick-figs { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); }
+  .pick-fig {
+    display: grid; grid-template-columns: auto 1fr; align-items: baseline;
+    column-gap: var(--sp-2); row-gap: 4px;
+  }
+  .pick-fig .k {
+    grid-column: 1 / -1; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.07em; color: var(--muted); font-weight: 600;
+  }
+  .pick-fig .v { font-size: 24px; font-weight: 700; line-height: 1; letter-spacing: -0.04em; }
+  .pick-sub { font-size: 12px; color: var(--muted); overflow: hidden;
+              text-overflow: ellipsis; white-space: nowrap; }
+  .pick-bar { grid-column: 1 / -1; width: 100%; height: 10px; }
+  @media (max-width: 620px) {
+    .setup-bar { gap: var(--sp-2) var(--sp-4); padding-block: var(--sp-2); }
+    .setup-seats { margin-left: 0; }
+    .setup-bar #sit-go { flex: 1 1 100%; }
+    .pick-list { grid-template-columns: 1fr; }
+  }
   /* Phone: keep the sim inside the viewport. Unlocking overflow here is how
      the seats, the 188px bubbles, the action bar and the log became a page
      you had to scroll to find your own cards. */

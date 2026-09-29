@@ -7,41 +7,78 @@ async function viewPlay() {
     renderTable(view, state.game);
     return;
   }
-  view.innerHTML = `<div class="panel"><h2>Simulate</h2>
-    <div class="small muted" style="margin:-6px 0 16px">Sit at a table and play real hands
-      against players from your database. Each villain acts from their own measured profile —
-      loose ones call wide, nits fold, aggressive ones barrel — so it plays like practice
-      against the people you actually face. Pick up to five and sit down.</div>
-    <div id="pick-list" class="pick-list"></div>
-    <div class="sit-controls">
-      <label class="small muted">stack <input id="sit-stack" type="number" value="200" min="20"></label>
-      <label class="small muted">blinds <input id="sit-sb" type="number" value="1" min="1">
-        / <input id="sit-bb" type="number" value="2" min="2"></label>
+  // The table settings and Sit down sat under the roster, so choosing who to
+  // play meant scrolling past every player to reach the button. They are one
+  // bar above the list now, pinned while the list scrolls under it.
+  view.innerHTML = `<div class="panel sim-setup"><h2>Simulate</h2>
+    <p class="panel-lead">Play real hands against players from your database. Each
+      villain acts from their own measured profile, so loose ones call wide, nits fold,
+      and aggressive ones barrel. Pick up to ${SIM_SEATS}.</p>
+    <div class="setup-bar">
+      <label class="setup-field"><span class="k">stack</span>
+        <input id="sit-stack" type="number" value="200" min="20" inputmode="numeric">
+        <span class="setup-hint" id="sit-depth"></span></label>
+      <label class="setup-field"><span class="k">blinds</span>
+        <input id="sit-sb" type="number" value="1" min="1" inputmode="numeric"
+          aria-label="small blind">
+        <span class="muted">/</span>
+        <input id="sit-bb" type="number" value="2" min="2" inputmode="numeric"
+          aria-label="big blind"></label>
+      <div class="setup-seats" id="sit-seats"></div>
       <button class="act primary" id="sit-go" disabled>Sit down</button>
-    </div></div>`;
-  $("#pick-list").appendChild(loadingBlock("Reading your database\u2026"));
+    </div>
+    <div class="pick-tools" id="pick-tools" hidden></div>
+    <div id="pick-list" class="pick-list"></div></div>`;
+  const depth = () => {
+    const stack = +$("#sit-stack").value, bb = +$("#sit-bb").value;
+    $("#sit-depth").textContent = stack > 0 && bb > 0 ? `${Math.round(stack / bb)} bb` : "";
+  };
+  $("#sit-stack").oninput = depth;
+  $("#sit-bb").oninput = depth;
+  depth();
+  const picked = new Set();
+  const paintSeats = () => {
+    $("#sit-seats").innerHTML = `<b>${picked.size}</b> / ${SIM_SEATS} picked`;
+    $("#sit-go").disabled = picked.size === 0;
+  };
+  paintSeats();
+  // Held from before the fetch, and dropped if the screen was redrawn while it
+  // was out: looked up again after the await, a stale reply filled the newer
+  // screen's list with cards wired to a different set of picks.
+  const list = $("#pick-list"), tools = $("#pick-tools");
+  list.appendChild(loadingBlock("Reading your database…"));
   const roster = await get("/api/roster");
-  if (!onScreen("play") || state.game || state.analysis) return;
+  if (!list.isConnected || !onScreen("play") || state.game || state.analysis) return;
   const players = (roster.players || [])
-    .filter(p => p.player_id != null && p.player_id !== roster.hero_id && p.hands >= 30)
-    .sort((a, b) => b.hands - a.hands);
-  const list = $("#pick-list");
-  if (!list) return;
+    .filter(p => p.player_id != null && p.player_id !== roster.hero_id && p.hands >= 30);
   list.innerHTML = "";
   if (!players.length) { list.innerHTML = `<div class="small muted">No players with
     enough hands yet — import some on the Database tab.</div>`; return; }
-  const picked = new Set();
-  for (const p of players) {
-    const b = h("button", "pick", `<span class="name">${esc(p.name)}</span>
-      <span class="small muted">${p.hands} hands · ${esc(p.archetype)} · GTO ${
-        p.gto != null ? Math.round(p.gto) : "—"}</span>`);
-    b.onclick = () => {
-      if (picked.has(p.player_id)) { picked.delete(p.player_id); b.classList.remove("on"); }
-      else if (picked.size < 5) { picked.add(p.player_id); b.classList.add("on"); }
-      $("#sit-go").disabled = picked.size === 0;
-    };
-    list.appendChild(b);
+  const cards = new Map(players.map(p => [p.player_id, pickCard(p, picked, paintSeats)]));
+  const draw = () => {
+    const key = PICK_SORTS[state.pickSort] ? state.pickSort : "hands";
+    // Unrated last whichever way it sorts: a missing figure is not a low one.
+    // Not -Infinity: two unrated players then compare as NaN, and a NaN
+    // comparator leaves the whole list in no order at all.
+    const rated = p => p[key] != null;
+    const order = [...players].sort((a, b) => (rated(b) - rated(a))
+      || (rated(a) && b[key] - a[key]) || b.hands - a.hands);
+    list.replaceChildren(...order.map(p => cards.get(p.player_id)));
+    for (const b of tools.querySelectorAll("button")) {
+      b.classList.toggle("on", b.dataset.sort === key);
+      b.setAttribute("aria-pressed", String(b.dataset.sort === key));
+    }
+  };
+  tools.hidden = false;
+  tools.innerHTML = `<span class="label-t">sort by</span>`;
+  for (const [key, label] of Object.entries(PICK_SORTS)) {
+    // The Sessions tab's one-of-several pill, not a toggle: exactly one is on.
+    const b = h("button", "sess-regime-tab");
+    b.type = "button"; b.textContent = label; b.dataset.sort = key;
+    b.onclick = () => { state.pickSort = key; draw(); };
+    tools.appendChild(b);
   }
+  draw();
   $("#sit-go").onclick = async () => {
     $("#sit-go").disabled = true;
     try {
@@ -49,6 +86,66 @@ async function viewPlay() {
         stack: +$("#sit-stack").value, sb: +$("#sit-sb").value, bb: +$("#sit-bb").value});
     } catch (err) { $("#sit-go").disabled = false; alert(err.message); }
   };
+}
+
+const SIM_SEATS = 5;
+const PICK_SORTS = {hands: "Hands", skill: "Skill", gto: "GTO"};
+
+/* One opponent. Skill and GTO get figures of their own rather than a slot in a
+   run-on caption: they are what you are choosing on, and "412 hands · LAG ·
+   GTO 61" was one grey line where comparing two players meant reading both
+   word by word. Both bars run 0-100, so the two figures on a card, and the
+   same figure across cards, are read against one scale. */
+function pickCard(p, picked, onChange) {
+  const b = h("button", "pick", `
+    <span class="pick-check" aria-hidden="true"></span>
+    <span class="pick-who">
+      <span class="name">${esc(p.name)}</span>
+      <span class="pick-meta"><span class="tag arch ${p.confidence >= 0.5 ? "on" : ""}">${
+        esc(p.archetype)}</span><span class="muted">${p.hands.toLocaleString()} hands</span></span>
+    </span>
+    <span class="pick-figs">
+      <span class="pick-fig" data-fig="skill"></span>
+      <span class="pick-fig" data-fig="gto"></span>
+    </span>`);
+  b.type = "button";
+  const fig = (slot, label, value, sub, tip) => {
+    const cell = $(`[data-fig="${slot}"]`, b);
+    const unrated = value == null;
+    cell.innerHTML = `<span class="k">${label}</span>
+      <span class="v fig${unrated ? " muted" : ""}">${unrated ? "—" : Math.round(value)}</span>
+      <span class="pick-sub">${esc(sub)}</span>`;
+    const track = bar(unrated ? 0 : value, 100, "var(--mark-2)", 100);
+    track.setAttribute("preserveAspectRatio", "none");
+    track.classList.add("pick-bar");
+    if (unrated) track.lastChild.remove();       // an empty track, not a 3px stub
+    cell.appendChild(track);
+    bindTip(cell, tip);
+  };
+  const skillUnrated = p.skill == null || p.skill_tier === "unknown";
+  fig("skill", "skill", skillUnrated ? null : p.skill,
+    skillUnrated ? "unknown" : p.skill_tier,
+    skillUnrated ? `<b>unknown</b><br>${termTip("unknown")}`
+      : `<b>${esc(p.skill_tier)}</b> ${p.skill.toFixed(0)}/100<br>
+        ${termTip("confidence")} ${fmtPct(p.skill_confidence)}`);
+  fig("gto", "GTO", p.gto, p.gto == null ? "no sample" : "vs baseline",
+    p.gto == null ? `<b>no sample</b><br>Too few comparable spots to rate against
+      the baseline yet.` : gtoExplainer());
+  b._paint = () => {
+    const on = picked.has(p.player_id);
+    b.classList.toggle("on", on);
+    b.classList.toggle("full", !on && picked.size >= SIM_SEATS);
+    b.setAttribute("aria-pressed", String(on));
+  };
+  b.onclick = () => {
+    if (picked.has(p.player_id)) picked.delete(p.player_id);
+    else if (picked.size < SIM_SEATS) picked.add(p.player_id);
+    // Every card, not just this one: filling the last seat dims the rest.
+    for (const other of b.parentNode.children) if (other._paint) other._paint();
+    onChange();
+  };
+  b._paint();
+  return b;
 }
 
 /* The table you just left is kept so the review can offer it again: the point
