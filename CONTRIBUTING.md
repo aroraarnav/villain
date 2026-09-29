@@ -1,129 +1,61 @@
 # Contributing to Villain
 
-Thanks for taking an interest. Bug reports, new site parsers, and fixes are all
-welcome. This file covers the dev setup, the one invariant the project will not
-bend on, how the tests are laid out, and how to add support for a new site.
+Bug reports, fixes and new site parsers are all welcome.
 
-## Dev setup
+## Setup
 
-Needs Python 3.11 or newer.
+Needs Python 3.11+.
 
 ```bash
 git clone https://github.com/aroraarnav/villain.git
 cd villain
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
 
-python3 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -e . pytest
-
-pytest                             # should be green before you start
+pytest -q && ruff check .    # both should pass before you start
 ```
 
-That installs the `villain` command in editable mode, so your
-changes are picked up without reinstalling. CI runs the same suite on Python
-3.11, 3.12 and 3.13, so if it passes locally on one of those it will almost
-certainly pass on the rest.
+CI runs the same two checks on Python 3.11, 3.12 and 3.13.
 
-## The one rule
+## The rules
 
-**No figure reaches the screen that the arithmetic did not produce.** Everything
-the tool shows is derived from the stored hands and is reproducible from them;
-nothing is guessed, rounded into existence, or borrowed from a different
-statistic. A corollary is enforced in the tests: **every statistic that reaches
-the user carries a glossary entry** describing what it counts and what *high* and
-*low* mean, and a test fails if one appears without it (see `villain/glossary.py`
-and `tests/`). If you add a number, add its glossary entry in the same change.
-
-Constants that are judgment calls rather than derivations (for example
-`CAPTURE` in `exploits.py` or `ADJUSTMENT_PRIOR` in `dynamics.py`) live in the
-source with a comment saying so. Keep that habit: state the assumption where it
-lives rather than burying it.
+1. **No invented numbers.** Everything on screen must come from the stored
+   hands. Every stat shown to a user needs an entry in `villain/glossary.py`,
+   and a test fails without one. Constants that are judgment calls, like
+   `CAPTURE` in `exploits.py`, say so in a comment.
+2. **No real player names.** Villain profiles real people. Their screen names
+   must never appear in code, comments, tests, fixtures, commit messages or PR
+   descriptions. Use placeholders like `player1` or `PlayerA`. If a placeholder
+   has to trigger specific name matching, check it with
+   `villain.identity.name_similarity`.
+3. **Same hands, same read.** Output must be deterministic.
+4. **Docstrings say why, not what.** Explain the trade-off or the bug being
+   prevented.
+5. **No credentials in the repo.** Keep them in `~/.villain/env`.
 
 ## Tests
 
-The suite lives in `tests/` and is run with plain `pytest` (config is in
-`pyproject.toml` under `[tool.pytest.ini_options]`).
+Plain `pytest` in `tests/`. Add or update tests with any behavior change.
 
-- **Balance checks.** The parser tests assert every hand balances to the cent —
-  chips in equal chips out. This is what proves the opcode decoding is correct,
-  so a parser change that breaks the balance is a parser bug, not a flaky test.
-- **Regressions are named for their bug.** Several tests in `test_profiling.py`
-  and elsewhere are named after the modeling mistake that produced them. When
-  you fix a wrong number, add a test named for what was wrong, so it cannot come
-  back quietly.
-- **Fixtures are anonymized.** `tests/data/pokernow_sample.json` uses generic
-  `player1`…`player5` names and synthetic account ids. Any fixture you add must
-  be the same — never commit a real export with real screen names.
+- Parser tests check that every hand balances to the cent: chips in equal chips
+  out. If that breaks, it's a parser bug.
+- When you fix a wrong number, name the test after what was wrong, so the bug
+  cannot come back unnoticed.
+- Fixtures must be anonymized, like `tests/data/pokernow_sample.json`.
 
-## Player anonymity
+## Adding a site
 
-This tool exists to say true, sometimes unflattering things about how specific
-people play — that only stays defensible if the humans behind it never surface
-in anything that leaves the local database. A real screen name has shown up
-before as a "realistic" example in a docstring or comment explaining the
-identity-matching code, and separately in a PR description quoting a real
-read. Neither is fine: **no real screen name, real full name, or anything that
-identifies a specific player belongs in code, comments, docstrings, tests,
-commit messages, or PR descriptions.** The local database, `HANDOFF.md`, and
-your own working notes are the only places that should ever see one — both are
-gitignored for exactly this reason.
+PokerNow is the only parser so far, but a new site needs no changes downstream.
 
-Need an example name for a comment or test? Use a fictional placeholder
-(`player1`, `PlayerA`, `Ghost`, whatever reads clearly) rather than something
-lifted from a real session. If a fictional pair needs to interact with the
-matching algorithm in a specific way (share a suffix, drop the same vowels,
-collide after normalizing), pick strings that actually reproduce that
-behavior — check with `villain.identity.name_similarity` before trusting the
-example, the same way you'd check any other figure that reaches a docstring.
-
-Please add or update tests with any behavior change, and keep the suite green.
-
-## Adding a parser for a new site
-
-PokerNow is currently the only supported format, but the registry is built so a
-new site touches nothing downstream. A parser is **any callable that takes a
-`Path` and yields `Hand` objects** (`villain/parsers/base.py`):
-
-```python
-Parser  = Callable[[Path], Iterator[Hand]]
-Sniffer = Callable[[Path], bool]
-```
-
-To add one:
-
-1. Create `villain/parsers/<site>.py`. Write a `sniff(path) -> bool` that
-   recognizes the format by content (not by filename), and a parser that yields
-   canonical `Hand` objects from `villain/model.py`.
-2. Register it at import time with
-   `register("<site>", sniff, parse)` — see how `pokernow.py` does it.
-3. Import your module in `villain/parsers/__init__.py` so it registers itself
-   (the existing `from . import pokernow` line is the pattern).
-4. Add a small anonymized sample under `tests/data/` and a test that parses it
-   and asserts the hands balance to the cent.
-
-`villain import` and the web UI both go through the registry's content sniffing,
-so once your parser is registered and recognizes its files, everything
-downstream — stats, profiles, the UI — works with no further changes.
-
-## Style
-
-- Type hints on public functions; the codebase uses `from __future__ import
-  annotations`.
-- Docstrings explain **why**, not what — the trade-off or the failure the code
-  guards against, not a paraphrase of the code.
-- Determinism: the same hands must always produce the same read. The only
-  non-deterministic path is the optional LLM exploit suggestions, and those are
-  clearly labeled as suggestions and checked against the arithmetic.
-
-## Secrets
-
-Never commit credentials. LLM settings are read from the environment, falling
-back to `~/.villain/env` — deliberately outside the working tree so a key can
-never be caught by a stray `git add -A`. The `.gitignore` already excludes the
-common offenders (`*.env`, `.env`, `secrets*`).
+1. Create `villain/parsers/<site>.py` with a `sniff(path) -> bool` that
+   recognizes the format by its content, and a parser that yields `Hand`
+   objects (`villain/model.py`).
+2. Call `register("<site>", sniff, parse)` at import time, as `pokernow.py` does.
+3. Import the module in `villain/parsers/__init__.py`.
+4. Add an anonymized sample to `tests/data/` and a test that it balances.
 
 ## Pull requests
 
-Work on a topic branch and open a PR against `main`. Keep the subject a plain
-statement of what changed and why. CI must be green (pytest on 3.11–3.13) before
-a merge.
+Branch off `main`, and make sure CI passes. In the description, say what changed
+and why. Back it up with real numbers from a run you actually did. Mention
+anything you deliberately left alone.
