@@ -15,6 +15,11 @@ what = "How often they raise before the flop."
 high = "Aggressive preflop. Expect to be raised, and defend wider."
 low = """Passive entry — they call more than they raise, which caps how strong their range can be."""
 
+[stats.raise_share]
+what = """Of the hands they play before the flop, how many they raise rather than call -- PFR as a share of VPIP."""
+high = """They enter pots by raising. A flat call from them is a deliberate choice, not a capped range by default."""
+low = """They call rather than raise the hands they play, so their range is capped when they just call. Raise over them and bet the flop."""
+
 [stats.three_bet]
 what = "When someone raises in front of them, how often they re-raise."
 high = """Re-raising more often than a value range allows, so many are bluffs. Fight back wider."""
@@ -306,6 +311,25 @@ unknown = """Not enough hands for a skill comparison. The number would mostly me
 "no-pair bet" = """A bet or raise after the flop while holding no pair or better on that board -- a bluff, or a draw betting as one. It worked if everyone folded on that street."""
 "checked the winner" = """You checked the river holding the best hand, and nobody bet after you. A bet there only loses to a hand you were already beating."""
 percentile = """The share of every possible hole-card combination on that board your hand beats -- not your chance to win the pot, which depends on what the other hand actually is. \"Usually X%\" is what a model fit on this database's own revealed hands says a line like that typically represents."""
+
+# -- the session review --------------------------------------------------------
+"reference range" = """The hands a simplified 100bb solver outline plays in that spot, written to match the frequency the spot calls for. Good enough to name a clear misfold; not precise enough to argue about a hand right at the edge."""
+misfold = """A hand the reference range plays that you folded."""
+"loose play" = """A hand you played that the reference range folds."""
+"most you can fold" = """Bet divided by pot-plus-bet: fold more often than this and a bettor profits from betting any two cards. Heads-up only -- against two players, folding more is correct."""
+"all-in equity" = """Your share of the pot at the moment the last chip went in, with every card known. What happened after that was luck, in both directions."""
+"expected" = """What the pot was worth to you at all-in equity: your share of it, minus what you put in. The gap between this and your result is how lucky the runout was."""
+cooler = """All-in with a hand near the top of what the board allows, and behind anyway. The money went in for good reasons; the cards were the problem."""
+"worth another look" = """A decision in a big pot whose shape often costs money: a big bluff into someone who has already raised, or a raise with a hand that mostly beats bluffs. The rule finds the shape, not the verdict -- read the hand."""
+"3-bet bluff" = """A suited wheel ace (A2s-A5s) or suited king (K5s-K9s): the hands that 3-bet best as bluffs, because they block the hands that fight back and play well when called."""
+"weak call vs 3-bet" = """Calling a re-raise of your open with an offsuit hand outside the continuing range. Offsuit hands make second-best pairs and lose big pots out of position."""
+persistent = """Off the reference in this sitting and in at least one before it. That is how you play, not one bad night."""
+new = """Off the reference in this sitting only. Worth watching; one sitting can be the cards."""
+fixed = """Off the reference before, and not in this sitting."""
+"changed tonight" = """Where tonight and the rest of their history disagree by more than chance: at least ten points apart, a two-proportion z of 2 or more, with enough chances on both sides. Compared inside one table size."""
+"stale read" = """Their usual archetype comes with a plan, and tonight they stopped doing what that plan assumes. Play the player at the table, not the one in the database."""
+provisional = """A rating from this sitting's hands alone, with how sure it is beside it. A sitting is rarely enough for a real rating, so treat close scores as a tie."""
+"fix first" = """Every flagged finding from this sitting, ranked by how many decisions it touched. A big-pot flag counts once for every 20 big blinds you put in, so one punt is not outranked by a handful of small folds."""
 
 # What each rating component measures, and what a good or bad score means.
 # Split by direction: a single blurb written as a weakness told a player

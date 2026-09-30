@@ -309,11 +309,10 @@ def test_tank_and_snap_split_by_street():
     assert caller.opps("pace:tank:turn:fold") == 0
 
 
-def test_timing_tells_use_share_and_outcomes_not_folklore():
-    """Snap-check share + fold-next vs normal — no 'Giving up' caption."""
+def test_pace_counters_record_share_and_what_came_next():
+    """Snap-check share, and fold-next against normal pace. The simulator's
+    bots read these to decide how a snap check should play out."""
     from villain.features import record_hand
-    from villain.profile import build_profile
-    from villain.timing import timing_tells
 
     books = {}
     # Snap-check flop, then fold the turn bet → fold_next hits.
@@ -356,15 +355,6 @@ def test_timing_tells_use_share_and_outcomes_not_folklore():
     assert book.rate("after:snap:flop:check:fold_next") == 1.0
     assert book.rate("after:normal:flop:check:fold_next") == 0.0
 
-    profile = build_profile(book)
-    cells = {f"{c.pace}:{c.street}:{c.action}": c for c in timing_tells(profile)}
-    snap_check = cells["snap:flop:check"]
-    assert snap_check.n >= 5
-    assert snap_check.share == pytest.approx(0.5, abs=0.05)
-    assert snap_check.label != "Giving up"
-    assert snap_check.fold_next == pytest.approx(1.0)
-    assert snap_check.fold_next_base == pytest.approx(0.0)
-    assert "Weaker" in snap_check.label or "fold" in snap_check.read.lower()
 
 
 def test_aggression_denominator_includes_checks():

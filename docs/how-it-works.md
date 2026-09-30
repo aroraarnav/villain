@@ -26,7 +26,7 @@ The screen is the app's; what follows is the same read as data, which is what
       "behavior": "...", "why": "...", "do": "...", "dont": "..."
     }
   ],
-  "watchlist": [], "adjustments": [], "combinations": [],
+  "watchlist": [], "adjustments": [],
   "skill": {
     "score": 69, "tier": "strong", "confidence": 0.54,
     "observed_bb100": -1.0, "adjusted_bb100": -0.2,
@@ -38,15 +38,13 @@ The screen is the app's; what follows is the same read as data, which is what
 
 Note what it does *not* claim: 183 hands buy a bucket at 51% confidence and one
 leak still labeled tentative, which is what a session this size contains. The
-full object also carries `versus`, `table_mix`, `contributions`, `plan` and the
+full object also carries `table_mix`, `contributions`, `plan` and the
 per-statistic `stats` block with an interval on every frequency.
 
 Each exploit answers four questions — what they are doing (as behavior, not as
 a statistic), why it is exploitable (the breakeven arithmetic), what to do, and
 the counter-mistake, which matters most because nearly every way of losing
-money to a correct read is an over-adjustment. Leaks that compound are called
-out together: folding flops too often *and* never check-raising removes both
-the reason to fear betting and the cost of being wrong.
+money to a correct read is an over-adjustment.
 
 Leaks are sorted by **bb/100**, what one is worth per 100 hands if you attack
 it every time, and labeled `tentative`, `likely` or `strong` by how much comes
@@ -206,6 +204,51 @@ to say anything. Which seat is yours comes from the export itself — PokerNow
 names the exporter — falling back to whose cards are visible without having
 been shown, since an export shows you your own hand every time and everybody
 else's only at a showdown.
+
+## Reading a sitting
+
+A profile is built from frequencies; a sitting is reviewed hand by hand,
+because two hundred hands put three or four in the pots that decided the night
+and a few hundred preflop decisions in spots with known answers.
+
+**Preflop against a reference.** Only your own export shows every hand you
+folded, so your first decision in each preflop spot -- first in by seat, the
+big blind facing a raise, the small blind facing one, and your answer to a
+3-bet -- is checked against a reference range, and the hands on the wrong side
+of it are named. The references are hand-written simplified solver outlines,
+each held by a test to the solver frequency the GTO table already cites for
+that spot. They are precise enough to name a clear misfold and not precise
+enough to argue about a hand at the edge. A spot is flagged only when the gap
+is eight points or more *and* at least three named hands sit behind it: a
+tight night dealt nothing but trash is not a leak.
+
+**The big pots.** All-in equity splits each result into what the pot was worth
+when the money went in and what the runout did. Two decision shapes are
+flagged for another look, using the stored per-street hand strength: a big
+turn or river bet with a hand in the bottom half of what the board allows,
+after the opponent has already raised or called a raise; and a river raise
+into a big bet with a hand that mostly beats bluffs. The rule finds the shape,
+not the verdict.
+
+**Folds by bet size**, heads-up, against the most a bet that size lets you
+fold -- bet over pot-plus-bet. Multiway pots are left out: against two
+players, folding more than one bettor's price allows is correct.
+
+**Fix first** ranks every flagged finding by how many decisions it touched. A
+misfold has no price -- that needs the value of the hand you did not play --
+so the count is the honest scale, and a big-pot flag counts once per 20 big
+blinds put in.
+
+**Across sittings.** The same measurements over your last five sittings say
+whether a leak is `new`, `persistent` or `fixed`: one bad night is the cards,
+the same gap four nights running is how you play.
+
+**Opponents.** Each opponent's tips come from tonight's hands and quote their
+counts. Tonight is compared with the rest of their history inside one table
+size, and reported only past a ten-point gap with a two-proportion z of 2. When
+the change contradicts what their usual archetype's plan assumes -- a limper
+who stopped limping -- the read is marked stale. A profile's **How to beat
+them now** uses the last sitting they played the same way.
 
 ## Skill
 

@@ -1,9 +1,8 @@
 /* ---- shared renderers ---- */
 function rosterTable(players, opts) {
   const wrap = h("div", "scroller");
-  // GTO dropped as a default column: a bare 0-100 integer beside the skill
-  // bar reads as a second, differently-encoded skill score. It is still one
-  // click away, on the profile it links to.
+  // No GTO column: a bare 0-100 integer beside the skill bar reads as a
+  // second, differently-encoded skill score.
   wrap.innerHTML = `<table><thead><tr>
       <th data-k="name">player</th>
       <th data-k="hands" class="num">hands</th><th data-k="archetype">read</th>
@@ -114,30 +113,8 @@ function rosterTable(players, opts) {
   return wrap;
 }
 
-/* vs GTO -- how close a player's frequencies sit to an optimal baseline, with
-   one rating. Preflop rows are a solver reference (exact as category
-   frequencies), postflop are board-averaged benchmarks; the fidelity rides
-   every row and the tooltip says which is which.
-
-   Rendered as a rating badge plus a link into every row, rather than a full
-   panel of eight rows sitting beside Key numbers -- the same idea (a
-   frequency next to a baseline) with less certainty drawn, taking a whole
-   peer tile on the one screen meant to be read mid-hand. */
-function gtoRows(rows) {
-  const host = h("div", "gto-rows");
-  for (const r of rows) {
-    const dir = r.deviation > 0 ? "+" : "−";
-    const row = h("div", "gto-row", `
-      <span class="gto-name">${esc(statLabel(r.stat, null))}<span
-        class="gto-fid ${r.fidelity === "solver" ? "solver" : ""}">${
-        r.fidelity === "solver" ? "solver" : "bench"}</span></span>
-      <span class="gto-nums small muted">you ${fmtPct(r.player)} · gto ${fmtPct(r.target)}</span>
-      <span class="gto-dev">${dir}${Math.round(Math.abs(r.deviation) * 100)}</span>`);
-    host.appendChild(row);
-  }
-  return host;
-}
-
+/* What the simulator's GTO figure means. The profile no longer shows a GTO
+   score: a second 0-100 number beside skill read as a second skill rating. */
 function gtoExplainer() {
   return `<span class="hl">GTO rating</span><br>
     How close these frequencies sit to a game-theory-optimal baseline — the
@@ -147,28 +124,9 @@ function gtoExplainer() {
     — not a live solver. Preflop rows weigh double in the score.`;
 }
 
-function openGtoModal(gto) {
-  sheet("vs GTO — every stat").appendChild(gtoRows(gto.rows));
-}
-
-/* A compact rating badge, `you N/100 GTO`, plus a link to the full row list --
-   for a panel header, not a panel of its own. */
-function renderGtoBadge(gto) {
-  if (!gto || gto.rating == null || !(gto.rows || []).length) return null;
-  const wrap = h("span", "small muted");
-  wrap.style.cssText = "display:inline-flex;align-items:center;gap:6px";
-  const badge = h("span", "gto-badge", `<b>${Math.round(gto.rating)}</b><span class="of">/100 GTO</span>`);
-  badge.appendChild(info(gtoExplainer()));
-  const link = h("button", "linkbtn");
-  link.textContent = "See vs GTO";
-  link.onclick = () => openGtoModal(gto);
-  wrap.append(badge, link);
-  return wrap;
-}
-
 /* Profile: one function per tile. `hero` changes the wording, not the shape. */
 
-function profileHead(p, isHero, hero) {
+function profileHead(p, isHero, hero, recent) {
   const head = h("div", "panel wide", `
     <div class="profile-head">
       <div class="profile-id">
@@ -196,12 +154,26 @@ function profileHead(p, isHero, hero) {
     $("#skill-ring", head).prepend(skillGauge(p.skill.score));
   }
   $("#worth-stat .k", head).appendChild(info(termTip("available")));
-  if (!hero && p.plan) {
+  // How to beat them comes from the last sitting they played, not from the
+  // archetype's canned plan: a plan built on their whole history goes stale
+  // the day they change, and says nothing about the version at your table.
+  // The archetype plan is the fallback only when no recent sitting is big
+  // enough to read.
+  if (!hero && (recent || p.plan)) {
     const planLink = h("button", "linkbtn how-link");
-    planLink.textContent = "How to play them";
+    planLink.textContent = "How to beat them now";
     planLink.onclick = () => {
-      sheet(`How to play ${esc(p.name || p.archetype)}`,
-            {body: `<div class="how-body">${esc(p.plan)}</div>`});
+      const card = sheet(`How to beat ${esc(p.name || p.archetype)}`, {body: `<div class="how-now"></div>`});
+      const box = $(".how-now", card);
+      if (recent) {
+        box.appendChild(h("p", "small muted", `From their last sitting, ${
+          esc(whenLabel(recent.started_at, true))}, ${recent.hands} hands.`));
+        box.appendChild(opponentCard(recent, state.heroId));
+      } else {
+        box.innerHTML = `<p class="small muted">No recent sitting is big enough to
+          read, so this is the plan for their usual type (${esc(p.archetype)}).</p>
+          <div class="how-body">${esc(p.plan)}</div>`;
+      }
     };
     $(".read-copy", head).appendChild(planLink);
   }
@@ -230,24 +202,6 @@ function profileHead(p, isHero, hero) {
   line.append(document.createTextNode(`${p.hands} hands`));
   line.appendChild(info(`<b>${esc(p.sample_quality)}</b><br>${termTip(p.sample_quality)}`));
   meta.append(archPill, line);
-  // Who they are on the hands they played against you. Only here, never on
-  // the roster: the roster is how everybody plays the field, and two
-  // references in one list is how "tag" stopped meaning anything.
-  if (p.versus) {
-    const vs = h("span", "", `<span class="tag arch on">vs you: ${esc(p.versus.archetype)}</span>`);
-    vs.appendChild(info(`<span class="hl">against you</span><br>
-      On the ${p.versus.decisions.toLocaleString()} decisions they made with you
-      on the other side, ${esc(p.versus.regime_label)}, they play like
-      <b>${esc(p.versus.archetype)}</b> (${fmtPct(p.versus.confidence)} sure)
-      &mdash; against <b>${esc(p.archetype)}</b> for the field.<br><br>
-      <span class="hl">also plausibly</span><br>${
-        p.versus.mix.slice(1, 3).map(m =>
-          `${esc(m.archetype)} ${fmtPct(m.share)}`).join("<br>")}<br><br>
-      One table size, never pooled: a player can be one thing against you
-      heads-up and another six-handed, and the average of those describes
-      neither table you sat at.`));
-    meta.appendChild(vs);
-  }
   if (p.contributions && Object.keys(p.contributions).length > 1) {
     const where = document.createElement("span");
     where.textContent = p.regime_label;
@@ -268,8 +222,6 @@ function skillPanel(p) {
     `<div class="spread"><h2>Skill breakdown <span class="muted" style="font-weight:400">\u00b7 ` +
     `${esc(p.skill.tier)}</span></h2></div>` +
     `<div class="skill-side two-up" id="skill-side"></div>`;
-  const gtoBadge = renderGtoBadge(p.gto);
-  if (gtoBadge) $(".spread", skillBox).appendChild(gtoBadge);
   const skillSide = $("#skill-side", skillBox);
   skillSide.innerHTML = "";
   const comps = p.skill_components || p.skill.components;
@@ -299,7 +251,7 @@ function skillPanel(p) {
 
 function whatToDoTile(p, hero, leaks) {
   /* The tile the screen exists for, and the only one on the primary surface:
-     priced leaks, then the unconfirmed watchlist, then the synthesis row. */
+     priced leaks, then the unconfirmed watchlist. */
   const doBox = h("div", "panel wide primary p-do", `<h2>${hero ? "Your biggest leaks" : "What to do"}</h2>
     <div class="leaks"></div>`);
 
@@ -394,16 +346,6 @@ function whatToDoTile(p, hero, leaks) {
   }
 
 
-  // Not a priced row -- a synthesis of the rows above it -- so it stops
-  // borrowing their shape: no price cell, a recessed ground, and it sits at
-  // the foot of the list where a summary belongs.
-  for (const c of (p.combinations || [])) {
-    const block = h("div", "leak compound", `<div class="headline"><b>${esc(c.headline)}</b>
-      <span class="tag">these compound</span></div>
-      <div class="leak-advice">${esc(c.body)}</div>`);
-    leakBox.appendChild(block);
-  }
-
   return doBox;
 }
 
@@ -466,76 +408,6 @@ function adjustmentsTile(p) {
       adjGrid.appendChild(div);
     }
     return adjBox;
-  }
-  return null;
-}
-
-
-function timingTellsTile(p) {
-  /* Null unless some cell actually has a tell -- a grid of "not enough data"
-     is noise wearing a panel's clothes. */
-  const tells = p.timing_tells || [];
-  // Render only when some cell actually has a tell -- a grid of "not enough
-  // data" is noise wearing a panel's clothes.
-  if (tells.some(c => c.n >= 5 && !/no clear tell|not enough/i.test(c.label || ""))) {
-    const timingBox = h("div", "panel wide");
-    const headRow = h("div", "spread");
-    const title = h("div", "headline");
-    const h2 = document.createElement("h2");
-    h2.style.margin = "0";
-    h2.textContent = "Timing tells";
-    const flag = h("span", "flag");
-    flag.textContent = "!";
-    bindTip(flag, `<span class="hl">use with caution</span><br>
-      Timing is noisy online. Each cell is the <em>share</em> of that action
-      at this pace, plus whether they won / went to showdown / folded next
-      <em>differently</em> than after the same action at normal pace. Use it
-      to break ties \u2014 never as the whole basis of a decision.`);
-    title.append(h2, flag);
-    headRow.appendChild(title);
-    const note = h("span", "small muted");
-    note.textContent = "share of action + outcome vs normal pace";
-    headRow.appendChild(note);
-    timingBox.appendChild(headRow);
-
-    const byKey = Object.fromEntries(
-      tells.map(c => [`${c.pace}:${c.street}:${c.action}`, c]));
-    for (const street of ["flop", "turn"]) {
-      const block = h("div", "timing-street", `<div class="street-label">${street}</div>`);
-      const grid = h("div", "timing-grid", `<div class="corner"></div>
-        <div class="colhead">check</div>
-        <div class="colhead">call</div>
-        <div class="colhead">raise</div>`);
-      for (const pace of ["snap", "tank"]) {
-        const rowhead = h("div", "rowhead");
-        rowhead.textContent = pace;
-        grid.appendChild(rowhead);
-        for (const action of ["check", "call", "aggro"]) {
-          const cell = byKey[`${pace}:${street}:${action}`] || {
-            n: 0, total: 0, share: null, label: "Not enough data",
-            read: "Need more timed actions."};
-          const div = document.createElement("div");
-          const quiet = cell.n < 5 || /no clear tell|not enough/i.test(cell.label || "");
-          div.className = "timing-cell" + (quiet ? " thin" : " on");
-          const share = cell.share == null ? ""
-            : `${Math.round(100 * cell.share)}% of ${cell.total}`;
-          const nLine = cell.n
-            ? `${cell.n} timed${share ? ` \u00b7 ${share}` : ""}`
-            : "no data yet";
-          // Only a real tell prints a label; everything else is a quiet dash.
-          // The read that used to crowd every cell is one hover away.
-          div.innerHTML = quiet
-            ? `<div class="tell">\u2014</div>`
-            : `<div class="tell">${esc(cell.label)}</div><div class="n">${cell.n} timed</div>`;
-          bindTip(div, `<b>${esc(cell.label)}</b><br>${esc(cell.read)}<br>
-            <span class="muted">${esc(nLine)}</span>`);
-          grid.appendChild(div);
-        }
-      }
-      block.appendChild(grid);
-      timingBox.appendChild(block);
-    }
-    return timingBox;
   }
   return null;
 }
@@ -639,15 +511,14 @@ function profileCard(p, opts) {
   // and strand whatever tile precedes them alone on a line.
   const wideTiles = [];
 
-  const head = profileHead(p, isHero, hero);
+  const head = profileHead(p, isHero, hero, opts.recent);
   card.appendChild(head);
 
   const doBox = whatToDoTile(p, hero, leaks);
   card.appendChild(doBox);
 
-  for (const tile of [adjustmentsTile(p), timingTellsTile(p)]) {
-    if (tile) wideTiles.push(tile);
-  }
+  const adjustments = adjustmentsTile(p);
+  if (adjustments) wideTiles.push(adjustments);
 
   card.appendChild(skillPanel(p));
   for (const tile of wideTiles) card.appendChild(tile);

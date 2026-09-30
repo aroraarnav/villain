@@ -51,15 +51,6 @@ def test_session_detail_net_bb_present_for_every_player(store):
         assert isinstance(row["net_bb"], float)
 
 
-def test_session_trends_skip_derived_aggression():
-    """aggression:* is assembled in build_profile and is not in book.ratios,
-    so sitting trends for it never fired. Dead stats, not a wrong number."""
-    from villain.db import Store
-    assert "aggression:flop" not in Store.SESSION_STATS
-    assert "aggression:turn" not in Store.SESSION_STATS
-    assert Store.SESSION_MIN_OPPS >= 40
-
-
 def test_a_sitting_survives_a_deleted_player(store):
     """Deleting somebody leaves their seats resolving to nobody.
 

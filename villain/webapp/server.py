@@ -30,7 +30,7 @@ from .assets import page, static
 from .heroview import _cached_hero_id, forget_hero, forget_hero_failure, hero_begin, hero_payload, hero_peek, hero_status
 from .jsonutil import encode as json_encode
 from .payloads import MIN_ROSTER_HANDS, profile_payload, roster_payload, tab_availability, table_summary
-from .sessions import SESSIONS, SIM_GAMES, _reap_sessions, apply_answers, commit_session, parse_upload, question_payload, session_brief, session_payload
+from .sessions import SESSIONS, SIM_GAMES, _reap_sessions, apply_answers, commit_session, parse_upload, session_brief
 
 #: Hostnames the UI may be reached on. Anything else is a rebinding attempt.
 LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", ""})
@@ -188,19 +188,35 @@ class Handler(BaseHTTPRequestHandler):
 
     @get("/api/session-detail")
     def _session_detail(self, route):
+        """The review of one sitting: who played, what to fix, the hands that
+        decided it, and how to beat each person there."""
+        from ..review import session_review
         sid = _int(parse_qs(route.query).get("id", ["0"])[0], "id")
         with Store(self.db_path) as store:
             match = next((x for x in store.sessions() if x["id"] == sid), None)
             if match is None:
                 return self._send(404, {"error": "no such session"})
             hero_id = _cached_hero_id(store)
-            players = store.session_detail(match)
-            for pl in players:
-                pl["is_hero"] = pl.get("player_id") == hero_id
             return self._send(200, {
                 "id": match["id"], "started_at": match["started_at"],
                 "ended_at": match["ended_at"], "hands": match["hands"],
-                "hero_id": hero_id, "players": players})
+                "hero_id": hero_id} | session_review(store, match, hero_id))
+
+    @get("/api/session-export")
+    def _session_export(self, route):
+        """One sitting as plain text, for pasting into a conversation. Returned
+        to the page, never sent anywhere: where it goes is the reader's call."""
+        from ..review import export_text
+        sid = _int(parse_qs(route.query).get("id", ["0"])[0], "id")
+        with Store(self.db_path) as store:
+            match = next((x for x in store.sessions() if x["id"] == sid), None)
+            if match is None:
+                return self._send(404, {"error": "no such session"})
+            hero_id = _cached_hero_id(store)
+            names = {str(r["id"]): r["display_name"] for r in store.players()}
+            text = export_text(store.session_hands(match["hand_ids"]), names,
+                               str(hero_id) if hero_id is not None else None)
+            return self._send(200, {"text": text})
 
     @get("/api/roster")
     def _roster(self, _route):
@@ -243,22 +259,20 @@ class Handler(BaseHTTPRequestHandler):
             aliases = [dict(r) for r in store.conn.execute(
                 "SELECT site, account, name, hands FROM aliases WHERE player_id = ?",
                 (player_id,))]
+            # Not for you: "how to beat them" is a question about opponents.
+            from ..review import recent_read
+            hero_id = _cached_hero_id(store)
+            recent = recent_read(store, player_id) if player_id != hero_id else None
             return self._send(200, {
                 "player_id": player_id,
                 "display_name": row["display_name"],
+                "recent": recent,
                 "aliases": aliases,
                 "profiles": profiles,
                 "by_table": by_table if len(by_table) > 1 else [],
                 "notes": [dict(n) for n in store.notes(player_id)],
-                "hero_id": _cached_hero_id(store),
+                "hero_id": hero_id,
             })
-
-    @get("/api/session/<arg>")
-    def _session(self, _route, token):
-        if token not in SESSIONS:
-            return self._send(404, {"error": "session expired -- upload again"})
-        with Store(self.db_path) as store:
-            return self._send(200, session_payload(token, store))
 
     @get("/api/hero")
     def _hero(self, route):
@@ -513,19 +527,10 @@ class Handler(BaseHTTPRequestHandler):
     @post("/api/session/<token>/identity", writes=False, needs="session")
     def _identity(self, body: dict, token: str):
         apply_answers(SESSIONS[token], body.get("answers") or {})
-        # Brief unless the caller is showing the preview. This is the same trap
-        # as the upload response: building the full payload profiles every hand
-        # in the session, which on a large import is minutes of work behind a
-        # dialog that said "Applying".
-        if parse_qs(urlparse(self.path).query).get("full", ["0"])[0] == "1":
-            with Store(self.db_path) as store:
-                return self._send(200, session_payload(token, store))
+        # Brief, never the profiled preview: an import only needs to know
+        # whether questions remain, and profiling every hand in the session
+        # was minutes of work behind a dialog that said "Applying".
         return self._send(200, session_brief(token))
-
-    @post("/api/session/<token>/plan", writes=False, needs="session")
-    def _plan(self, body: dict, token: str):
-        return self._send(
-            200, [question_payload(q) for q in SESSIONS[token].get("questions", [])])
 
     @post("/api/session/<token>/commit", writes=True, needs="session")
     def _commit(self, body: dict, token: str):
@@ -678,9 +683,8 @@ class Handler(BaseHTTPRequestHandler):
             auto = auto_answers(questions)
             if auto:
                 apply_answers(SESSIONS[token], auto)
-        # Deliberately the brief payload: an import never shows the preview,
-        # and building it means profiling every hand in the session a second
-        # time. The session view asks for the full one when it opens.
+        # Deliberately the brief payload: profiling every hand here would be
+        # done again from the stored hands the moment they are saved.
         payload = session_brief(token)
         payload["rejected"] = rejected
         return self._send(200, payload)

@@ -29,8 +29,6 @@ from .sessions import (
                        merged_hands,
                        parse_upload,
                        question_payload,
-                       session_identity_labels,
-                       session_payload,
 )
 
 __all__ = [
@@ -39,5 +37,5 @@ __all__ = [
     "apply_answers", "commit_session", "database_merges", "hero_payload",
     "main", "merged_hands", "page", "parse_upload",
     "profile_payload", "question_payload", "roster_payload", "serve",
-    "session_identity_labels", "session_payload", "static",
+    "static",
 ]

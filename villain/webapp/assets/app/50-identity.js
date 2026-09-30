@@ -1,83 +1,3 @@
-/* ---- tab 1: session ---- */
-function viewSession() {
-  const view = $("#view");
-  view.innerHTML = `
-    <div class="panel">
-      <div class="spread"><h2>read a session</h2>
-        <span class="small muted">nothing is saved until you ask</span></div>
-      <div class="drop" id="drop">
-        <div style="font-size:15px;color:var(--ink)">Drop hand history files here</div>
-        <div class="small" style="margin-top:4px">or click to choose \u00b7 PokerNow JSON exports</div>
-      </div>
-      <input type="file" id="file" multiple accept=".json,.txt" hidden>
-      <div id="upload-status" class="small muted" style="margin-top:10px"></div>
-    </div>
-    <div id="session-body"></div>`;
-
-  const drop = $("#drop"), input = $("#file"), status = $("#upload-status");
-  if (isGuest()) {
-    guestLockDrop(drop);
-    if (state.session) renderSession();
-    return;
-  }
-  wireDrop(drop, input, list => handleFiles(list));
-
-  async function handleFiles(list) {
-    const files = [...list];
-    if (!files.length) return;
-    status.textContent = `reading ${files.length} file(s)\u2026`;
-    try {
-      const payload = [];
-      for (const f of files) payload.push({name: f.name, content: await f.text()});
-      status.textContent = "parsing\u2026";
-      const data = await post("/api/upload", {files: payload});
-      state.session = data;
-      renderSession();
-      if (data.questions && data.questions.length && !data.answered) {
-        askIdentity(data.token, data.questions, null, data.linked, data.conflicts);
-      }
-      status.innerHTML = data.rejected && data.rejected.length
-        ? `<span class="err">skipped: ${data.rejected.map(r => esc(r.name)).join(", ")}</span>`
-        : "";
-    } catch (err) {
-      status.innerHTML = `<span class="err">${esc(err.message)}</span>`;
-    }
-  }
-
-  if (state.session) renderSession();
-}
-
-function renderSession() {
-  const data = state.session, box = $("#session-body");
-  if (!box) return;
-  box.innerHTML = `
-    <div class="panel">
-      <div class="spread">
-        <div><h2>this session</h2>
-          <div class="small muted">${data.hands} hands \u00b7
-            ${data.files.map(f => esc(f.name)).join(", ")}</div></div>
-        <div class="row">
-          <span class="small muted" id="save-note">${data.saved
-            ? "saved to database" : "not in the database"}</span>
-          <button class="act primary" id="save" ${data.saved ? "disabled" : ""}>
-            ${data.saved ? "saved" : "Add to database"}</button>
-        </div>
-      </div>
-      ${data.auto_merged ? `<p class="small muted" style="margin:8px 0 0">
-        Linked ${data.auto_merged} known player match(es) automatically
-        (kept existing database names).</p>` : ""}
-      <div id="session-roster" style="margin-top:12px"></div>
-    </div>
-    <div id="session-profiles"></div>`;
-  $("#session-roster").appendChild(rosterTable(data.players, {onClick: null}));
-  playerTabs(data.profiles, $("#session-profiles"));
-  const save = $("#save");
-  if (save && !data.saved) {
-    if (isGuest()) guestLock(save);
-    else save.onclick = () => commit(data.token);
-  }
-}
-
 /* ---- identity, settled at upload ---- */
 /* Asked when the file lands rather than when it is saved, so the session you
    are reading has already pooled the accounts. Merging also asks what to call
@@ -360,7 +280,10 @@ function sideMeta(side) {
 }
 
 const STAT_LABELS = {
-  "vpip": "VPIP", "pfr": "PFR", "three_bet": "3-bet", "limp": "limps",
+  "vpip": "VPIP", "pfr": "PFR", "raise_share": "raises of hands played",
+  "three_bet": "3-bet", "limp": "limps", "bb_defend": "BB defense",
+  "fold_to_three_bet": "fold to 3-bet", "cbet:flop": "c-bet flop",
+  "check_raise:flop": "check-raise flop",
   "wtsd": "went to showdown", "wsd": "won at showdown",
   "aggression:flop": "flop aggression", "aggression:turn": "turn aggression",
   "aggression:river": "river aggression",
@@ -559,16 +482,7 @@ async function askIdentity(token, questions, onDone, linked, conflicts) {
   const send = async (answers) => {
     showBusy("Applying\u2026", undefined);
     try {
-      // The full preview is asked for only when it is on screen. During an
-      // import nothing is showing it, and building it costs as much as the
-      // import itself.
-      const showing = !!(state.session && state.session.token === token);
-      const refreshed = await post(
-        `/api/session/${token}/identity${showing ? "?full=1" : ""}`, {answers});
-      if (showing) {
-        state.session = refreshed;
-        renderSession();
-      }
+      await post(`/api/session/${token}/identity`, {answers});
       if (onDone) await onDone();
       else $("#modal").innerHTML = "";
     } catch (err) {
@@ -610,17 +524,6 @@ async function askIdentity(token, questions, onDone, linked, conflicts) {
     }
     await send(answers);
   };
-}
-
-async function commit(token) {
-  try {
-    const result = await post(`/api/session/${token}/commit`, {});
-    state.session.saved = true;
-    renderSession();
-    showResult(result);
-  } catch (err) {
-    showResult({error: err.message});
-  }
 }
 
 function showResult(result) {

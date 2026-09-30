@@ -501,20 +501,6 @@
      was weak. */
   .comp-bar { min-width: 0; }
   .comp-bar svg { display: block; width: 100%; height: 14px; }
-  .gto-badge { font-variant-numeric: tabular-nums; display: inline-flex; align-items: baseline; gap: 3px; }
-  .gto-badge b { font-family: var(--mono); font-size: 20px; font-weight: 700; letter-spacing: -0.04em; }
-  .gto-badge .of { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
-  .gto-row { display: grid; grid-template-columns: minmax(0,1fr) auto 30px; gap: 12px;
-             align-items: baseline; padding: 7px 0; border-top: 1px solid var(--line); }
-  .gto-row:first-child { border-top: 0; }
-  .gto-nums { white-space: nowrap; font-variant-numeric: tabular-nums; }
-  .gto-dev { text-align: right; color: var(--muted);
-             font-family: var(--mono); font-size: .95em; letter-spacing: -0.02em;
-             font-variant-numeric: tabular-nums; }
-  .gto-fid { font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
-             margin-left: 7px; padding: 1px 6px; border-radius: 999px;
-             border: 1px solid var(--line); color: var(--muted); vertical-align: 1px; }
-  .gto-fid.solver { border-color: var(--edge); color: var(--ink); }
   .card.big { font-size: 17px; min-width: 34px; padding: 6px 8px; }
   /* The oval is inset so seats sit on the rim without hanging out of the box
      and painting over the action bar. Percent placement is relative to this
@@ -941,7 +927,66 @@
     max-height: min(calc(100vh - 132px), 560px);
     overflow: auto; margin: 0;
   }
-  .sess-main { margin: 0; }
+  .sess-main { margin: 0; min-width: 0; }
+  /* The review is a column of its own panels, so the sitting's title sits
+     above them rather than inside a panel that would nest them. */
+  .sess-title { margin: 0 0 var(--sp-1); }
+  .sess-body > .panel { margin: 0 0 var(--sp-3); }
+  .sess-body > .villain-view { margin-top: var(--sp-5); }
+  .sr-head { display: flex; justify-content: space-between; align-items: center;
+             flex-wrap: wrap; gap: var(--sp-3); margin: 0 0 var(--sp-3); }
+  .sr-actions { gap: var(--sp-4); align-items: center; }
+  .sr-text { width: 100%; min-height: 280px; font-family: var(--mono); font-size: 12px;
+             background: var(--inset); color: var(--ink); border: 1px solid var(--line);
+             border-radius: 8px; padding: var(--sp-2); resize: vertical; }
+  .sr-fix-title { display: flex; gap: var(--sp-2); align-items: baseline; }
+  .sr-rank { font-family: var(--mono); font-size: 12px; color: var(--muted);
+             font-variant-numeric: tabular-nums; min-width: 1.2em; }
+  .sr-fix-list .sr-fix.extra { display: none; }
+  .sr-fix-list.all .sr-fix.extra { display: block; }
+  .sr-fix .leak-advice { margin-top: var(--sp-1); }
+  /* A pot: its size, the board, and everyone who put money in, then what the
+     all-in equity and the flags say about it. */
+  .sr-pot { padding: var(--sp-3) 0; border-top: 1px solid var(--line); cursor: pointer; }
+  .sr-pot:first-of-type { border-top: 0; }
+  .sr-pot:hover { background: var(--accent-soft); }
+  .sr-pot-top { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+  .sr-pot-size { font-size: 15px; font-weight: 700; min-width: 64px; }
+  .sr-pot-who { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+  .sr-seat { display: inline-flex; align-items: center; gap: 6px; padding: 2px 6px;
+             border-radius: 6px; }
+  .sr-seat.hero-scope { background: var(--hero-soft); }
+  .sr-pot-notes { margin-top: var(--sp-1); }
+  .sr-pot-notes .review-tip { margin: var(--sp-1) 0 0; }
+  .sr-spot { padding: var(--sp-2) 0; border-top: 1px solid var(--line); }
+  .sr-spot:first-of-type { border-top: 0; }
+  .sr-spot-top { display: flex; justify-content: space-between; gap: var(--sp-3);
+                 flex-wrap: wrap; }
+  .sr-spot.flagged .sr-spot-label { font-weight: 600; }
+  .sr-spot-bar { margin: var(--sp-1) 0; }
+  .sr-spot-line { display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap;
+                  margin-top: var(--sp-1); }
+  .sr-spot-line .hand-chips { margin-top: 0; }
+  /* One bar and one tick: how often you did it, and the reference. The
+     distance between them is the finding. */
+  .sr-vs { position: relative; display: block; height: 8px; border-radius: 4px;
+           background: var(--inset); max-width: 420px; }
+  .sr-vs-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px;
+                background: var(--mark-2); }
+  .sr-vs-fill.off { background: var(--warn); }
+  .sr-vs-mark { position: absolute; top: -3px; bottom: -3px; width: 2px;
+                margin-left: -1px; background: var(--ink); }
+  .sr-facts { display: flex; flex-wrap: wrap; gap: var(--sp-5); margin: 0 0 var(--sp-2); }
+  .sr-facts .stat-pair { align-items: flex-start; text-align: left; }
+  table.sr-trend td.off { color: var(--warn); font-weight: 700; }
+  .sr-status.persistent { border-color: var(--danger); color: var(--ink); }
+  .sr-status.new { border-color: var(--warn); color: var(--ink); }
+  .sr-status.fixed { border-color: var(--up); color: var(--ink); }
+  .sr-stale { margin-top: var(--sp-3); }
+  .sr-none { margin-top: var(--sp-2); }
+  .sr-change { display: flex; gap: var(--sp-2); align-items: baseline; flex-wrap: wrap;
+               padding: 3px 0; }
+  .sr-change-stat { cursor: help; min-width: 150px; }
   #sess-rows { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
   .sess-item {
     display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
@@ -1106,15 +1151,6 @@
      worth a heavy figure competing with one worth five. */
   .leak-price.thin .v { color: var(--muted); font-weight: 600; font-size: 17px; }
   .leak-body { min-width: 0; }
-  /* Several leaks that add up to more than their sum is a different object
-     from a priced row, so it stops pretending to be one: no price cell, a
-     recessed ground, and it sits at the foot of the list where a summary
-     belongs. */
-  .leak.compound {
-    display: block; background: var(--inset); border-left: 2px solid var(--mark-2);
-    border-bottom: 0; border-radius: 0 8px 8px 0;
-    padding: var(--sp-3); margin-top: var(--sp-2);
-  }
   .leak-advice {
     color: var(--ink); font-size: 14px; max-width: 68ch; margin-top: var(--sp-1);
     line-height: 1.45;
@@ -1296,12 +1332,8 @@
      which is the one thing on the page that did not line up with the grid. */
   .pos-ring { width: 100%; height: auto; margin: var(--sp-2) 0 0; display: block; }
   .pos-note { margin: var(--sp-3) 0 0; }
-  /* Hero's sizing and timing tells: one block per street, two bars on a shared
-     scale, the gap between them being the tell. Laid out two-up because three
-     streets down a full-width panel is a column of air. */
-  .tellcols { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-              gap: var(--sp-3) var(--sp-6); align-items: start; }
-  .tellcols > div > h3 { margin-top: 0; }
+  /* Hero's sizing tell: one block per street, two bars on a shared scale,
+     the gap between them being the tell. */
   .tellblock { padding: var(--sp-2) 0 var(--sp-3); border-top: 1px solid var(--line); }
   .tellblock:first-child { border-top: 0; }
   .tellhead { display: flex; align-items: baseline; gap: var(--sp-2); margin-bottom: var(--sp-1); }
@@ -1313,32 +1345,6 @@
   /* A street with a real gap is the one worth reading; the rest are shown so
      you can see that they are not. */
   .tellblock:not(.on) .tellnote { display: none; }
-  /* Range narrowing: average strength of what is still live, street by street.
-     The dashed rule is the median hand the board allows. */
-  .narrow-wrap { max-width: 440px; }
-  .narrow-chart { width: 100%; height: auto; display: block; }
-  .timing-street { margin-top: 14px; }
-  .timing-street .street-label {
-    font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
-    color: var(--muted); font-weight: 600; margin-bottom: 6px;
-  }
-  .timing-grid {
-    display: grid; grid-template-columns: 64px 1fr 1fr 1fr; gap: 1px;
-    background: var(--line); border: 1px solid var(--line);
-  }
-  .timing-grid > * { background: var(--panel); padding: 9px 10px; min-width: 0; }
-  .timing-grid .corner { background: var(--accent-soft); }
-  .timing-grid .colhead, .timing-grid .rowhead {
-    font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
-    color: var(--muted); background: var(--accent-soft); font-weight: 600;
-  }
-  .timing-grid .rowhead { display: flex; align-items: center; }
-  .timing-cell { cursor: help; }
-  .timing-cell .tell { font-weight: 600; font-size: 14px; }
-  .timing-cell .n { font-size: 11px; color: var(--muted); margin-top: 5px; }
-  .timing-cell.thin { cursor: help; }
-  .timing-cell.thin .tell { color: var(--edge); font-weight: 500; }
-  .timing-cell.on { box-shadow: inset 2px 0 0 var(--red); }
   .rank { font-variant-numeric: tabular-nums; color: var(--muted); width: 22px; }
   .ev { display: grid; grid-template-columns: minmax(200px, auto) 1fr auto; gap: 12px;
         align-items: center; padding: 8px 0 8px 8px;

@@ -6,7 +6,7 @@ import pytest
 
 from villain.archetypes import ARCHETYPES
 from villain.exploits import PRESSURE, RULES, TIERS, find_leaks, size_band
-from villain.playbook import COMBINATIONS, PLAYBOOK, combinations_for, entry_for
+from villain.playbook import PLAYBOOK, entry_for
 
 # -- coverage ---------------------------------------------------------------
 
@@ -32,20 +32,6 @@ def test_dont_is_a_real_counter_mistake():
     for leak_id, entry in PLAYBOOK.items():
         assert entry.dont.lower().startswith(("do not", "never", "don't")), leak_id
         assert entry.dont != entry.do, leak_id
-
-
-def test_combinations_reference_real_rules():
-    known = {r.id for r in RULES}
-    for combo in COMBINATIONS:
-        assert combo.leaks <= known, combo.headline
-        assert len(combo.leaks) >= 2
-
-
-def test_combinations_only_fire_when_all_parts_are_present():
-    combo = COMBINATIONS[0]
-    part = next(iter(combo.leaks))
-    assert combo not in combinations_for({part})
-    assert combo in combinations_for(combo.leaks)
 
 
 def test_archetype_plans_are_substantial():
@@ -92,7 +78,7 @@ def test_analyze_export_carries_the_language(seeded):
     from villain.analyze import as_dict
     player = max(seeded.players(), key=lambda r: r["hands"] or 0)
     payload = as_dict(seeded.profiles(int(player["id"]))[0])
-    assert "combinations" in payload and "plan" in payload
+    assert "plan" in payload
     json.dumps(payload)
     for leak in payload["leaks"]:
         for field in ("behavior", "why", "do", "dont", "priority", "in_words"):

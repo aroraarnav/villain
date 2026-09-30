@@ -240,9 +240,9 @@ async function viewSessions() {
             title="hide the list">\u00ab</button></div>
         <div id="sess-rows"></div>
       </div>
-      <div class="panel sess-main">
-        <h2 id="sess-title">who played, and how</h2>
-        <div id="sess-body"></div>
+      <div class="sess-main">
+        <h2 id="sess-title" class="sess-title">who played, and how</h2>
+        <div id="sess-body" class="sess-body"></div>
       </div>
     </div>`;
   const rows = $("#sess-rows");
@@ -269,124 +269,4 @@ async function viewSessions() {
       `${whenLabel(chosen.started_at, true)} \u00b7 ${chosen.hands} hands`;
   }
   await drawSession(state.sessionId);
-}
-
-async function drawSession(id) {
-  const body = $("#sess-body");
-  body.innerHTML = "";
-  body.appendChild(loadingBlock("Reading the sitting\u2026"));
-  let data;
-  try { data = await get(`/api/session-detail?id=${id}`); }
-  catch (err) { body.innerHTML = `<p class="err">${esc(err.message)}</p>`; return; }
-  body.innerHTML = "";
-  for (const p of data.players) {
-    const div = h("div", "sess-row" + (p.is_hero ? " hero-scope hero-sitting" : ""));
-    const netTxt = p.net_bb > 0 ? `+${p.net_bb}` : `${p.net_bb}`;
-    // Too few hands tonight to rate: a 0 here would be a number nobody measured.
-    const unrated = p.skill == null;
-    // Net bb and skill are the only measurements on this page, and they were
-    // 12.5px muted text at the right margin. Same stat-pair the profile header
-    // uses -- one figure treatment across the app, not a per-screen decision.
-    div.innerHTML = `<div class="sess-head">
-        <div class="sess-id">
-          <div class="sess-who"><button class="linkbtn sess-name">${esc(p.name)}</button>${
-            p.is_hero ? '<span class="tag hero-tag">you</span>' : ""}
-            <span class="tag arch ${p.confidence >= 0.5 ? "on" : ""}">${esc(p.archetype)}</span>
-            <span class="sitting-note">this sitting</span>
-          </div>
-          <div class="small muted">${p.hands} hands \u00b7 ${esc(p.regime_label || "")}</div>
-        </div>
-        <div class="sess-stats">
-          <div class="stat-pair">
-            <span class="v ${p.net_bb >= 0 ? "up" : "down"}">${netTxt}</span>
-            <span class="k">bb</span>
-          </div>
-          <div class="stat-pair sess-skill">
-            <span class="v ${unrated ? "muted" : ""}">${unrated ? "\u2014" : Math.round(p.skill)}</span>
-            <span class="k">${unrated ? "unknown" : "skill"}</span>
-          </div>
-        </div>
-      </div>
-      <div class="sess-deltas"></div>`;
-    $(".sess-name", div).onclick = () => switchTab("players", p.player_id);
-    if (unrated) {
-      bindTip($(".sess-skill", div), `<b>unknown</b><br>${termTip("unknown")}`);
-    } else {
-      const skillBar = bar(p.skill, 100, "var(--mark-2)", 999);
-      skillBar.setAttribute("preserveAspectRatio", "none");
-      $(".sess-skill", div).appendChild(skillBar);
-    }
-    // A sitting-only read, not the pooled one on their Database page. The
-    // two disagreeing is correct -- a sitting can look nothing like the
-    // season -- but only if it says so.
-    $(".sitting-note", div).appendChild(info(`<span class="hl">this sitting</span><br>
-      Measured on just tonight's hands here, not the pooled read on their
-      Database page. The two can disagree, and when they do the difference is
-      the point.`));
-    const box = $(".sess-deltas", div);
-    if (!p.deltas.length) {
-      // One line on the row, not a paragraph per player. Six of these stacked
-      // was the whole page on a database with no outside sample yet.
-      box.innerHTML = `<div class="small muted sess-none">No outside sample at
-        this table size to compare tonight against.</div>`;
-    } else {
-      // One table size at a time, picked with a tab. A row per (stat, regime)
-      // puts VPIP on screen three times and reads as a duplicate rather than
-      // as three different games. One table size, no tabs.
-      const byRegime = new Map();
-      for (const d of p.deltas) {
-        const key = d.regime_label || d.regime || "";
-        if (!byRegime.has(key)) byRegime.set(key, []);
-        byRegime.get(key).push(d);
-      }
-      const regimes = [...byRegime.keys()];
-      const rows = document.createElement("div");
-      // Tonight against usually, two bars on one scale, as the against-you
-      // panel draws it: the finding is the gap, and a text grid makes the
-      // reader do the subtraction.
-      const drawRows = label => {
-        rows.innerHTML = "";
-        const set = byRegime.get(label);
-        const max = Math.max(...set.flatMap(d => [d.session, d.usual]), 0.01);
-        for (const d of set) {
-          const row = h("div", "sess-delta");
-          const up = d.delta > 0;
-          row.innerHTML = `<div class="sess-delta-head">
-              <span class="sess-stat">${esc(statLabel(d.stat, null))}</span>
-              <span class="small ${up ? "up" : "down"}">${up ? "\u25b2" : "\u25bc"}${
-                Math.abs(Math.round(d.delta * 100))}pp</span>
-            </div>`;
-          for (const [name, v, color] of [["tonight", d.session, "var(--mark-3)"],
-                                          ["usually", d.usual, "var(--mark-1)"]]) {
-            const line = h("div", "metric");
-            const label2 = h("span", "small muted"); label2.textContent = name;
-            const val = h("span", "small tellval"); val.textContent = fmtPct(v);
-            const drawn = bar(v, max, color, 150);
-            drawn.setAttribute("preserveAspectRatio", "none");
-            line.append(label2, drawn, val);
-            row.appendChild(line);
-          }
-          bindTip($(".sess-stat", row), statTip(d.stat, statLabel(d.stat, null)));
-          rows.appendChild(row);
-        }
-      };
-      if (regimes.length > 1) {
-        const tabs = h("div", "sess-regime-tabs");
-        regimes.forEach((label, i) => {
-          const b = h("button", "sess-regime-tab" + (i === 0 ? " on" : ""));
-          b.textContent = label;
-          b.onclick = () => {
-            tabs.querySelectorAll(".sess-regime-tab").forEach(x => x.classList.remove("on"));
-            b.classList.add("on");
-            drawRows(label);
-          };
-          tabs.appendChild(b);
-        });
-        box.appendChild(tabs);
-      }
-      box.appendChild(rows);
-      drawRows(regimes[0]);
-    }
-    body.appendChild(div);
-  }
 }

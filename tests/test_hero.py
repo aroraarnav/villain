@@ -4,30 +4,23 @@ import pytest
 
 from villain.db import Store
 from villain.hero import (
-    CHECK,
     FOLD,
     MARGIN,
     MIN_TELL_HANDS,
     SIZING,
     SIZING_TELL_GAP,
-    TIMING,
-    TIMING_TELL_GAP,
     Bucket,
     Grade,
     GradeReport,
-    StreetStrength,
     Tell,
     combined_grid,
     find_hero,
     fold_grades,
     hand_class,
     hero_visibility,
-    missed_value,
     preflop_range,
-    range_narrowing,
     sizing_tell,
     texture_label,
-    timing_tell,
 )
 
 
@@ -280,137 +273,6 @@ def test_fold_report_by_texture_matches_by_street_shape():
     report = GradeReport(grades=[wet, dry])
     assert wet.texture == "wet" and dry.texture == "dry"
     assert report.by_texture() == {"wet": (1, 1), "dry": (0, 1)}
-
-
-# -- missed_value -----------------------------------------------------------
-
-def _missed(strength, faced_strength, pot_before_bb=10.0):
-    return Grade(
-        CHECK, hand_id="h", street=1, hole_cards=("Ah", "Kh"), board=["2c", "7d", "9s"],
-        strength=strength, faced_strength=faced_strength, pot_before_bb=pot_before_bb,
-    )
-
-
-def test_missed_value_needs_the_bigger_margin():
-    """CHECK's margin is deliberately wider than FOLD's -- see GradeKind. A
-    gap that would count as a fold mistake should not automatically count as
-    missed value."""
-    small_edge = _missed(strength=0.70, faced_strength=0.55)   # edge 0.15 > MARGIN(0.05)
-    assert small_edge.edge > MARGIN
-    assert small_edge.edge < CHECK.margin
-    assert not small_edge.flagged
-
-    big_edge = _missed(strength=0.90, faced_strength=0.50)     # edge 0.40 > CHECK.margin
-    assert big_edge.flagged
-
-
-def test_a_check_faces_no_price_so_only_the_margin_gates_it():
-    """The second bar in `flagged` is pot odds, and a check faces none. It
-    stays in the shared rule because required_equity is 0 for a CHECK, which
-    is the honest reading rather than a special case."""
-    g = _missed(strength=0.90, faced_strength=0.50)
-    assert g.required_equity == 0.0 and g.to_call_bb == 0.0
-    assert g.worth() == pytest.approx(g.edge * g.pot_before_bb)
-
-
-def test_missed_value_report_aggregates_like_a_fold_report():
-    ok = _missed(strength=0.40, faced_strength=0.45)
-    bad = _missed(strength=0.90, faced_strength=0.50)
-    report = GradeReport(grades=[ok, bad])
-    assert report.graded == 2
-    assert report.flagged == [bad]
-    assert report.rate == pytest.approx(0.5)
-    assert report.by_street() == {1: (1, 2)}
-
-
-def test_missed_value_in_words_states_both_numbers():
-    g = _missed(strength=0.90, faced_strength=0.50)
-    words = g.in_words
-    assert "90%" in words and "50%" in words
-
-
-def test_missed_value_summary_is_shorter_than_in_words():
-    g = _missed(strength=0.90, faced_strength=0.50)
-    assert "90%" in g.summary and "50%" in g.summary
-    assert len(g.summary) < len(g.in_words)
-
-
-def test_missed_value_produces_well_formed_grades(stored):
-    hero_id = find_hero(stored, min_hands=10)
-    hero_hands = stored.player_hands(hero_id)
-    report = missed_value(hero_hands, hero_id, _StubModel())
-    assert isinstance(report, GradeReport)
-    for g in report.grades:
-        assert 0.0 <= g.strength <= 1.0
-        assert g.faced_strength == 0.5
-        assert g.street in (1, 2, 3)
-
-
-# -- timing_tell --------------------------------------------------------------
-
-def _timing(strong_hands, strong_avg, weak_hands, weak_avg):
-    return _tell(TIMING, strong_hands, strong_avg, weak_hands, weak_avg)
-
-
-def test_timing_gap_needs_both_sides_thick_enough():
-    thin = _timing(strong_hands=MIN_TELL_HANDS - 1, strong_avg=5.0,
-                   weak_hands=MIN_TELL_HANDS, weak_avg=2.0)
-    assert thin.gap(1) is None
-
-    thick = _timing(strong_hands=MIN_TELL_HANDS, strong_avg=5.0,
-                    weak_hands=MIN_TELL_HANDS, weak_avg=2.0)
-    assert thick.gap(1) == pytest.approx(3.0)
-
-
-def test_timing_tells_needs_the_gap_to_clear_the_bar():
-    small_gap = _timing(strong_hands=20, strong_avg=3.0, weak_hands=20, weak_avg=2.5)
-    assert abs(small_gap.gap(1)) < TIMING_TELL_GAP
-    assert small_gap.tells() == []
-
-    real_gap = _timing(strong_hands=20, strong_avg=3.0, weak_hands=20, weak_avg=8.0)
-    assert real_gap.tells() == [(1, real_gap.gap(1))]
-
-
-def test_timing_describe_names_the_bluff_tank_direction():
-    """Negative gap -- weaker hands take longer -- is the tank-as-bluff tell."""
-    tanks_bluffs = _timing(strong_hands=20, strong_avg=3.0, weak_hands=20, weak_avg=8.0)
-    assert "bluffs" in tanks_bluffs.describe(1)
-
-    tanks_value = _timing(strong_hands=20, strong_avg=8.0, weak_hands=20, weak_avg=3.0)
-    assert "strong hands" in tanks_value.describe(1)
-
-
-def test_timing_describe_lead_false_drops_the_street_opener():
-    g = _timing(strong_hands=20, strong_avg=3.0, weak_hands=20, weak_avg=8.0)
-    assert g.describe(1, lead=True).startswith("On the flop,")
-    assert g.describe(1, lead=False).startswith("You took")
-    assert "flop" not in g.describe(1, lead=False)
-
-
-def test_timing_tell_produces_one_bucket_pair_per_postflop_street(stored):
-    hero_id = find_hero(stored, min_hands=10)
-    tt = timing_tell(stored.player_hands(hero_id), hero_id)
-    assert set(tt.by_street) == {1, 2, 3}
-    for strong, weak in tt.by_street.values():
-        assert strong.hands >= 0 and weak.hands >= 0
-
-
-# -- range_narrowing ----------------------------------------------------------
-
-def test_range_narrowing_only_counts_streets_hero_actually_saw(stored):
-    hero_id = find_hero(stored, min_hands=10)
-    rn = range_narrowing(stored.player_hands(hero_id), hero_id)
-    assert all(isinstance(s, StreetStrength) for s in rn)
-    assert all(s.street in (1, 2, 3) for s in rn)
-    assert all(0.0 <= s.avg_strength <= 1.0 for s in rn)
-    assert all(s.hands > 0 for s in rn)
-    # Hands live get thinner (or equal) street by street -- nobody more hands
-    # on the turn than saw the flop.
-    by_street = {s.street: s.hands for s in rn}
-    if 1 in by_street and 2 in by_street:
-        assert by_street[2] <= by_street[1]
-    if 2 in by_street and 3 in by_street:
-        assert by_street[3] <= by_street[2]
 
 
 # -- hero_of: the same question asked of a hand list --------------------------

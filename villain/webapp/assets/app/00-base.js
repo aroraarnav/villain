@@ -3,7 +3,7 @@ const fmtPct = v => (100 * v).toFixed(0) + "%";
 const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g,
   c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const SVG = "http://www.w3.org/2000/svg";
-const state = {tab: "players", session: null, player: null, roster: null, glossary: null, game: null, lastEvent: null, stepTimer: null, descOn: true, pickSort: "hands", revealed: false, checkFold: false, checkFoldHand: null, heroPoll: null,
+const state = {tab: "players", player: null, roster: null, glossary: null, game: null, lastEvent: null, stepTimer: null, descOn: true, pickSort: "hands", revealed: false, checkFold: false, checkFoldHand: null, heroPoll: null,
                sessionId: null, paused: false, muted: false, analysis: null, simGen: 0,
                dealHand: null, dealUntil: null, stepUntil: null, clockHold: null};
 

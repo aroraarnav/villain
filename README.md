@@ -64,11 +64,18 @@ Every claim has a **see the hands** button showing the hands behind it.
 
 ![The roster: every player ranked by skill, with what each is worth and their biggest leak](docs/roster.png)
 
-**Sessions.** One sitting at a time: who played, and what each person did
-differently that night compared with their usual game.
+**Sessions.** One sitting, reviewed: what to fix first, ranked, with the hands
+behind each item; the biggest pots, with all-in equity separating the cooler
+from the punt; your preflop graded spot by spot against a reference range,
+naming the hands you misplayed; your 3-bets and how you answered them; how you
+folded by bet size; whether each leak is new or keeps coming back; and, for
+every opponent, how they played tonight and how to beat them -- with a warning
+when that no longer matches their usual read. **Copy for Claude** hands you the
+sitting as text to paste into a conversation.
 
 **Hero.** You, graded against your own cards: how often your folds were right,
-the value you missed, and how your ranges and sizing shift by spot.
+your preflop audited spot by spot across your whole history, and whether your
+bet size gives your hand away.
 
 ![The Hero tab: fold grades and missed value, the preflop range grid, and how wide each seat gets played](docs/hero.png)
 

@@ -11,7 +11,6 @@ from __future__ import annotations
 from .archetypes import ARCHETYPE_BY_NAME, match
 from .exploits import find_leaks, find_watchlist
 from .glossary import component_entry, component_help, component_reading, component_stats, versus_behavior
-from .playbook import combinations_for
 from .priors import REGIME_LABELS
 from .profile import Profile
 from .skill import WEAK_COMPONENT, rate, weaknesses
@@ -100,20 +99,6 @@ def as_dict(profile: Profile) -> dict:
         # Where they treat you differently from everyone else. Never priced:
         # what an adjustment is worth depends on how you were playing when
         # they made it, which is not in the hand history.
-        # Who they are on the hands they played against *you*, at the table
-        # size the two of you share most. Deliberately absent from the roster:
-        # a list of everybody is a list of how they play the field, and mixing
-        # the two references in one column is how the field read stopped
-        # meaning anything.
-        "versus": ({
-            "archetype": profile.versus.archetype,
-            "confidence": round(profile.versus.confidence, 3),
-            "regime": profile.versus.regime,
-            "regime_label": profile.versus.regime_label,
-            "decisions": round(profile.versus.decisions),
-            "mix": [{"archetype": k, "share": round(v, 3)}
-                    for k, v in profile.versus.mix[:3]],
-        } if getattr(profile, "versus", None) else None),
         "adjustments": [
             {"stat": a.stat, "behavior": versus_behavior(a.stat),
              # The counter the evidence panel opens on: the against-you slice,
@@ -170,12 +155,6 @@ def as_dict(profile: Profile) -> dict:
             {"name": c.name, "score": round(c.score, 1), "note": c.note,
              "meaning": component_help(c.name) or ""}
             for c in weaknesses(profile.skill)
-        ],
-        # Leaks that compound. Two tendencies pointing the same way call for a
-        # more aggressive adjustment than either would on its own.
-        "combinations": [
-            {"headline": c.headline, "body": c.body, "leaks": sorted(c.leaks)}
-            for c in combinations_for(l.id for l in profile.tags)
         ],
         "plan": (ARCHETYPE_BY_NAME[profile.archetype].plan
                  if profile.archetype in ARCHETYPE_BY_NAME else ""),

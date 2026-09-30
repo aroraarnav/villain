@@ -79,10 +79,14 @@ def _hero_model(store: Store, progress=None, hands=None):
     return model
 
 
+#: Hands shown per list in each preflop spot on the Hero page; the count
+#: beside it covers the rest.
+SPOT_CHIPS = 12
+
 #: Bump whenever _build_hero_payload's returned shape changes, so an old
 #: cache file from a previous version of this module is a miss rather than a
 #: served-stale response with fields the current frontend does not expect.
-_HERO_CACHE_VERSION = 10
+_HERO_CACHE_VERSION = 12
 
 
 def forget_hero(store: Store) -> None:
@@ -350,9 +354,11 @@ def _hero_self(store: Store, hero_id: int) -> dict | None:
 
 
 def _build_hero_payload(store: Store, hero_id: int | None, progress=None) -> dict | None:
-    from ..hero import combined_grid, fold_grades, hero_visibility, missed_value, preflop_range, range_narrowing, sizing_tell, timing_tell
+    from ..charts import audit
+    from ..hero import combined_grid, fold_grades, hero_visibility, preflop_range, sizing_tell
     from ..model import STREET_LABELS
     from ..reads import NotEnoughData  # raised by the strength-model fit hero.py calls, not by hero itself
+    from ..review import _spot_json
 
     # Loaded once, used by both halves of the build. Working out whose seat is
     # whose and fitting the model each need every stored hand, and each used to
@@ -409,23 +415,18 @@ def _build_hero_payload(store: Store, hero_id: int | None, progress=None) -> dic
         # field to score -- two long bars, the first of them pretending
         # three equal walks.
         model = _hero_model(store, progress=progress, hands=all_hands)
-        chunk = walked("grading", 5)
+        chunk = walked("grading", 2)
         if progress is not None:
-            progress(0, 5 * n_hero, "grading")
+            progress(0, 2 * n_hero, "grading")
         sizing = sizing_tell(hero_hands, hero_id, progress=chunk(0))
-        timing = timing_tell(hero_hands, hero_id, progress=chunk(1))
-        narrowing = range_narrowing(hero_hands, hero_id, progress=chunk(2))
-        report = fold_grades(hero_hands, hero_id, model, progress=chunk(3))
-        missed_report = missed_value(hero_hands, hero_id, model, progress=chunk(4))
+        report = fold_grades(hero_hands, hero_id, model, progress=chunk(1))
         grade_error = None
     except NotEnoughData as exc:
-        chunk = walked("measuring", 3)
+        chunk = walked("measuring", 1)
         if progress is not None:
-            progress(0, 3 * n_hero, "measuring")
+            progress(0, n_hero, "measuring")
         sizing = sizing_tell(hero_hands, hero_id, progress=chunk(0))
-        timing = timing_tell(hero_hands, hero_id, progress=chunk(1))
-        narrowing = range_narrowing(hero_hands, hero_id, progress=chunk(2))
-        report = missed_report = None
+        report = None
         grade_error = str(exc)
 
     def _fold_json(g):
@@ -460,23 +461,15 @@ def _build_hero_payload(store: Store, hero_id: int | None, progress=None) -> dic
     return {
         "hero_id": hero_id, "name": row["display_name"],
         "visibility": seen / total if total else 0.0, "hands": row["hands"] or 0,
-        "ranges": [
-            {"position": p.position, "hands": p.hands, "raised": p.raised,
-             "called": p.called, "checked": p.checked, "folded": p.folded}
-            for p in ranges.values()
-        ],
+        # Graded against the reference range for each spot -- the answer to
+        # "which hands", which a count by seat could never give.
+        "spots": [_spot_json(r, limit=SPOT_CHIPS) for r in audit(hero_hands, hero_key)
+                  if r.chart.key != "vs3bet"],
         "grid": {cls: {"played": played, "dealt": dealt}
                 for cls, (played, dealt) in combined_grid(ranges).items()},
         "fold_grades": None if report is None else _bucketed_json(report),
-        "missed_value": None if missed_report is None else _bucketed_json(missed_report),
         "grade_error": grade_error,
         "sizing": _tell_json(sizing),
-        "timing": _tell_json(timing),
-        "narrowing": [
-            {"street": STREET_LABELS.get(s.street, s.street), "hands": s.hands,
-             "avg_strength": s.avg_strength}
-            for s in sorted(narrowing, key=lambda s: s.street)
-        ],
         "self": _hero_self(store, hero_id),
     }
 

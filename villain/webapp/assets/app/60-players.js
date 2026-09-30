@@ -100,7 +100,7 @@ async function viewPlayer(id) {
   const holder = document.createElement("div");
   view.appendChild(holder);
   state.heroId = data.hero_id;
-  playerTabs(data.profiles, holder, {heroId: data.hero_id});
+  playerTabs(data.profiles, holder, {heroId: data.hero_id, recent: data.recent});
 
   // Accounts pooled into this player. A list, not a control surface: the
   // splitting moved into its own dialog behind the actions at the foot of the
@@ -286,7 +286,7 @@ function confirmReset(data) {
     try {
       const result = await post("/api/reset", {confirm: "delete everything"});
       $("#modal").innerHTML = "";
-      state.player = null; state.session = null; state.roster = null;
+      state.player = null; state.roster = null;
       syncUrl(true);
       viewPlayers();
       paintTabs();               // an emptied database closes tabs again

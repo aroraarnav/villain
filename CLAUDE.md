@@ -11,7 +11,9 @@ before any change leaves this repo — read it before opening a PR, not after.
 - `villain/` — the library. `db.py` (storage + rebuild), `identity.py`
   (merging accounts into players), `stats.py`/`profile.py` (counters →
   ratios), `archetypes.py` (the ten player types), `exploits.py`/`dynamics.py`
-  (priced leaks and the against-you read), `sim.py`/`botplay.py`/`holdem.py`
+  (priced leaks and the against-you read), `charts.py` (reference preflop
+  ranges and your preflop graded against them), `review.py` (the Sessions
+  page: one sitting reviewed), `sim.py`/`botplay.py`/`holdem.py`
   (the practice simulator), `glossary.py` (every stat's definition — required
   for anything that reaches the UI), `cli.py` (the `villain` command).
 - `villain/webapp/` — the UI's Python side. `server.py` owns the routes and
