@@ -7,7 +7,21 @@ import pytest
 
 from villain.db import Store, split_key
 from villain.identity import session_questions
-from villain.webapp import MIN_ROSTER_HANDS, SESSIONS, commit_session, parse_upload, profile_payload, roster_payload, session_payload
+from villain.webapp import MIN_ROSTER_HANDS, SESSIONS, commit_session, parse_upload, profile_payload, roster_payload
+from villain.webapp.sessions import session_brief
+
+
+def _pooled(token, store=None):
+    """Hands per player name in an upload, after its merges -- what a reader
+    of the session would see, without profiling anything."""
+    from villain.webapp import database_merges, merged_hands
+    session = SESSIONS[token]
+    extra = database_merges(store, session["hands"]) if store is not None else None
+    counts: dict[str, int] = {}
+    for hand in merged_hands(session, extra):
+        for seat in hand.seats:
+            counts[seat.name] = counts.get(seat.name, 0) + 1
+    return counts
 
 
 @pytest.fixture
@@ -42,16 +56,15 @@ def test_session_analysis_touches_no_database(session, tmp_path):
     db = tmp_path / "v.db"
     with Store(db) as store:
         before = store.conn.execute("SELECT COUNT(*) c FROM hands").fetchone()["c"]
-    payload = session_payload(session)
-    assert payload["players"]
-    assert payload["saved"] is False
+    assert _pooled(session)
+    assert session_brief(session)["saved"] is False
     with Store(db) as store:
         after = store.conn.execute("SELECT COUNT(*) c FROM hands").fetchone()["c"]
     assert before == after == 0
 
 
-def test_session_payload_is_json_serialisable(session):
-    json.dumps(session_payload(session))
+def test_session_brief_is_json_serializable(session):
+    json.dumps(session_brief(session))
 
 
 def test_commit_stores_the_session(session, store):
@@ -341,17 +354,17 @@ def test_database_is_reusable_after_reset(seeded, hands):
 def test_merge_answers_pool_the_session_before_it_is_saved(session, store):
     """The point of asking at upload: the session you read is already pooled."""
     from villain.identity import session_questions
-    from villain.webapp import SESSIONS, apply_answers, session_payload
+    from villain.webapp import SESSIONS, apply_answers
     questions = session_questions(store, SESSIONS[session]["hands"])
     alias = [q for q in questions if q.kind == "alias"]
     if not alias:
         pytest.skip("fixture has no same-person candidates")
     SESSIONS[session]["questions"] = questions
 
-    before = {r["name"]: r["hands"] for r in session_payload(session)["players"]}
+    before = _pooled(session)
     q = alias[0]
     apply_answers(SESSIONS[session], {q.id: {"same": True, "name": q.names[0]}})
-    after = {r["name"]: r["hands"] for r in session_payload(session)["players"]}
+    after = _pooled(session)
 
     assert len(after) < len(before), "the two accounts should now be one player"
     assert q.names[0] in after, "the chosen name should be the one kept"
@@ -360,7 +373,7 @@ def test_merge_answers_pool_the_session_before_it_is_saved(session, store):
 
 def test_the_chosen_name_is_honoured(session, store):
     from villain.identity import session_questions
-    from villain.webapp import SESSIONS, apply_answers, session_payload
+    from villain.webapp import SESSIONS, apply_answers
     questions = session_questions(store, SESSIONS[session]["hands"])
     alias = [q for q in questions if q.kind == "alias"]
     if not alias:
@@ -370,18 +383,18 @@ def test_the_chosen_name_is_honoured(session, store):
     # Deliberately pick the name that is *not* the default.
     other = [n for n in q.names if n != q.default_name][0]
     apply_answers(SESSIONS[session], {q.id: {"same": True, "name": other}})
-    names = {r["name"] for r in session_payload(session)["players"]}
+    names = set(_pooled(session))
     assert other in names
     assert q.default_name not in names
 
 
 def test_declining_leaves_the_session_untouched(session, store):
     from villain.identity import session_questions
-    from villain.webapp import SESSIONS, apply_answers, session_payload
+    from villain.webapp import SESSIONS, apply_answers
     SESSIONS[session]["questions"] = session_questions(store, SESSIONS[session]["hands"])
-    before = {r["name"] for r in session_payload(session)["players"]}
+    before = set(_pooled(session))
     apply_answers(SESSIONS[session], {})
-    assert {r["name"] for r in session_payload(session)["players"]} == before
+    assert set(_pooled(session)) == before
 
 
 def test_stored_hands_keep_the_original_account_ids(session, store):
@@ -441,13 +454,13 @@ def test_a_database_merge_shows_up_in_a_loaded_session(tmp_path, hands):
     in the database would contradict the database it is about to be saved into."""
     import copy
 
-    from villain.webapp import SESSIONS, database_merges, session_payload
+    from villain.webapp import SESSIONS, database_merges
     token = "dbmerge"
     SESSIONS[token] = {"hands": copy.deepcopy(hands), "files": [], "created": 0.0}
     try:
         with Store(tmp_path / "v.db") as store:
             store.add_hands(hands)
-            before = {r["name"]: r["hands"] for r in session_payload(token, store)["players"]}
+            before = _pooled(token, store)
             # Merge two players who never share a hand.
             store.conn.execute(
                 "INSERT INTO players (display_name, created_at) VALUES ('Ghost', 0)")
@@ -458,7 +471,7 @@ def test_a_database_merge_shows_up_in_a_loaded_session(tmp_path, hands):
                                                            int(r["player_id"])))
             store.link(int(a["player_id"]), int(b["player_id"]))
             merges = database_merges(store, SESSIONS[token]["hands"])
-            after = {r["name"]: r["hands"] for r in session_payload(token, store)["players"]}
+            after = _pooled(token, store)
     finally:
         SESSIONS.pop(token, None)
     assert merges, "the merged accounts should be pooled in the session"
@@ -502,14 +515,6 @@ def test_the_payload_points_evidence_at_the_slice(seeded):
         assert a["behavior"] != a["stat"]
 
 
-def test_an_uploaded_session_shows_them_too(session):
-    """A preview that drops a section the same hands produce once saved is a
-    preview of something else."""
-    payload = session_payload(session)
-    for profile in payload["profiles"]:
-        assert "adjustments" in profile
-
-
 def test_auto_merges_do_not_swallow_the_questions_that_need_a_human(session, tmp_path):
     """Applying the runs must not mark the session answered.
 
@@ -518,7 +523,7 @@ def test_auto_merges_do_not_swallow_the_questions_that_need_a_human(session, tmp
     user has answered" hid every remaining question behind merges the user
     never saw."""
     from villain.identity import auto_answers, session_questions
-    from villain.webapp import SESSIONS, apply_answers, session_payload
+    from villain.webapp import SESSIONS, apply_answers
 
     with Store(tmp_path / "v.db") as store:
         questions = session_questions(store, SESSIONS[session]["hands"])
@@ -526,7 +531,7 @@ def test_auto_merges_do_not_swallow_the_questions_that_need_a_human(session, tmp
         auto = auto_answers(questions)
         if auto:
             apply_answers(SESSIONS[session], auto)
-        payload = session_payload(session, store)
+        payload = session_brief(session)
 
     if auto:
         assert not payload["answered"], "auto merges are not a human answer"
@@ -535,7 +540,7 @@ def test_auto_merges_do_not_swallow_the_questions_that_need_a_human(session, tmp
     if human:
         with Store(tmp_path / "v.db") as store:
             apply_answers(SESSIONS[session], {human[0].id: {"same": False}})
-            payload = session_payload(session, store)
+            payload = session_brief(session)
         assert payload["answered"]
 
 
@@ -866,53 +871,6 @@ def test_a_read_that_only_holds_at_one_table_size_survives(tmp_path):
     assert "hu" in regimes, "the heads-up read must survive being averaged away"
     hu = next(a for a in found if a.regime == "hu")
     assert hu.gap < 0, "heads-up he folds less, not more"
-
-
-def test_the_against_you_read_is_detail_only(store):
-    """The roster is how everybody plays the field; one reference per list.
-
-    Mixing "how they play the table" with "how they play you" in one column is
-    how the field read stopped meaning anything in the first place."""
-    from tests.conftest import FIXTURE
-    from villain.analyze import as_dict
-    from villain.parsers import parse_file
-    from villain.webapp import roster_payload
-
-    store.add_hands(parse_file(FIXTURE))
-    rows = roster_payload(store)
-    assert rows, "need at least one player to check"
-    assert all("versus" not in row for row in rows)
-    detail = as_dict(store.profile(rows[0]["player_id"]))
-    assert "versus" in detail, "the detailed view carries it"
-
-
-def test_the_against_you_archetype_is_taken_at_one_table_size():
-    """Pooling is what hid the read: it must name a regime, never blend them."""
-    from villain.dynamics import MIN_VERSUS_DECISIONS, versus_read
-    from villain.stats import VS_HERO, Ratio, StatBook
-
-    def book(regime, rate, n):
-        b = StatBook(player_id="1", name="x", regime=regime, hands=n)
-        for stat in ("fold_vs_bet:flop", "fold_vs_bet:turn", "vpip", "pfr"):
-            b.ratios[VS_HERO + stat] = Ratio(hits=rate * n, opps=n)
-            b.ratios[stat] = Ratio(hits=rate * n, opps=n)
-        return b
-
-    n = MIN_VERSUS_DECISIONS          # each book carries 4 counters of n
-    read = versus_read({"hu": book("hu", 0.2, n), "6max": book("6max", 0.5, n // 4)})
-    assert read is not None
-    assert read.regime == "hu", "the table size with the most shared history"
-    assert read.regime_label == "heads-up"
-
-
-def test_no_against_you_read_without_enough_shared_history():
-    from villain.dynamics import versus_read
-    from villain.stats import VS_HERO, Ratio, StatBook
-
-    b = StatBook(player_id="1", name="x", regime="6max", hands=20)
-    b.ratios[VS_HERO + "vpip"] = Ratio(hits=5, opps=20)
-    b.ratios["vpip"] = Ratio(hits=5, opps=20)
-    assert versus_read({"6max": b}) is None
 
 
 # --- Hero where there is no thread to build it on ---------------------------

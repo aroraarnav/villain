@@ -15,8 +15,6 @@ from ..archetypes import ARCHETYPE_BY_NAME, deviations
 from ..db import Store
 from ..exploits import RULES, find_watchlist
 from ..skill import weaknesses
-from ..timing import timing_tells
-from .jsonutil import as_json
 
 DISPLAY_STATS = [
     ("vpip", "VPIP", "hands played"),
@@ -112,15 +110,6 @@ def profile_payload(profile, player_id: int | None = None) -> dict:
         for key in ("think:fold", "think:call", "think:check", "think:aggro",
                     "think:pf", "think:flop", "think:turn", "think:river")
         if profile.means.get(key)
-    }
-    payload["timing_tells"] = [as_json(c, "action_label") for c in timing_tells(profile)]
-    from ..gto import compare as _gto_compare
-    from ..gto import rating as _gto_rating
-    _grows = _gto_compare(profile)
-    payload["gto"] = {
-        "rating": _gto_rating(_grows),
-        "rows": [as_json(r, "deviation") | {"opps": round(r.opps, 1)}
-                 for r in _grows],
     }
     return payload
 

@@ -18,7 +18,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .dynamics import adjustments, unified_read, versus_read
+from .dynamics import adjustments, unified_read
 from .features import record_hands
 from .model import Hand, hand_from_dict, stored_form
 from .stats import VS_HERO, Meter, Ratio, StatBook
@@ -991,10 +991,13 @@ class Store:
 
     def session_books(self, hand_ids: list[str]) -> dict:
         """Books built from one sitting's hands only."""
-        from .features import record_hands
-        from .model import hand_from_dict
+        return record_hands(self.session_hands(hand_ids))
+
+    def session_hands(self, hand_ids: list[str]) -> list[Hand]:
+        """One sitting's hands, keyed to player ids, with their card-scored
+        facts attached -- ready for anything that reads a sitting hand by hand."""
         if not hand_ids:
-            return {}
+            return []
         _, resolve = self.alias_resolver()
         hands = []
         marks = ",".join("?" * len(hand_ids))
@@ -1008,89 +1011,45 @@ class Store:
             # whole sitting down.
             key_seats(hand, resolve)
             hands.append(hand)
-        self._attach_derived(hands)
-        return record_hands(hands)
+        return self._attach_derived(hands)
 
-    #: Only statistics with a per-*hand* denominator are compared session to
-    #: session. Street-conditioned ones (fold vs turn bet, say) give a handful
-    #: of observations in one sitting, which is enough for a story and not for
-    #: a finding.
-    SESSION_STATS = ("vpip", "pfr", "three_bet", "limp", "wtsd")
+    def session_detail(self, session: dict, books: dict | None = None) -> list[dict]:
+        """Per player: who they were in this sitting, read from its hands alone.
 
-    #: A sitting needs this many opportunities before it is compared at all,
-    #: and the baseline needs this many on top of it. Twenty opportunities and
-    #: a 3 pp gap is a story, not a finding -- the copy already refuses a
-    #: missing baseline, and it should refuse a thin sitting the same way.
-    SESSION_MIN_OPPS = 40
-    SESSION_MIN_BASELINE = 60
-
-    def session_detail(self, session: dict) -> list[dict]:
-        """Per player: what they did in this sitting, against their own norm.
-
-        The baseline is the player's other hands, not this sitting's -- comparing
-        a session against a total that contains it shrinks every difference
-        toward nothing, and the more of their history this sitting is, the more
-        it hides."""
-        from .priors import REGIME_LABELS
-        books = self.session_books(session["hand_ids"])
+        A sitting-only read, so it can disagree with the pooled one -- and when
+        it does, the review says where. ``books`` saves rebuilding them when the
+        caller already has the sitting's hands."""
+        from .analyze import enrich
+        from .profile import build_profile
+        books = books if books is not None else self.session_books(session["hand_ids"])
         names = {str(r["id"]): r["display_name"] for r in self.players()}
         out = []
         for pid, by_regime in books.items():
             if pid.startswith(UNATTRIBUTED):
                 continue      # seated, counted for others, owned by nobody
             hands = sum(b.hands for b in by_regime.values())
-            # Summed across every table size played this sitting -- unlike
-            # the deltas below, a result does not need a same-regime baseline
-            # to mean something, it just needs adding up.
+            # Summed across every table size played this sitting: a result
+            # does not need a same-regime baseline to mean something.
             net_bb = sum(b.meters["net_bb"].total for b in by_regime.values()
                         if "net_bb" in b.meters)
-            stored = self.books(int(pid))
-            deltas = []
-            # Compared inside a table size, never across one. 55% VPIP is tight
-            # heads-up and wild at a full ring, so pooling the two and reporting
-            # the difference measures which table they sat at, not how they
-            # played.
-            for regime, book in by_regime.items():
-                baseline = stored.get(regime)
-                if baseline is None:
-                    continue
-                for stat, ratio in sorted(book.ratios.items()):
-                    if stat not in self.SESSION_STATS or not ratio.opps:
-                        continue
-                    total = baseline.ratios.get(stat)
-                    if total is None or ratio.opps < self.SESSION_MIN_OPPS:
-                        continue
-                    rest_hits = total.hits - ratio.hits
-                    rest_opps = total.opps - ratio.opps
-                    if rest_opps < self.SESSION_MIN_BASELINE:
-                        continue      # no history at this table size to differ from
-                    here, usual = ratio.hits / ratio.opps, rest_hits / rest_opps
-                    if abs(here - usual) < 0.03:
-                        continue      # not a difference, just arithmetic noise
-                    deltas.append({"stat": stat, "regime": regime,
-                                   "regime_label": REGIME_LABELS.get(regime, regime),
-                                   "session": round(here, 4),
-                                   "usual": round(usual, 4),
-                                   "delta": round(here - usual, 4),
-                                   "opps": round(ratio.opps, 1)})
-            deltas.sort(key=lambda d: -abs(d["delta"]))
-            # A read built from this sitting alone, so the trends sit next to
-            # what the player looked like while they were producing them.
-            # Same finish step as Database/CLI -- a sitting that skipped
-            # enrich drifted the moment the next leak rule landed.
-            from .analyze import enrich
-            from .profile import build_profile
+            # Same finish step as Database/CLI -- a sitting that skipped enrich
+            # drifted the moment the next leak rule landed.
             primary = max(by_regime.items(), key=lambda kv: kv[1].hands)[1]
             snap = enrich(build_profile(
                 primary, by_regime,
                 priors=self.fitted_priors(primary.regime) or None))
             out.append({"player_id": int(pid), "name": names.get(pid, pid),
-                        "hands": hands, "net_bb": round(net_bb, 1), "deltas": deltas,
+                        "hands": hands, "net_bb": round(net_bb, 1),
                         "regimes": sorted(by_regime),
                         "archetype": snap.archetype,
                         "confidence": round(snap.archetype_confidence, 3),
                         "skill": (None if not snap.skill.measured
                                   else snap.skill.score),
+                        # Shown as provisional below the rating bar: a sitting
+                        # is rarely enough hands for a rating, and ranking the
+                        # table by decisions still needs *some* ordering.
+                        "skill_score": round(snap.skill.score, 1),
+                        "skill_confidence": round(snap.skill.confidence, 2),
                         "skill_tier": snap.skill.tier,
                         "sample_quality": snap.sample_quality,
                         "regime_label": snap.regime_label})
@@ -1325,6 +1284,20 @@ class Store:
         and SQLite caps bound variables per statement, so IN fails with "too
         many SQL variables" on exactly the large imports that most need the
         narrowing."""
+        wanted = self._hand_ids_for(keys)
+        if not wanted:
+            return None
+        self.conn.execute(f"DROP TABLE IF EXISTS temp.{temp}")
+        self.conn.execute(f"CREATE TEMP TABLE {temp} (hand_id TEXT PRIMARY KEY)")
+        self.conn.executemany(
+            f"INSERT OR IGNORE INTO temp.{temp} (hand_id) VALUES (?)",
+            [(h,) for h in wanted])
+        return ("SELECT h.site, h.payload FROM hands h"
+                f" JOIN temp.{temp} w ON w.hand_id = h.hand_id"
+                " ORDER BY h.started_at"), len(wanted)
+
+    def _hand_ids_for(self, keys: set[tuple[str, str]]) -> set[str]:
+        """Every hand those aliases sat in, from the seat index alone."""
         # Candidates through the account index, then the exact rule in Python:
         # scanning every seat row in Python cost 169ms per call whatever the
         # player's size, and this runs on every link, split and evidence open.
@@ -1344,16 +1317,13 @@ class Store:
             if (row["site"], row["account"]) in keys
             or (row["site"], split_key(row["account"], row["name"])) in keys
         }
-        if not wanted:
-            return None
-        self.conn.execute(f"DROP TABLE IF EXISTS temp.{temp}")
-        self.conn.execute(f"CREATE TEMP TABLE {temp} (hand_id TEXT PRIMARY KEY)")
-        self.conn.executemany(
-            f"INSERT OR IGNORE INTO temp.{temp} (hand_id) VALUES (?)",
-            [(h,) for h in wanted])
-        return ("SELECT h.site, h.payload FROM hands h"
-                f" JOIN temp.{temp} w ON w.hand_id = h.hand_id"
-                " ORDER BY h.started_at"), len(wanted)
+        return wanted
+
+    def player_hand_ids(self, player_id: int) -> set[str]:
+        """Ids of every hand a player was dealt into, without opening one."""
+        accounts, _ = self.alias_resolver()
+        return self._hand_ids_for(
+            {key for key, pid in accounts.items() if pid == player_id})
 
     def profiles(self, player_id: int, min_hands: int = 1) -> list:
         """One profile per table size. The detailed view, not the default."""
@@ -1369,8 +1339,6 @@ class Store:
             priors = populations.get(profile.regime) or None
             profile.adjustments = adjustments(
                 {profile.regime: books[profile.regime]}, priors=priors)
-            profile.versus = versus_read({profile.regime: books[profile.regime]},
-                                         priors=priors)
         return built
 
     def profile(self, player_id: int):

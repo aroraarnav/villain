@@ -1,9 +1,8 @@
 """What only your own hand history can tell you.
 
 Villains' cards show at showdown; the exporter's hole cards are visible on
-almost every hand. That makes a counted preflop range, graded folds, missed
-value, and sizing/timing tells possible -- none of which a villain profile
-can honestly claim. :func:`find_hero` picks the seat; the rest hangs off it.
+almost every hand. That makes a counted preflop range, graded folds and a
+sizing tell possible -- none of which a villain profile can honestly claim. :func:`find_hero` picks the seat; the rest hangs off it.
 
 Four conventions hold throughout, so the functions below do not each restate
 them:
@@ -45,8 +44,7 @@ MIN_HERO_HANDS = 100
 #: rather than noise -- consistent standard, not a coincidence. It is the FOLD
 #: bar specifically: folds have a strongly negative mean edge (hero's folded
 #: hands run ~0.26 weaker than the bet they faced, on the live database), so a
-#: loose margin rarely fires by chance. See :class:`GradeKind` for why checks
-#: need a wider one.
+#: loose margin rarely fires by chance.
 MARGIN = 0.05
 
 RANK_ORDER = "23456789TJQKA"
@@ -311,27 +309,18 @@ def _hero_spots(hands: list, hero_id: int, progress=None):
 
 @dataclass(frozen=True)
 class GradeKind:
-    """The whole difference between grading a fold and grading a check.
+    """What a graded decision is compared against: a bar, a noun for the line,
+    and whether a price was faced.
 
-    Same population model, same "did the hand outrank what this line usually
-    represents" comparison; they were written as two parallel class pairs,
-    which put `edge`, `by_street`, `by_texture` and `worst` in the file twice
-    and left the web layer reading `mistakes`/`missed` off one report or the
-    other through getattr. What actually differs is a bar, a noun for the line
-    being compared against, and whether a price was faced -- so that is what
-    this holds, on the precedent :class:`TellKind` already sets below.
-
-    ``margin`` is not shared. Folds have a strongly negative mean edge, so a
-    tight bar rarely fires on noise; checks measure -0.03 mean against a 0.24
-    stdev, and at 0.05 fully 40% of them cross. 0.20 is roughly the 80th
-    percentile of the real distribution and brings that to 19%."""
+    Checks were graded the same way ("missed value") and dropped: their edge
+    is centered near zero with a wide spread, so even a 0.20 bar flagged a
+    fifth of every check hero made -- a list too long to act on."""
     margin: float
     line: str                 # "a bet like that one" / "a check on that line"
     priced: bool              # a fold faces pot odds; a check never does
 
 
 FOLD = GradeKind(margin=MARGIN, line="a bet like that one", priced=True)
-CHECK = GradeKind(margin=0.20, line="a check on that line", priced=False)
 
 
 @dataclass
@@ -497,27 +486,6 @@ def _strength_features(hand, decision: Decision) -> list[float]:
     return features
 
 
-def missed_value(hands: list, hero_id: int, model: StrengthModel,
-                 progress=None) -> GradeReport:
-    """Grade every postflop check hero made against the hand hero actually held."""
-    pending: list[tuple[dict, list[float]]] = []
-    for hand, seat, strengths in _hero_spots(hands, hero_id, progress):
-        for decision in HandView(hand).decisions():
-            if (decision.seat != seat.seat or decision.street is Street.PREFLOP
-                    or decision.action.act is not Act.CHECK):
-                continue
-            strength = strengths.get((seat.seat, decision.street))
-            if strength is None or not hand.big_blind:
-                continue
-            pending.append(({
-                "hand_id": hand.hand_id, "street": int(decision.street),
-                "hole_cards": seat.hole_cards, "board": hand.board_at(decision.street),
-                "strength": strength,
-                "pot_before_bb": decision.action.pot_before / hand.big_blind,
-            }, _strength_features(hand, decision)))
-    return _graded(CHECK, pending, model)
-
-
 # -- tells: does something visible about hero's bet change with the hand behind it ---
 # Two of these, asked the same way of the same decisions -- bet size, and think
 # time. They were written as two parallel class pairs, which meant `gap` and
@@ -537,14 +505,6 @@ MIN_TELL_HANDS = 8
 #: which is the kind of gap an attentive opponent actually notices.
 SIZING_TELL_GAP = 0.15
 
-#: A chosen bar, not a derived one: two seconds is long enough to not be click
-#: noise and short enough that a real habit produces it.
-TIMING_TELL_GAP = 2.0
-
-#: Same cap villain.reads applies before feeding think time to the population
-#: model -- one disconnect or one multi-tabled hand should not own the average.
-THINK_CAP_S = 60.0
-
 #: Hero's hand strength runs 0-1 over what the board allows, so the median is
 #: the split -- a fixed reference, not a value fit from this player's data.
 STRONG_HALF = 0.5
@@ -563,12 +523,9 @@ class Bucket:
 
 @dataclass(frozen=True)
 class TellKind:
-    """The whole difference between the sizing tell and the timing tell.
-
-    ``phrase`` renders the two averages into the sentence and ``warning`` the
-    clause after it -- the only parts that cannot be shared, since a size reads as
-    a percentage of pot and a think time as seconds, and only timing has a
-    direction worth naming."""
+    """How a tell is judged and worded: the gap it must clear, and the sentence
+    the two averages render into. A timing tell used to share this shape; it
+    was dropped because online clocks carry too much noise to act on."""
     gap_bar: float
     verb: str
     phrase: Callable[[float, float], str]
@@ -583,16 +540,6 @@ SIZING = TellKind(
     warning=lambda gap: ("a gap big enough that an observant opponent could "
                          "read your size."),
 )
-
-TIMING = TellKind(
-    gap_bar=TIMING_TELL_GAP, verb="you took",
-    phrase=lambda strong, weak: (f"{strong:.1f}s to bet your strongest hands "
-                                 f"and {weak:.1f}s with your weakest"),
-    warning=lambda gap: ("a gap big enough to suggest you "
-                         + ("tank with your bluffs" if gap < 0
-                            else "take longer with your strong hands") + "."),
-)
-
 
 @dataclass
 class Tell:
@@ -652,10 +599,10 @@ def _aggression_tell(hands: list, hero_id: int, kind: TellKind,
                      measure, progress=None) -> Tell:
     """Split hero's own bets and raises by the strength behind them.
 
-    Scoped to bets and raises for both kinds: "does hero's aggression carry a
-    tell" is narrower and more answerable than grading every action type. It is
-    answerable at all only because hero's strength is known on every action, not
-    just the ones that reached showdown."""
+    Scoped to bets and raises: "does hero's aggression carry a tell" is
+    narrower and more answerable than grading every action type. It is
+    answerable at all only because hero's strength is known on every action,
+    not just the ones that reached showdown."""
     by_street: dict[int, tuple[Bucket, Bucket]] = {
         int(s): (Bucket("top half"), Bucket("bottom half"))
         for s in (Street.FLOP, Street.TURN, Street.RIVER)
@@ -681,47 +628,3 @@ def sizing_tell(hands: list, hero_id: int, progress=None) -> Tell:
     strength off bet size alone, without ever seeing a card."""
     return _aggression_tell(hands, hero_id, SIZING,
                             lambda d: d.bet_fraction, progress)
-
-
-def timing_tell(hands: list, hero_id: int, progress=None) -> Tell:
-    """Does hero take longer to act with one half of the strength range than the
-    other? A snap bet and a tanked one are different information if they
-    correlate with strength."""
-    return _aggression_tell(
-        hands, hero_id, TIMING,
-        lambda d: min((d.action.think_ms or 0) / 1000.0, THINK_CAP_S), progress)
-
-
-# -- range narrowing: does hero's continuing range actually get stronger -------
-# Purely descriptive -- no model, no comparison to a bar. A continuing range
-# is supposed to narrow to the hands that held up, so average hand strength
-# among hands still live should trend upward street by street. Whether it
-# does is a sanity check on hero's own postflop discipline, not a priced leak.
-
-
-@dataclass
-class StreetStrength:
-    street: int
-    hands: int
-    avg_strength: float
-
-
-def range_narrowing(hands: list, hero_id: int, progress=None) -> list[StreetStrength]:
-    """Average hand strength among hero's hands still live at each street, flop
-    through river.
-
-    "Still live" uses HandView.saw, reconstructed from who folded when rather
-    than from who happened to act -- the same building block the rest of the
-    stats engine uses to avoid counting a player who folded before a street was
-    dealt."""
-    totals: dict[int, list[float]] = {int(s): [] for s in (Street.FLOP, Street.TURN, Street.RIVER)}
-    for hand, seat, strengths in _hero_spots(hands, hero_id, progress):
-        view = HandView(hand)
-        for street in (Street.FLOP, Street.TURN, Street.RIVER):
-            if seat.seat not in view.saw.get(street, ()):
-                continue
-            strength = strengths.get((seat.seat, street))
-            if strength is not None:
-                totals[int(street)].append(strength)
-    return [StreetStrength(street=s, hands=len(vals), avg_strength=sum(vals) / len(vals))
-            for s, vals in totals.items() if vals]

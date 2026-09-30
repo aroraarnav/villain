@@ -248,6 +248,25 @@ ARCHETYPES: list[Archetype] = [
 
 ARCHETYPE_BY_NAME = {a.name: a for a in ARCHETYPES}
 
+#: What each plan assumes about the player, as stat -> direction (+1 does it
+#: more than the field, -1 less). Separate from ``traits`` on purpose: traits
+#: are what *matching* weighs, this is what the *advice* stands on. A limper is
+#: matched mostly on how rarely they raise, but "raise over their limps" is
+#: only true while they limp -- so a sitting where they stopped limping is the
+#: one that makes the plan stale, whatever their raise share did.
+PLAN_PREMISE: dict[str, dict[str, int]] = {
+    "nit": {"vpip": -1, "bb_defend": -1},
+    "station": {"fold_vs_bet:river": -1, "fold_vs_bet:turn": -1, "wtsd": +1},
+    "overfolder": {"fold_vs_bet:flop": +1, "fold_vs_bet:turn": +1, "fold_vs_bet:river": +1},
+    "maniac": {"pfr": +1, "three_bet": +1},
+    "lag": {"vpip": +1, "pfr": +1},
+    "tag": {"vpip": -1, "raise_share": +1},
+    "tight passive": {"vpip": -1, "cbet:flop": -1},
+    "loose passive": {"vpip": +1, "raise_share": -1},
+    "limper": {"limp": +1},
+    "trapper": {"check_raise:flop": +1, "cbet:flop": -1},
+}
+
 #: Folding too much and too little are the same mistake; signed deviations
 #: cannot say that. Competent known labels sit ≤0.064 from the reference,
 #: weak ones ≥0.069.

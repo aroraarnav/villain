@@ -12,15 +12,10 @@ import tempfile
 import time
 from pathlib import Path
 
-from ..analyze import enrich
 from ..db import Store, split_key
-from ..dynamics import unified_read
-from ..features import record_hands
 from ..identity import askable_questions, auto_answers
 from ..model import hand_from_dict, hand_to_dict
 from ..parsers import parse_file
-from .heroview import _to_you
-from .payloads import profile_payload, roster_row
 
 SESSIONS: dict[str, dict] = {}
 #: Live practice games, held in memory only. Keyed by an opaque token.
@@ -118,33 +113,6 @@ def merged_hands(session: dict, extra: dict | None = None) -> list:
     return hands
 
 
-def session_identity_labels(session: dict) -> dict[str, dict]:
-    """Per pooled display name: session aliases, and the database name if
-    linked. After auto-merge the title is often already the database name, and
-    the muted line still has to show what is merging with what."""
-    answers = session.get("answers") or {}
-    by_keep: dict[str, dict] = {}
-    for question in session.get("questions") or []:
-        answer = answers.get(question.id)
-        if not answer or not answer.get("same"):
-            continue
-        keep = answer.get("name") or question.default_name
-        if not keep:
-            continue
-        entry = by_keep.setdefault(keep, {"db_name": None, "session_names": []})
-        sides = [s for s in (question.left, question.right) if s]
-        db_side = next((s for s in sides
-                        if "database" in (s.get("where") or "")), None)
-        if db_side and db_side.get("name"):
-            entry["db_name"] = db_side["name"]
-        for side in sides:
-            name = side.get("name")
-            where = side.get("where") or ""
-            if name and "session" in where and name not in entry["session_names"]:
-                entry["session_names"].append(name)
-    return by_keep
-
-
 def _conflicting_pairs(session: dict) -> list[list[str]]:
     """Accounts in this batch that provably are not the same person.
 
@@ -177,11 +145,10 @@ def _conflicting_pairs(session: dict) -> list[list[str]]:
 def session_brief(token: str) -> dict:
     """What an upload needs to know, without profiling anything.
 
-    :func:`session_payload` builds the whole preview because the session *view*
-    shows profiles before you save. An import needs only the token, the counts
-    and the questions, then commits and computes it all again from the stored
-    hands -- 80s of native CPU on a 71k import, an order of magnitude worse in
-    the browser, under a bar that said "matching players"."""
+    An import needs only the token, the counts and the questions, then commits
+    and computes everything from the stored hands. Profiling here was 80s of
+    native CPU on a 71k import, an order of magnitude worse in the browser,
+    under a bar that said "matching players"."""
     session = SESSIONS[token]
     return {
         "token": token,
@@ -211,89 +178,6 @@ def session_brief(token: str) -> dict:
         "merges": [{"from": k[1], "to": v["name"]}
                    for k, v in (session.get("merges") or {}).items()],
     }
-
-
-def session_payload(token: str, store: Store | None = None) -> dict:
-    """Profiles for an uploaded session. Reads the store, never writes to it."""
-    from ..hero import hero_of
-    session = SESSIONS[token]
-    extra = database_merges(store, session["hands"]) if store is not None else None
-    mhands = list(merged_hands(session, extra))
-    books = record_hands(mhands)
-    # The exporter is hero, the same person the Hero tab is about.
-    hero_key = hero_of(mhands)
-
-    # Same shrink as database profiles when this pool has fitted priors. No
-    # ``versus``: an uploaded session is previewed before it is saved, and
-    # attaching one here would be a behavior change, not a refactor.
-    populations = store.fitted_by_regime() if store is not None else None
-    keyed = [(k, unified_read(by_regime, populations if by_regime else None,
-                              versus=False))
-             for k, by_regime in books.items()]
-    keyed = [(k, p) for k, p in keyed if p is not None]
-    keyed.sort(key=lambda kp: -kp[1].hands)
-
-    labels = session_identity_labels(session)
-    # Also surface database display names from already-linked aliases when the
-    # session did not need a question (same account id, same name).
-    if store is not None:
-        alias_names = {
-            (r["site"], r["account"]): r["name"]
-            for r in store.conn.execute(
-                "SELECT site, account, name FROM aliases")
-        }
-        player_names = {int(r["id"]): r["display_name"] for r in store.players()}
-        alias_player = {
-            (r["site"], r["account"]): int(r["player_id"])
-            for r in store.conn.execute(
-                "SELECT site, account, player_id FROM aliases")
-        }
-        for hand in session["hands"]:
-            for seat in hand.seats:
-                key = (hand.site, seat.player_id)
-                pid = alias_player.get(key) or alias_player.get(
-                    (hand.site, split_key(seat.player_id, seat.name)))
-                if pid is None:
-                    continue
-                db_name = player_names.get(pid) or alias_names.get(key)
-                if not db_name:
-                    continue
-                # Profile name after merge is the keep/db name.
-                keep = db_name
-                entry = labels.setdefault(
-                    keep, {"db_name": None, "session_names": []})
-                entry["db_name"] = db_name
-                if seat.name and seat.name not in entry["session_names"]:
-                    entry["session_names"].append(seat.name)
-
-    rows = []
-    profile_payloads = []
-    for player_key, profile in keyed:
-        enrich(profile)
-        link = labels.get(profile.name) or {}
-        db_name = link.get("db_name")
-        session_names = [n for n in (link.get("session_names") or [])
-                         if n and n != profile.name]
-        if db_name and db_name != profile.name and profile.name not in session_names:
-            session_names = [profile.name] + session_names
-        is_hero = hero_key is not None and player_key == hero_key
-        row = roster_row(profile) | {
-            "player_id": None, "is_hero": is_hero,
-            "db_name": db_name if db_name else None,
-            "session_names": session_names,
-        }
-        rows.append(row)
-        pp = profile_payload(profile)
-        pp["db_name"] = row["db_name"]
-        pp["session_names"] = row["session_names"]
-        pp["is_hero"] = is_hero
-        if is_hero:                       # blue identity + second-person voice
-            pp = _to_you(pp)
-        profile_payloads.append(pp)
-    # The brief is the whole answer bar the two keys profiling adds, and it was
-    # copied out here in full -- so the note explaining `answered` existed
-    # twice, and had already been corrected in only one of them.
-    return session_brief(token) | {"players": rows, "profiles": profile_payloads}
 
 
 def question_payload(question) -> dict:

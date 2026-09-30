@@ -133,21 +133,17 @@ function renderGradedSection(el, section, opts) {
   }
 }
 
-//: Shared by sizing and timing -- both need bets/raises, so a thin sample
-//: reads the same way in either one.
 const TELL_EMPTY_TEXT = "Not enough postflop bets or raises with a clean line to compare yet.";
 
-/* sizing_tell and timing_tell share a shape too: street -> {strong, weak,
-   in_words}. One renderer for both. */
-/* A sizing or timing tell is one comparison -- what you do with the top half
+/* A sizing tell is one comparison -- what you do with the top half
    of your range against what you do with the bottom half -- and the tell is
    the *gap* between them. A sentence makes the reader hold two numbers in
    their head and subtract. Two bars on a shared scale make the gap the thing
    you see, which is the same reason the against-you panel is drawn this way,
    and this reuses that pattern rather than inventing a second one.
 
-   `fmt` renders a bucket's average: pot fraction for sizing, seconds for
-   timing. `unit` names it once per row instead of on both bars. */
+   `fmt` renders a bucket's average; `unit` names it once per row instead of
+   on both bars. */
 function renderTellSection(el, section, opts) {
   const rows = Object.entries(section || {});
   if (!rows.length) {
@@ -185,57 +181,6 @@ function renderTellSection(el, section, opts) {
     }
     el.appendChild(block);
   }
-}
-
-/* Average strength of the hands still live, street by street. A continuing
-   range is supposed to get stronger as the wide parts give up along the way,
-   so the shape of the line *is* the finding -- printed as "flop 48% (61)
-   turn 52% (39) river 55% (22)" it was three numbers the reader had to plot
-   themselves. */
-function narrowingChart(rows) {
-  // Axis, labels and values all inside the SVG: street names in a sibling
-  // flex row line up with the dots only by luck, since the dots are inset by
-  // the plot padding. The right margin is a gutter for the median label.
-  const W = 380, H = 152;
-  const x0 = 40, x1 = W - 84, y0 = 18, y1 = 92;
-  const y = v => y1 - Math.max(0, Math.min(1, v)) * (y1 - y0);
-  const x = i => rows.length < 2 ? (x0 + x1) / 2 : x0 + (i * (x1 - x0)) / (rows.length - 1);
-  const svg = el("svg", {viewBox: `0 0 ${W} ${H}`, class: "narrow-chart", role: "img",
-    "aria-label": rows.map(r => `${r.street} ${fmtPct(r.avg_strength)}`).join(", ")});
-  // The full 0-100 scale, labeled. Without it a range that holds steady near
-  // the median draws a flat line in the middle of an unlabeled box, which
-  // reads as a broken chart rather than as the finding it is.
-  for (const q of [0, 0.5, 1]) {
-    const median = q === 0.5;
-    el("line", {x1: x0, y1: y(q), x2: x1, y2: y(q),
-                stroke: median ? "var(--axis)" : "var(--grid)", "stroke-width": 1,
-                "stroke-dasharray": median ? "3 3" : null}, svg);
-    const lab = el("text", {x: x0 - 8, y: y(q) + 3.5, "text-anchor": "end",
-      "font-size": 10, fill: "var(--muted)", class: "fig-t"}, svg);
-    lab.textContent = `${q * 100}`;
-  }
-  // 0.5 is the median hand the board allows -- the same split the sizing tell
-  // buckets on -- so it is a real reference, not a threshold someone chose.
-  const medLab = el("text", {x: x1 + 8, y: y(0.5) + 3.5, "text-anchor": "start",
-    "font-size": 9.5, fill: "var(--muted)", "letter-spacing": ".06em"}, svg);
-  medLab.textContent = "MEDIAN HAND";
-  el("polyline", {points: rows.map((r, i) => `${x(i)},${y(r.avg_strength)}`).join(" "),
-    fill: "none", stroke: "var(--hero)", "stroke-width": 2,
-    "stroke-linejoin": "round", "stroke-linecap": "round"}, svg);
-  rows.forEach((r, i) => {
-    el("circle", {cx: x(i), cy: y(r.avg_strength), r: 5.5, fill: "var(--panel)"}, svg);
-    el("circle", {cx: x(i), cy: y(r.avg_strength), r: 3.5, fill: "var(--hero)"}, svg);
-    const name = el("text", {x: x(i), y: H - 26, "text-anchor": "middle", "font-size": 10,
-      "font-weight": 600, "letter-spacing": ".06em", fill: "var(--muted)"}, svg);
-    name.textContent = r.street.toUpperCase();
-    const val = el("text", {x: x(i), y: H - 11, "text-anchor": "middle", "font-size": 11,
-      fill: "var(--ink)", class: "fig-t"}, svg);
-    val.textContent = fmtPct(r.avg_strength);
-    const hit = el("rect", {x: x(i) - 26, y: 0, width: 52, height: H, fill: "transparent"}, svg);
-    bindTip(hit, `<b>${esc(r.street)}</b> — average strength ${fmtPct(r.avg_strength)}<br>
-      <span class="muted">over ${r.hands} hands still live</span>`);
-  });
-  return svg;
 }
 
 const SUIT = {s: "♠", h: "♥", d: "♦", c: "♣"};

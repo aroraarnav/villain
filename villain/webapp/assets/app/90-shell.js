@@ -120,8 +120,7 @@ async function render() {
   try {
     if (!state.glossary) state.glossary = await get("/api/glossary");
     if (mine !== renderSeq) return;          // superseded while we waited
-    if (state.tab === "session") viewSession();
-    else if (state.tab === "sessions") await viewSessions();
+    if (state.tab === "sessions") await viewSessions();
     else if (state.tab === "hero") await viewHero();
     else if (state.tab === "play") await viewPlay();
     else await viewPlayers();

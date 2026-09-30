@@ -101,9 +101,8 @@ async function viewHero() {
   // per-leak "do this to them").
   const dash = profileCard(data.self, {heroId: data.hero_id, hero: true});
 
-  // Grid and position breakdown side by side: two views of the same range,
-  // one by hand the other by seat. dash-cols is the two-panel layout the
-  // skill/read split already uses on a player's own page.
+  // The grid (what you played, hand by hand) beside the audit (which of those
+  // were wrong, spot by spot): the grid shows a shape, the audit names hands.
   const rangeCols = h("div", "dash-cols wide");
   const gridCol = h("div", "col", `<div class="panel">
     <h2 id="hero-range-head">preflop range</h2>
@@ -111,33 +110,20 @@ async function viewHero() {
     <div id="hero-grid"></div>
     <div class="range-legend"><span>never</span><span class="ramp"></span><span>always</span></div>
   </div>`);
-  const posCol = h("div", "col", `<div class="panel">
-    <h2>by position</h2>
-    <div id="hero-positions"></div>
-  </div>`);
-  rangeCols.append(gridCol, posCol);
+  const spotCol = h("div", "col");
+  spotCol.appendChild(preflopPanel({preflop: data.spots || [], hero_id: data.hero_id}));
+  rangeCols.append(gridCol, spotCol);
 
   const gradesPanel = h("div", "panel wide", `
-    <h2 id="hero-grades-head">fold grades &amp; missed value</h2>
-    <h3>fold grades</h3>
-    <div id="hero-folds"></div>
-    <h3>missed value</h3>
-    <div id="hero-missed"></div>`);
+    <h2 id="hero-grades-head">fold grades</h2>
+    <div id="hero-folds"></div>`);
   dash.appendChild(gradesPanel);
   dash.appendChild(rangeCols);
 
   const tellsPanel = h("div", "panel wide", `
-    <h2 id="hero-tells-head">sizing &amp; timing tells</h2>
-    <div class="tellcols">
-      <div><h3>sizing</h3><div id="hero-sizing"></div></div>
-      <div><h3>timing</h3><div id="hero-timing"></div></div>
-    </div>`);
+    <h2 id="hero-tells-head">sizing tell</h2>
+    <div id="hero-sizing"></div>`);
   dash.appendChild(tellsPanel);
-
-  const narrowingPanel = h("div", "panel wide", `
-    <h2 id="hero-narrowing-head">range narrowing</h2>
-    <div id="hero-narrowing"></div>`);
-  dash.appendChild(narrowingPanel);
 
   // Self machinery first. profileCard builds the same tiles it builds for a
   // villain -- key numbers, priced leaks, skill -- and on this tab those are
@@ -166,83 +152,23 @@ async function viewHero() {
   $("#hero-grades-head", dash).appendChild(info(
     `${termTip("percentile")}<br><br><span class="hl">fold grades</span> --
     postflop folds, graded against what a bet like that one usually turns out
-    to be.<br><br><span class="hl">missed value</span> -- the mirror question,
-    asked of checks that could have bet instead.`));
+    to be.`));
   $("#hero-tells-head", dash).appendChild(info(
-    `Does your bet size, or think time, change with the hand behind it?
-    Nobody's hand strength is known often enough to ask a villain this --
-    yours is known on every bet, not just the ones that reached showdown.`));
-  $("#hero-narrowing-head", dash).appendChild(info(
-    `A continuing range is supposed to get stronger street by street, as the
-    wide ones give up along the way. Average hand strength among hands still
-    live, by street, says whether yours does.`));
+    `Does your bet size change with the hand behind it? Nobody's hand
+    strength is known often enough to ask a villain this -- yours is known on
+    every bet, not just the ones that reached showdown.`));
 
   $("#hero-grid", dash).appendChild(rangeGrid(data.grid));
 
-  const positions = $("#hero-positions", dash);
-  const ranges = [...(data.ranges || [])].sort(
-    (a, b) => POSITION_ORDER.indexOf(a.position) - POSITION_ORDER.indexOf(b.position));
-  const ring = positionRing(ranges);
-  if (ring) {
-    positions.appendChild(ring);
-    positions.insertAdjacentHTML("beforeend",
-      `<div class="panel-lead pos-note">Share of hands played from each seat,
-       shaded against your widest.</div>`);
-  } else {
-    // One seat is not a ring. Fall back to the row the rest of the app uses.
-    positions.className = "hero-pos";
-    for (const r of ranges) {
-      if (!r.hands) continue;
-      const played = (r.raised + r.called) / r.hands;
-      const row = h("div", "pos-row", `
-        <span class="pos-name">${esc(r.position)}<span class="small muted"> ${r.hands}h</span></span>
-        <span class="pos-bar"></span>
-        <span class="pos-val small muted">${fmtPct(played)} played</span>`);
-      const b = bar(played, 1, "var(--mark-3)", 150);
-      b.setAttribute("preserveAspectRatio", "none");
-      $(".pos-bar", row).appendChild(b);
-      positions.appendChild(row);
-    }
-  }
-
   if (data.grade_error) {
     $("#hero-folds", dash).innerHTML = `<div class="small muted">${esc(data.grade_error)}</div>`;
-    $("#hero-missed", dash).innerHTML = "";
   } else {
     renderGradedSection($("#hero-folds", dash), data.fold_grades, {
       noun: "folds", heroId: data.hero_id,
       verdict: "had more edge than the bet typically shows",
       emptyText: "Not enough postflop folds with a clean line to grade yet.",
     });
-    renderGradedSection($("#hero-missed", dash), data.missed_value, {
-      noun: "checks", heroId: data.hero_id,
-      verdict: "had more edge than the check typically shows",
-      emptyText: "Not enough postflop checks with a clean line to grade yet.",
-    });
   }
 
-  // Sizing is a share of the pot, timing is seconds -- same comparison, two
-  // units, so the formatter travels with the call.
   renderTellSection($("#hero-sizing", dash), data.sizing, {unit: "of pot"});
-  renderTellSection($("#hero-timing", dash), data.timing, {
-    unit: "to act", fmt: v => `${v.toFixed(1)}s`});
-
-  const narrowing = $("#hero-narrowing", dash);
-  if (!data.narrowing || !data.narrowing.length) {
-    narrowing.innerHTML = `<div class="small muted">Not enough hands reaching
-      each street yet.</div>`;
-  } else {
-    const chart = h("div", "narrow-wrap");
-    chart.appendChild(narrowingChart(data.narrowing));
-    narrowing.appendChild(chart);
-    const strengths = data.narrowing.map(s => s.avg_strength);
-    if (strengths.length >= 2) {
-      const monotone = strengths.every((v, i) => i === 0 || v >= strengths[i - 1]);
-      const note = h("p", "small muted");
-      note.textContent = monotone
-        ? "Narrows street by street, as a continuing range should."
-        : "Does not narrow monotonically -- worth a look at which street gives it back.";
-      narrowing.appendChild(note);
-    }
-  }
 }
