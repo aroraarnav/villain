@@ -83,6 +83,15 @@ def test_every_archetype_is_recovered_from_its_own_frequencies(synth_profile):
             assert match(profile)[0] == arch.name, f"{arch.name} at {regime_name}"
 
 
+def test_a_limper_has_to_limp(synth_profile):
+    """The limper plan is "raise their limps". Every other limper trait --
+    rarely raising, folding flops -- with limping pulled down to never must
+    not carry that label, or the advice is for a player who is not there."""
+    profile = synth_profile("limper", regime="6max", opps=200,
+                            overrides={"limp": 0.0})
+    assert match(profile)[0] != "limper"
+
+
 def test_thin_samples_stay_uncertain(synth_profile):
     thin = synth_profile("station", opps=4)
     thick = synth_profile("station", opps=200)

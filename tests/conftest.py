@@ -65,13 +65,13 @@ def seeded(store, hands):
 def synth_profile():
     """A player who plays exactly like a named archetype, at a given sample size."""
     def build(archetype: str, regime: str = "6max", opps: int = 60, noise: float = 0.0,
-              seed: int = 0):
+              seed: int = 0, overrides: dict[str, float] | None = None):
         arch = ARCHETYPE_BY_NAME[archetype]
         rng = np.random.default_rng(seed)
         book = StatBook(player_id=f"synth-{archetype}", name=archetype,
                         regime=regime, hands=opps * 3)
         for feature in PROFILE_FEATURES:
-            p = target_frequency(arch, feature, regime)
+            p = (overrides or {}).get(feature, target_frequency(arch, feature, regime))
             if noise:
                 p = float(np.clip(p + rng.normal(0, noise), 0.02, 0.97))
             book.ratios[feature].hits = round(p * opps)
