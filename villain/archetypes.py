@@ -23,7 +23,12 @@ IMPORTANCE = {
     # that single question and, with n_preflop >> n_river, decided the label
     # outright. Volume (vpip) stays; the rest of the block is halved.
     "vpip": 2.0, "pfr": 0.9, "raise_share": 1.4, "three_bet": 1.2,
-    "fold_to_three_bet": 0.6, "limp": 0.7, "bb_defend": 1.0,
+    # Limp is the one preflop question no other feature asks: raise share
+    # cannot tell a limper from a player who cold-calls raises. At 0.7 the
+    # limper was matched on raise share, so a player who never limped could
+    # carry a plan that says "raise their limps". 1.6 improved held-out log
+    # loss 1.680 -> 1.658 and calibration error 0.012 -> 0.002.
+    "fold_to_three_bet": 0.6, "limp": 1.6, "bb_defend": 1.0,
     # Station / maniac / trapper / TAG vs weak-tight are postflop questions.
     "aggression:flop": 1.8, "aggression:turn": 1.8, "aggression:river": 1.5,
     "cbet:flop": 1.3, "cbet:turn": 1.1, "cbet:river": 0.8,
@@ -218,9 +223,11 @@ ARCHETYPES: list[Archetype] = [
         "cheap flops, so they miss constantly and give up when they do. "
         "Slow down when they call the flop -- that call means something "
         "real -- and fold to their raises without hesitation.",
-        # +0.9 not +2.5: limp's fitted spread is 1.60 vs assumed 1.00, so
-        # +2.5 was past anyone in the pool. This bucket held 22%.
-        {"raise_share": -1.1, "vpip": +0.2, "pfr": -1.0, "limp": +0.7, "three_bet": -0.9,
+        # Limp first: the plan is "raise their limps", so it is the trait the
+        # label has to mean. +1.2 not +2.5: limp's fitted spread is 1.60 vs
+        # assumed 1.00, so +2.5 was past anyone in the pool. Raise share and
+        # PFR follow from limping and are eased so they no longer lead.
+        {"raise_share": -0.7, "vpip": +0.2, "pfr": -0.6, "limp": +1.2, "three_bet": -0.9,
          "fold_to_cbet:flop": +0.7, "fold_vs_bet:flop": +0.6,
          "aggression:flop": -0.9, "cbet:flop": -0.3, "wwsf": -0.7},
     ),
