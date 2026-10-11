@@ -626,7 +626,8 @@
              letter-spacing: -0.02em; margin: 3px 0; }
   .pnl-big.up { color: var(--up); }
   .pnl-big.down { color: var(--danger); }
-  .think-bubble { position: absolute; bottom: calc(100% + 8px); left: 50%; transforborder: 1px solid var(--edge); border-radius: 10px; padding: 7px 10px;
+  .think-bubble { position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+    background: var(--panel); border: 1px solid var(--edge); border-radius: 10px; padding: 7px 10px;
     width: 188px; box-shadow: 0 8px 22px rgba(0,0,0,.45); z-index: 6; font-size: 12px; text-align: left; }
   .think-bubble.below { bottom: auto; top: calc(100% + 8px); }
   /* Seats near an edge anchor their bubble to that edge instead of centering
