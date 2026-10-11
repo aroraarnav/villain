@@ -125,7 +125,7 @@ async function viewPlayer(id) {
     const panel = h("div", "panel", `<h2>split by table size</h2>
       <div class="small muted" style="margin:0 0 12px">
         The read above pools these.</div>
-      <div class="scroller"><table><thead><tr>
+      <div class="scroller"><table class="by-table"><thead><tr>
         <th>table</th><th class="num">hands</th><th>read</th>
         <th class="num">skill</th><th>biggest leak</th>
       </tr></thead><tbody></tbody></table></div>`);
