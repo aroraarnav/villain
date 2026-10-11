@@ -159,6 +159,7 @@ async function viewHero() {
     every bet, not just the ones that reached showdown.`));
 
   $("#hero-grid", dash).appendChild(rangeGrid(data.grid));
+  holdToGrid($(".panel", gridCol), $(".panel", spotCol));
 
   if (data.grade_error) {
     $("#hero-folds", dash).innerHTML = `<div class="small muted">${esc(data.grade_error)}</div>`;
@@ -171,4 +172,25 @@ async function viewHero() {
   }
 
   renderTellSection($("#hero-sizing", dash), data.sizing, {unit: "of pot"});
+}
+
+/* The by-spot list runs to several times the grid's height, and the grid is
+   the thing the pair is about -- so the list is held to the grid's height
+   until asked for in full. The grid's height follows its width, so the hold
+   is re-measured whenever the grid resizes. */
+function holdToGrid(grid, panel) {
+  const more = h("div", "spot-more");
+  const btn = h("button", "linkbtn");
+  more.appendChild(btn);
+  panel.append(more);
+  panel.classList.add("held");
+  const fit = () => {
+    panel.style.setProperty("--hold", `${grid.offsetHeight}px`);
+    const held = panel.classList.contains("held");
+    btn.textContent = held ? "Show all spots" : "Show fewer";
+    // Nothing cut off, nothing to show.
+    more.hidden = held && panel.scrollHeight <= panel.clientHeight;
+  };
+  btn.onclick = () => { panel.classList.toggle("held"); fit(); };
+  new ResizeObserver(fit).observe(grid);
 }

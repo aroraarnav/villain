@@ -964,6 +964,13 @@
                  flex-wrap: wrap; }
   .sr-spot.flagged .sr-spot-label { font-weight: 600; }
   .sr-spot-bar { margin: var(--sp-1) 0; }
+  /* Hero: the by-spot list held to the range grid's height, fading out above
+     its "Show all" until opened. */
+  .spot-more { margin-top: var(--sp-2); }
+  .panel.held { position: relative; max-height: var(--hold); overflow: hidden; }
+  .panel.held .spot-more { position: absolute; left: 0; right: 0; bottom: 0; margin: 0;
+                           padding: var(--sp-6) var(--sp-5) var(--sp-4);
+                           background: linear-gradient(transparent, var(--panel) 55%); }
   .sr-spot-line { display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap;
                   margin-top: var(--sp-1); }
   .sr-spot-line .hand-chips { margin-top: 0; }
