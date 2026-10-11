@@ -163,7 +163,9 @@ async function sitDown(setup) {
 }
 
 const SIM_DELAY = 3000;                 // one beat before every auto-action
-const SIM_COMPACT = window.matchMedia("(max-width: 780px)");
+// A phone, either way up. Laptops report a fine pointer, so a short laptop
+// window keeps the full table.
+const SIM_COMPACT = window.matchMedia("(max-width: 780px), (max-height: 500px) and (pointer: coarse)");
 SIM_COMPACT.addEventListener("change", () => {
   if (state.game && state.tab === "play" && !state.analysis)
     renderTable($("#view"), state.game);
@@ -391,11 +393,18 @@ function renderTable(view, data) {
   const st = data.state, n = st.seats.length;
   const pnl = st.pnl || 0;
   const pnlBb = st.bb ? (pnl / st.bb).toFixed(1) : "0";
-  view.innerHTML = `<div class="panel sim-panel"><div class="sim-layout">
+  // The P/L chip, the menu button and the scrim exist for the phone layout,
+  // where the side panel is a sheet; wider screens hide all three.
+  view.innerHTML = `<div class="panel sim-panel${state.simSideOpen ? " side-open" : ""}"><div class="sim-layout">
     <div class="sim-main">
       <div class="spread"><h2 style="margin:0">hand ${st.hand_no} <span
         class="muted" style="font-weight:400">· ${esc(st.street)}</span></h2>
-        <button class="linkbtn" id="leave">Leave table</button></div>
+        <span class="sim-bar-pnl ${pnl >= 0 ? "up" : "down"}">${pnl >= 0 ? "+" : ""}${pnl}<span
+          class="small muted">${pnl >= 0 ? "+" : ""}${pnlBb} bb</span></span>
+        <button class="linkbtn" id="leave">Leave table</button>
+        <button class="sim-more" id="sim-more" aria-label="Session: P/L, modes, hand log, end"
+          aria-expanded="${!!state.simSideOpen}"><svg viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg></button></div>
       <div class="poker-table" id="ptable">
         <div class="felt-oval"></div>
         <div class="table-center">
@@ -431,10 +440,15 @@ function renderTable(view, data) {
         <div class="handlog-body" id="handlog"></div>
       </div>
     </div>
-  </div></div>`;
+  </div><div class="sim-scrim" id="sim-scrim"></div></div>`;
   const table = $("#ptable");
   const compact = SIM_COMPACT.matches;
-  const rx = compact ? 33 : 40, ry = compact ? 30 : 36;
+  // A phone held upright gives the felt a tall stage. Seats on one fixed
+  // pair of compact radii huddled in its middle and overlapped, so the
+  // vertical radius follows the stage's shape out to its rim.
+  const aspect = compact ? table.clientHeight / Math.max(1, table.clientWidth) : 0;
+  const rx = compact ? (aspect > 1 ? 35 : 33) : 40;
+  const ry = compact ? Math.max(30, Math.min(38, 30 + (aspect - 0.85) * 27)) : 36;
   st.seats.forEach((s, i) => {
     const theta = Math.PI / 2 + (i / n) * 2 * Math.PI;   // you (0) at the bottom
     // Sit on the felt rim, inside the stage. 45/44 hung the hero through the
@@ -480,14 +494,21 @@ function renderTable(view, data) {
     table.appendChild(seat);
     if (s.is_button) {
       const d = h("div", "dealer-btn"); d.textContent = "D";
-      d.style.left = (50 + (compact ? 24 : 29) * Math.cos(theta - 0.4)) + "%";
-      d.style.top = (50 + (compact ? 20 : 24) * Math.sin(theta - 0.4)) + "%";
-      table.appendChild(d);
+      if (compact) {
+        // On the plate's corner. Placed on the felt by angle, on a phone it
+        // landed on your own cards.
+        d.classList.add("on-seat");
+        $(".tseat-body", seat).appendChild(d);
+      } else {
+        d.style.left = (50 + 29 * Math.cos(theta - 0.4)) + "%";
+        d.style.top = (50 + 24 * Math.sin(theta - 0.4)) + "%";
+        table.appendChild(d);
+      }
     }
     if (s.committed > 0 && !st.over) {
       const chip = h("div", "tbet");
-      chip.style.left = (50 + (compact ? 19 : 23) * Math.cos(theta)) + "%";
-      chip.style.top = (50 + (compact ? 16 : 19) * Math.sin(theta)) + "%";
+      chip.style.left = (50 + (compact ? rx * 0.6 : 23) * Math.cos(theta)) + "%";
+      chip.style.top = (50 + (compact ? ry * 0.6 : 19) * Math.sin(theta)) + "%";
       chip.innerHTML = `<span class="chip-dot"></span>${s.committed}`;
       table.appendChild(chip);
     }
@@ -501,6 +522,7 @@ function renderTable(view, data) {
     `<div class="log-line ${logLineKind(l)}">${esc(formatLogLine(l))}</div>`).join("");
   logEl.scrollTop = logEl.scrollHeight;
   $("#leave").onclick = () => {
+    state.simSideOpen = false;
     state.simGen++;
     resetSimClock();
     state.game = null; state.lastEvent = null; state.analysis = null;
@@ -532,7 +554,14 @@ function renderTable(view, data) {
     }
     paintDealCount();
   };
-  $("#end-session").onclick = () => endSession();
+  $("#end-session").onclick = () => { state.simSideOpen = false; endSession(); };
+  const side = (open) => {
+    state.simSideOpen = open;
+    $(".sim-panel").classList.toggle("side-open", open);
+    $("#sim-more").setAttribute("aria-expanded", String(open));
+  };
+  $("#sim-more").onclick = () => side(!state.simSideOpen);
+  $("#sim-scrim").onclick = () => side(false);
   renderControls($("#controls"), data);
   paintDealCount();
   if (state.paused) return;

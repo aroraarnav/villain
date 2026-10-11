@@ -68,3 +68,20 @@
 @media (prefers-reduced-motion: reduce) {
   .guestbar .spin { animation-duration: 2.4s; }
 }
+
+/* Phone: app.css keeps the header on one line there, so the chip gives up
+   the address -- the one part of it a phone can do without -- and the save
+   note truncates rather than pushing the theme button off the edge. The
+   guest bar's form takes the full width, with a 16px field so iOS does not
+   zoom into it. */
+@media (max-width: 780px) {
+  .acct { flex: none; min-width: 0; gap: 6px; }
+  .acct .who { display: none; }
+  .acct .msg { max-width: 7.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .acct .gauge { width: 40px; }
+  .acct button { height: 38px; padding: 0 12px; }
+  .guestbar { margin-top: 12px; padding: 12px 14px; }
+  .guestbar .signin { margin-left: 0; width: 100%; flex-wrap: wrap; }
+  .guestbar input { flex: 1 1 10rem; width: auto; font-size: 16px; padding: 8px 14px; }
+  .guestbar button { font-size: 14px; padding: 9px 16px; }
+}

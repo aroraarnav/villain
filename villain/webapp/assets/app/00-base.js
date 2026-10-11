@@ -115,10 +115,44 @@ function bindTip(el, html) {
   };
   el.addEventListener("focus", anchor);
   el.addEventListener("blur", hide);
-  el.addEventListener("touchstart", e => { e.preventDefault(); anchor(); }, {passive: false});
+  // Touch shows the tip on a tap, not on touchstart. preventDefault on
+  // touchstart swallowed both the scroll that began on the element and the
+  // click it was part of: a pick card's Skill/GTO half could not be tapped to
+  // seat that player, a roster row's hands cell could not open them, and a
+  // swipe that started on either did not scroll. A tip inside something that
+  // is itself a control yields to that control's tap.
+  let down = null;
+  el.addEventListener("touchstart", e => {
+    const t = e.touches[0];
+    down = {x: t.clientX, y: t.clientY};
+  }, {passive: true});
+  el.addEventListener("touchend", e => {
+    const t = e.changedTouches[0];
+    const tapped = down && Math.hypot(t.clientX - down.x, t.clientY - down.y) < 10;
+    down = null;
+    if (!tapped) return;
+    const control = el.parentElement && el.parentElement.closest(TAPPABLE);
+    if (control && !el.matches(".info")) return;
+    e.preventDefault();      // no synthesized click or mouse events behind it
+    if (tip._owner === owner) hide();
+    else { anchor(); tip._touchEl = el; }
+  });
   el.addEventListener("mousemove", e => place(e.clientX, e.clientY));
   el.addEventListener("mouseleave", hide);
 }
+/* What a tap already means something on. A tip inside one of these stays a
+   hover/focus tip; the tap belongs to the control. */
+const TAPPABLE = "button, a, label, [role=button], tr.clickable, .ev, .sr-pot, .key-row, .fold-row";
+/* A tip opened by a tap has no mouseleave to close it: the next touch
+   anywhere else, or a scroll, does. */
+document.addEventListener("touchstart", e => {
+  if (tip.classList.contains("on") && tip._touchEl && !tip._touchEl.contains(e.target)) {
+    tip.classList.remove("on"); tip._owner = null; tip._touchEl = null;
+  }
+}, {passive: true});
+addEventListener("scroll", () => {
+  if (tip._touchEl) { tip.classList.remove("on"); tip._owner = null; tip._touchEl = null; }
+}, {passive: true, capture: true});
 function el(tag, attrs, parent) {
   const node = document.createElementNS(SVG, tag);
   for (const k in attrs) node.setAttribute(k, attrs[k]);
