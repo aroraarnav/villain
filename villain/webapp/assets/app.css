@@ -1054,6 +1054,7 @@
   /* Hero: the by-spot list held to the range grid's height, fading out above
      its "Show all" until opened. */
   .spot-more { margin-top: var(--sp-2); }
+  .clip-more { display: none; }
   .panel.held { position: relative; max-height: var(--hold); overflow: hidden; }
   .panel.held .spot-more { position: absolute; left: 0; right: 0; bottom: 0; margin: 0;
                            padding: var(--sp-6) var(--sp-5) var(--sp-4);
@@ -1681,38 +1682,95 @@
       touch-action: manipulation; -webkit-tap-highlight-color: transparent;
     }
 
-    /* Database: a list of people, not a six-column table scrolled sideways.
-       Name and skill on the first line; read, hands, biggest leak and worth
-       under it. The header row becomes the sort pills it always was. */
+    /* Database, the way Lifts lists lifts: one card of rows, each a name over
+       one muted line, and one figure at the right -- whichever the list is
+       sorted on. The biggest leak and the second figure are on the profile a
+       tap away; carrying all six columns made every row four pieces of text
+       and 160 people a 12,000px page. */
+    .panel:has(> #db-roster) { background: none; border: 0; padding: 0; margin-top: var(--sp-2); }
+    .panel:has(> #db-roster) > .spread { align-items: center; margin-bottom: var(--sp-2); }
+    .panel:has(> #db-roster) > .spread h2 { margin: 0; }
+    #db-meta { display: none; }
     #db-roster .scroller { overflow: visible; }
     #db-roster table, #db-roster thead, #db-roster tbody { display: block; }
     #db-roster thead tr {
       display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none;
-      margin: 0 -16px 4px; padding: 2px 16px 8px;
+      margin: 0 -16px 6px; padding: 2px 16px 6px;
     }
     #db-roster thead tr::-webkit-scrollbar { display: none; }
     #db-roster th {
       flex: none; border: 1px solid var(--edge); border-radius: 999px;
-      padding: 6px 12px; font-size: 11px; text-align: center;
+      padding: 6px 13px; font-size: 11px; text-align: center;
     }
     #db-roster th.sorted { border-color: var(--red); color: var(--ink); }
+    #db-roster th[data-k="top_leak"] { display: none; }
+    #db-roster tbody { background: var(--panel); border-radius: 14px; overflow: hidden; }
     #db-roster tbody tr {
-      display: grid; align-items: center; column-gap: 10px; row-gap: 5px;
-      grid-template-columns: auto auto minmax(0, 1fr) auto;
-      grid-template-areas: "name name name skill" "read hands leak worth";
-      padding: 12px 8px; margin: 0 -8px; border-bottom: 1px solid var(--line);
-      border-radius: 8px;
+      display: grid; align-items: center; column-gap: 6px; row-gap: 1px;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      grid-template-areas: "name name fig" "read hands fig";
+      min-height: 60px; padding: 10px 16px; border-top: 1px solid var(--line);
     }
+    #db-roster tbody tr:first-child { border-top: 0; }
     #db-roster td { border: 0; padding: 0; min-width: 0; }
-    #db-roster td:nth-child(1) { grid-area: name; }
-    #db-roster td:nth-child(2) { grid-area: hands; color: var(--muted); font-size: 12.5px; }
+    #db-roster td:nth-child(1) { grid-area: name; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #db-roster td:nth-child(1) .name { font-size: 15px; }
+    #db-roster td:nth-child(1) .small { display: none; }
     #db-roster td:nth-child(3) { grid-area: read; }
-    #db-roster td:nth-child(4) { grid-area: skill; }
-    #db-roster td:nth-child(5) { grid-area: worth; font-size: 13px; }
-    #db-roster td:nth-child(6) {
-      grid-area: leak; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-      color: var(--muted);
+    #db-roster td:nth-child(3) .tag {
+      border: 0; padding: 0; border-radius: 0; font-size: 12.5px; color: var(--muted);
     }
+    #db-roster td:nth-child(2) {
+      grid-area: hands; font-family: var(--mono); font-size: 12px; color: var(--muted);
+      letter-spacing: -0.02em; text-align: left;
+    }
+    #db-roster td:nth-child(2)::before { content: "\00b7  "; font-family: var(--font-ui); }
+    #db-roster td:nth-child(2)::after { content: " hands"; font-family: var(--font-ui); letter-spacing: 0; }
+    #db-roster td:nth-child(4), #db-roster td:nth-child(5) { grid-area: fig; justify-self: end; }
+    #db-roster td:nth-child(4) svg { width: 40px; }
+    #db-roster td:nth-child(4) span {
+      font-family: var(--mono); font-size: 16px; font-weight: 700; letter-spacing: -0.03em;
+      min-width: 1.6em; text-align: right;
+    }
+    #db-roster td:nth-child(5), #db-roster td:nth-child(6) { display: none; }
+    #db-roster [data-sort="exploitability"] td:nth-child(4) { display: none; }
+    #db-roster [data-sort="exploitability"] td:nth-child(5) {
+      display: block; font-size: 16px; font-weight: 700;
+    }
+
+    /* Sessions, read like a Lifts workout: the sitting's name and one line of
+       facts, then cards with as few words in them as will carry the point.
+       Each panel's explainer paragraph is gone -- the info marks say the same
+       thing on a tap -- and every list of hands is one line that scrolls
+       sideways instead of a wall of chips three to six rows deep. */
+    .sess-body .panel-lead, .sess-main .villain-view-head .small { display: none; }
+    .sess-title { font-size: 20px; font-weight: 600; letter-spacing: -0.015em;
+                  line-height: 1.25; margin: var(--sp-4) 0 2px; }
+    .sr-head { margin: 0 0 var(--sp-3); gap: var(--sp-2); align-items: center; }
+    .sr-head > .small { font-family: var(--mono); font-size: 12px; letter-spacing: -0.02em; }
+    .sr-head .stat-pair .v { font-size: 22px; }
+    .sess-body > .panel { margin-bottom: 10px; }
+    .sess-body .review-tip { padding: 10px 12px; }
+    .sess-body .sr-fix-title b { font-size: 15px; }
+    .sess-body .sr-spot { padding: 10px 0; }
+    .hand-chips {
+      flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+      padding-right: 28px; scroll-padding-right: 28px;
+      -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+      mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+    }
+    .hand-chips::-webkit-scrollbar { display: none; }
+    .hand-chip { flex: none; }
+    .sr-spot-line { flex-wrap: nowrap; }
+    .sr-spot-line > span:first-child { flex: none; white-space: nowrap; }
+    .sr-spot-line .hand-chips { flex: 1 1 0; min-width: 0; }
+    .phone-clip:not(.open) .clip-extra { display: none; }
+    .phone-clip .clip-more { display: inline-block; margin-top: var(--sp-3); font-size: 14px;
+                             min-height: 32px; }
+
+    /* Cards, not boxes: the hairline around every panel was most of the
+       chrome on a narrow screen. */
+    .panel { border-color: transparent; border-radius: 14px; }
 
     /* The evidence list: board and result on one line, what happened under
        it at full width. A 200px board column left the sentence one word wide

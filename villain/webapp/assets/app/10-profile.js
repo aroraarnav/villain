@@ -99,6 +99,8 @@ function rosterTable(players, opts) {
       tr.children[3].appendChild(holder);
       body.appendChild(tr);
     }
+    // The phone list shows one figure per row, and it is the one sorted on.
+    wrap.dataset.sort = sort.key;
     wrap.querySelectorAll("th").forEach(th => {
       th.classList.toggle("sorted", th.dataset.k === sort.key);
       th.classList.toggle("desc", th.dataset.k === sort.key && sort.dir < 0);

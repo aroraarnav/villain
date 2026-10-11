@@ -19,14 +19,34 @@ async function drawSession(id) {
   if (data.hero_seated) {
     body.appendChild(fixFirst(data));
   }
-  body.appendChild(keyHandsPanel(data));
+  body.appendChild(clipOnPhone(keyHandsPanel(data), ".sr-pot", 3, "pots"));
   if (data.hero_seated) {
-    body.appendChild(preflopPanel(data));
+    body.appendChild(clipOnPhone(preflopPanel(data), ".sr-spot", 4, "spots"));
     body.appendChild(threeBetPanel(data));
     body.appendChild(foldSizePanel(data));
-    body.appendChild(trendPanel(data));
+    body.appendChild(clipOnPhone(trendPanel(data), "tbody tr", 4, "rows"));
   }
   body.appendChild(tablePanel(data));
+}
+
+/* On a phone a long list shows its first few and a link for the rest; the
+   preflop spots and the trend rows were most of the sitting's length there.
+   Wider screens hide the link and every item shows, as before -- the rules
+   that hide the extras live in the phone block of app.css. */
+function clipOnPhone(panel, selector, keep, noun) {
+  const items = [...panel.querySelectorAll(selector)];
+  if (items.length <= keep) return panel;
+  panel.classList.add("phone-clip");
+  for (const el of items.slice(keep)) el.classList.add("clip-extra");
+  const more = h("button", "linkbtn clip-more");
+  const label = () => {
+    more.textContent = panel.classList.contains("open")
+      ? "Show fewer" : `Show all ${items.length} ${noun}`;
+  };
+  more.onclick = () => { panel.classList.toggle("open"); label(); };
+  label();
+  panel.appendChild(more);
+  return panel;
 }
 
 /* A hand, as a control. `ref` carries a hand id and whatever short label the
