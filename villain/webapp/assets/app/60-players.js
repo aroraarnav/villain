@@ -237,13 +237,24 @@ function splitDialog(data) {
    dismissing first left the profile on screen looking frozen. */
 function deleteDialog(data) {
   const draw = (err) => {
+    // "The profile goes" read as a step on the way to a merge, and was
+    // clicked through as one (#76). Say what leaves the roster, that it
+    // stays gone, and start on Cancel so a stray Enter cannot confirm it.
+    const accounts = (data.aliases || []).length;
     sheet(`Delete ${esc(data.display_name)}?`, {bare: true, body: `
-      <p>The profile goes. The hands stay.</p>
+      <p>${esc(data.display_name)} leaves the roster for good${accounts > 1
+        ? `, and so do all ${accounts} of their accounts` : ""}. This
+        cannot be undone — they only come back if you import their hands
+        again, as a new player with no merges.</p>
+      <p class="small muted">Their hands stay: the other players at those
+        tables keep them. To combine two players, this is not the button
+        — merges are offered when you add hands.</p>
       <div class="row" style="justify-content:flex-end;margin-top:16px">
         <button class="act" data-close>Cancel</button>
-        <button class="act danger" id="do-del">Delete</button>
+        <button class="act danger" id="do-del">Delete for good</button>
       </div>
       ${err ? `<div class="small err" style="margin-top:10px">${esc(err)}</div>` : ""}`});
+    $("#modal [data-close]").focus();
     $("#do-del").onclick = async () => {
       const setBusy = showBusy("Deleting\u2026");
       try {
